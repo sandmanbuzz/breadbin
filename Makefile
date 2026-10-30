@@ -8,7 +8,7 @@ LIBSRC  := $(wildcard src/lib/*.s)
 LIBOBJ  := $(BUILD)/lib/breadbin.lib
 ROOTSRC := $(shell find rootfs -type f)
 
-.PHONY: all clean test test-host test-smoke test-only run run-reu
+.PHONY: all clean test test-host test-smoke test-only test-keyboard size run run-reu
 .SECONDARY:
 all: $(BUILD)/breadbin.d64
 
@@ -54,6 +54,11 @@ SMOKE := tests.test_system.Boot.test_00_kernal_is_shadowed \
 test-smoke: all test-host
 	python3 -m unittest $(SMOKE) -v
 
+# Real keystrokes through VICE's keyboard matrix (needs xdotool and a display):
+#   xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard
+test-keyboard: all
+	python3 -m unittest tests.test_keyboard -v
+
 # Targeted: make test-only T="tests.test_system.Boot.test_24_editor tests.test_system.REU"
 test-only: all
 	python3 -m unittest $(T) -v
@@ -69,3 +74,7 @@ run-reu: all
 
 clean:
 	rm -rf $(BUILD)
+
+# byte budget per kernel module and the headroom left
+size: all
+	python3 tools/size.py

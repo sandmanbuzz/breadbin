@@ -8,6 +8,7 @@
 """
 import os
 import re
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -45,6 +46,12 @@ def screen_to_text(codes):
         else:
             out.append("?")
     return "".join(out)
+
+
+def real_keys_available():
+    """True if keystrokes can go through the emulated keyboard matrix: needs
+    xdotool and an X display (xvfb-run provides one)."""
+    return bool(shutil.which("xdotool") and os.environ.get("DISPLAY"))
 
 
 class Vice:
@@ -145,6 +152,38 @@ class Vice:
                 esc = chunk.replace("\\", "\\\\").replace("|", "\\xdd").replace(" ", "\\x20")
             self._cmd("keybuf " + esc)
             self._cmd("x", wait=0.25)
+
+    # ---- real keystrokes: X events -> VICE's emulated keyboard matrix. Unlike
+    # type(), which writes into the KERNAL-style key buffer, these exercise
+    # the matrix scan, the decode tables, modifiers and key repeat.
+    def _x(self, *args):
+        return subprocess.run(["xdotool", *args], capture_output=True, text=True).stdout
+
+    def focus(self):
+        wins = [w for w in self._x("search", "--class", "x64sc").split()
+                if "VICE" in self._x("getwindowname", w)]
+        if not wins:
+            raise RuntimeError("VICE window not found")
+        self._x("windowmove", wins[0], "0", "0")
+        self._x("mousemove", "300", "300")
+        self._x("windowfocus", wins[0])
+        time.sleep(1)
+
+    def xkey(self, *keys, delay=0.15):
+        """Tap X key names, e.g. xkey('a', 'Return', 'space', 'exclam')."""
+        for k in keys:
+            self._x("key", k)
+            time.sleep(delay)
+
+    def xtype(self, text, delay=0.15):
+        names = {" ": "space", "\n": "Return"}
+        self.xkey(*[names.get(c, c) for c in text], delay=delay)
+
+    def xdown(self, key):
+        self._x("keydown", key)
+
+    def xup(self, key):
+        self._x("keyup", key)
 
     def wait_shell(self, user="root", timeout=90):
         """Boot to a shell prompt, logging in as `user` if asked."""
