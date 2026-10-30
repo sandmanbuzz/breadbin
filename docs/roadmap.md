@@ -111,6 +111,8 @@ Decided 2026-10-30: **keep zero page stock-shaped.** The layout is part of what 
 - **`$FB–$FE` stays free** for the boot stub and programs, as in stock.
 - **Who decides when it is needed.** The compiler's real zero page need is measured at S14, not guessed now.
 
+**Stock behavior retired so far** (M0-2): SHIFT+C= no longer switches the character set (`$0291` is ignored); the key-decode state at `$F5–$F6` and `$028E–$0290` is not maintained; RUN/STOP, SHIFT, CTRL and C= never enter the key buffer, and SHIFT+RUN/STOP does not expand to a load command. Everything else the keyboard touched keeps its stock meaning.
+
 The stock meanings above are from the standard C64 memory map and have not been checked against the ROM image; `da65` is installed to do that when the poaching table is first written.
 
 ## KERNAL takeover: how the addresses work
@@ -120,7 +122,7 @@ The stock meanings above are from the standard C64 memory map and have not been 
 - **Make each replacement a swap behind a name.** First give the KERNAL entry a kernel-local name (for example `key_get = $FFE4`) at every call site, which costs nothing. Then replace the definition with our routine, with the same register conventions. Each step is a small, testable diff.
 - **State coupling is the real work.** The ROM routines use zero page `$90–$FF` and low memory `$0200–$03FF`, and our code reads some of it directly (`ST` at `$90` in `blk.s`, `$C6`, `$0276` and `$91` in the IRQ, `$D1` and `$D3` in `con.s`). Each replacement keeps those locations with their stock meaning for the services we still provide, as described next.
 - **Order:** M0-2 keyboard (small; owns `SCNKEY`, `GETIN`, `UDTIM`, `$C6`, `$0276`, `$91`), then M0-3 screen (`CHROUT`, `PLOT`), then M0-4 IEC and channels (riskiest; needs the real 1541), then M0-5. Targeted tests plus smoke after each; full suite after M0-4 and M0-5.
-- **Space during the transition.** The new code lives in the existing kernel region, which has 1.9 KB of headroom against an estimated 1.5 to 2 KB of new code: tight. If it overflows, `$E000–$E3FF` (1 KB of the shadowed ROM that the spike showed to be dead BASIC) can hold a second code region loaded after the shadow copy. Do not build that until a link fails.
+- **Space during the transition.** The new code lives in the existing kernel region. It had 1.9 KB of headroom; the keyboard alone took 747 bytes of it, leaving 1109, against screen and IEC drivers that will each need several hundred more. So the region will overflow during M0-3 or M0-4. The planned relief is `$E000–$E3FF` (1 KB of the shadowed ROM that the spike showed to be dead BASIC) as a second code region loaded after the shadow copy; build it when the first link fails, not before. Run `make size` in every story and quote the numbers.
 - **Optional, independent: shrink the syscall table's stubs.** Each of the 31 entries goes through an 8-byte stub (about 248 bytes). An entry of the form `jsr dispatch`, with the dispatcher recovering the syscall number from the return address, removes them and keeps the ABI. Do it only if space demands.
 
 ## The Ultimate Command Interface
@@ -150,11 +152,24 @@ Dependencies are noted. Two tracks run in parallel and meet at M5.
 New device code (UCI, the filesystem interface) all lands in the kernel, so the room has to exist first. M0-4 also rewrites call sites in `blk.s` and `cbm.s`, so it goes before S5 and S6, which touch the same code.
 
 - **M0-1. Shadow the KERNAL and own the hardware vectors.** Copy the ROM into RAM at boot, run at `$01=$35`, point `$FFFA–$FFFF` at our own NMI, reset and IRQ entries, and stop jumping into the ROM's `$EA81`. No memory gain yet. The spike above is the proof of concept. *Depends on S1.*
-- **M0-2. Own keyboard.** Matrix scan, key buffer, RUN/STOP handling and key repeat in the kernel, replacing `SCNKEY`, `GETIN`, `UDTIM`, `$C6`, `$0276` and `$91`. *Depends on M0-1.*
+- **M0-2. Own keyboard.** *Done.* `src/kernel/kbd.s` replaces `SCNKEY`, `GETIN` and `UDTIM`. The stock locations keep their stock meaning (key buffer at `$0277` with count `$C6`, repeat flag `$028A`, shift flags `$028D`, `$91`, jiffy clock `$A0–$A2`), so VICE's `keybuf` and anything written against the memory map still work. Internal improvements: keys are taken on press edges from the whole matrix, so a key pressed while another is held is not lost; RUN/STOP and the modifiers never enter the buffer; readers sleep until a key is waiting instead of waking every tick (`CH_KEY`); SHIFT+C= no longer switches the character set. Cost: 747 bytes (457 code, 272 tables, 18 BSS). Tested with real keystrokes (`tests/test_keyboard.py`): typing, shift and control flags, shifted symbols, rollover, key repeat, the RUN/STOP key, and the jiffy clock.
 - **M0-3. Own screen driver.** Direct writes to screen and colour RAM, scrolling and cursor in `con.s`, replacing `CHROUT` and `PLOT`. *Depends on M0-1; independent of M0-2.*
 - **M0-4. Own IEC driver and channel handling.** Talk and listen, byte transfer and the drive's command and status channels, replacing `OPEN`, `CLOSE`, `CHKIN`, `CHKOUT`, `CHRIN`, `CLRCHN`, `SETLFS`, `SETNAM`. The most delicate step: it needs real-hardware validation. *Depends on M0-1.*
 - **M0-5. Drop the shadow and relayout.** The linker config puts kernel code in `$E000–$FFFF` and the pool grows. Zero page stays stock-shaped (see "Zero page policy"). Measure the gain and update the limits table above. *Depends on M0-2, M0-3, M0-4.*
 - **M0-6. Stream primitive:** move a run of pages between memory and an open channel in one call. Used first by `exec`, then by overlays. *Depends on M0-4.*
+- **M0-7. Space pass.** Once all the replacements exist, a second, deliberately brutal pass over the kernel's size, driven by `make size`. Every byte freed is a byte for user programs or for new kernel and driver work. Rules: measure first, record the before and after of each saving in the commit message, and run the full suite at the end. Candidates already visible in the baseline (2026-10-30, after M0-2):
+
+| Module | Bytes | Where the bytes are | Idea |
+|---|---|---|---|
+| `proc` | 4321 | 3315 BSS: per-process save areas (12 × 192 = 2304) | save only the stack and zero page a process actually uses; fewer or smaller slots |
+| `file` | 2986 | 2664 code | review for shared helpers and repeated sequences |
+| `fs` | 2847 | 2506 code | the same |
+| `blk` | 2702 | 1628 BSS: six 256-byte cache buffers (1536) | fewer buffers, or put the cache in the REU when there is one |
+| `cbm` | 1914 | 1860 code | the CBM DOS layer is rarely used: a candidate to load on demand (an overlay) |
+| `kbd` | 747 | 272 tables | the shifted and control tables are largely derivable from the plain one |
+| `jtab` | 371 | 248 in per-syscall stubs | `jsr dispatch` entries with the number recovered from the return address |
+
+Programs matter as much as the kernel: `as` is 6.4 KB and `basic` 5.6 KB of the 30 KB pool. *Depends on M0-2, M0-3, M0-4.*
 
 ### M1: Safety net
 
