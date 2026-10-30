@@ -8,7 +8,7 @@ LIBSRC  := $(wildcard src/lib/*.s)
 LIBOBJ  := $(BUILD)/lib/breadbin.lib
 ROOTSRC := $(shell find rootfs -type f)
 
-.PHONY: all clean test test-host run run-reu
+.PHONY: all clean test test-host test-smoke test-only run run-reu
 .SECONDARY:
 all: $(BUILD)/breadbin.d64
 
@@ -45,6 +45,18 @@ $(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(ROOTSRC) tools/mkimage.py
 
 test-host:
 	python3 -m unittest discover -s tools -p 'test_*.py'
+
+# A few minutes: the boot, scheduler, pipe and Ctrl-C paths. Run after any kernel change.
+SMOKE := tests.test_system.Boot.test_00_kernal_is_shadowed \
+         tests.test_system.Boot.test_02_echo \
+         tests.test_system.Boot.test_05_pipe_three_stages \
+         tests.test_system.Boot.test_13_ctrl_c_blocked_reader
+test-smoke: all test-host
+	python3 -m unittest $(SMOKE) -v
+
+# Targeted: make test-only T="tests.test_system.Boot.test_24_editor tests.test_system.REU"
+test-only: all
+	python3 -m unittest $(T) -v
 
 test: all test-host
 	python3 -m unittest discover -s tests -p 'test_*.py' -v
