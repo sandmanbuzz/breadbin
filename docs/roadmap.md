@@ -89,7 +89,7 @@ That is a thin surface: console, keyboard, and an IEC driver. No tape, RS-232, B
 **What it is worth** (estimates, to be confirmed as each step lands):
 
 - **About 6 KB net of RAM** at the top of memory (8 KB freed, less about 1.5–2 KB for our own keyboard, screen and IEC code). With the kernel's code moved up there, the process pool can grow from 30 KB to roughly 36–38 KB.
-- **About 112 bytes of zero page** (`$90–$FF`) that the KERNAL owns today. Zero page is the scarcest resource for a compiler: a program has about 13 free bytes now. Per-process zero page can be enlarged, and saving only the range a program uses (recorded in its CX header) keeps context switches cheap.
+- **A little zero page, by policy not wholesale** (see "Zero page policy"). A compiler is short of it: a program has about 13 free bytes now. The first source is the 48 bytes at `$60–$8F` that nothing uses today; poaching retired KERNAL locations (tape, RS-232) is the second.
 - About 512 bytes at `$0200–$03FF` (KERNAL and BASIC variables, tape buffer), and the hardware vectors become ours.
 - **Control over the IRQ and the bus.** Our own IRQ entry skips the KERNAL's indirection, and an own IEC driver is the precondition for making disk I/O less of a stall later.
 
@@ -101,12 +101,24 @@ That is a thin surface: console, keyboard, and an IEC driver. No tape, RS-232, B
 
 **LOAD and SAVE as a primitive.** They are memory-to-file block moves, and a kernel primitive that streams a run of pages to or from an open channel serves `exec`, overlays and swapping alike. The speed gain depends on the transport: modest on a stock 1541, large through the REU and the Ultimate (`LOAD_REU`, DMA `LOAD`). It is cheap to add once the IEC driver is ours.
 
+## Zero page policy
+
+Decided 2026-10-30: **keep zero page stock-shaped.** The layout is part of what developers expect from the hardware, and we do not turn it into foreign territory except as a last-resort architectural refactor.
+
+- **Familiar means the stock address keeps its stock meaning.** Where a replacement still provides the service, it keeps maintaining the well-known locations: `ST` (`$90`), the stop-key flag (`$91`), the jiffy clock (`$A0–$A2`), the keyboard buffer count (`$C6`) and buffer (`$0277`), and the cursor position and line pointer (`$D1–$D3`, `$D6`). That is cheap, and it keeps anything written against the stock map working. These locations are in the current set of direct references.
+- **We may poach locations whose service we removed**, such as the tape and RS-232 variables inside `$90–$FF`, once nothing reads them. Each poached address goes in a table with its stock meaning and our use, so there are no surprises. Do not poach a location with a still-live meaning.
+- **The free zero page we have today is not KERNAL-owned.** The kernel uses `$40–$5F` of the `$40–$8F` it reserves, so `$60–$8F` (48 bytes, BASIC's old area) is unused. That is the first place to look for more program zero page, and it needs no stock address to change meaning. Programs already see a custom per-process layout (`$02–$3F` is saved and restored per process, argv at `$20`), and that part is ours already.
+- **`$FB–$FE` stays free** for the boot stub and programs, as in stock.
+- **Who decides when it is needed.** The compiler's real zero page need is measured at S14, not guessed now.
+
+The stock meanings above are from the standard C64 memory map and have not been checked against the ROM image; `da65` is installed to do that when the poaching table is first written.
+
 ## KERNAL takeover: how the addresses work
 
 - **Almost nothing needs a fixed address.** The fixed points are the hardware vectors (`$FFFA–$FFFF`, six bytes), the boot stub at `$0801`, and the syscall jump table at `$CF00`, which is the ABI for programs. Everything else is placed by `ld65` on every build, and internal calls are `jsr label`. A routine that grows by a byte moves its neighbours at the next `make`, and the linker reports an overflow if a region fills. There is no repacking by hand.
 - **Programs never call the KERNAL.** All KERNAL calls are in `con.s`, `proc.s`, `blk.s` and `cbm.s`. The ROM's `$FFxx` jump table has no external users, so it simply goes away with the ROM.
 - **Make each replacement a swap behind a name.** First give the KERNAL entry a kernel-local name (for example `key_get = $FFE4`) at every call site, which costs nothing. Then replace the definition with our routine, with the same register conventions. Each step is a small, testable diff.
-- **State coupling is the real work.** The ROM routines use zero page `$90–$FF` and low memory `$0200–$03FF`, and our code reads some of it directly (`ST` at `$90` in `blk.s`, `$C6`, `$0276` and `$91` in the IRQ). Those stay untouched until the step that replaces their owner removes the last reader. M0-5 is when `$90–$FF` becomes ours.
+- **State coupling is the real work.** The ROM routines use zero page `$90–$FF` and low memory `$0200–$03FF`, and our code reads some of it directly (`ST` at `$90` in `blk.s`, `$C6`, `$0276` and `$91` in the IRQ, `$D1` and `$D3` in `con.s`). Each replacement keeps those locations with their stock meaning for the services we still provide, as described next.
 - **Order:** M0-2 keyboard (small; owns `SCNKEY`, `GETIN`, `UDTIM`, `$C6`, `$0276`, `$91`), then M0-3 screen (`CHROUT`, `PLOT`), then M0-4 IEC and channels (riskiest; needs the real 1541), then M0-5. Targeted tests plus smoke after each; full suite after M0-4 and M0-5.
 - **Space during the transition.** The new code lives in the existing kernel region, which has 1.9 KB of headroom against an estimated 1.5 to 2 KB of new code: tight. If it overflows, `$E000–$E3FF` (1 KB of the shadowed ROM that the spike showed to be dead BASIC) can hold a second code region loaded after the shadow copy. Do not build that until a link fails.
 - **Optional, independent: shrink the syscall table's stubs.** Each of the 31 entries goes through an 8-byte stub (about 248 bytes). An entry of the form `jsr dispatch`, with the dispatcher recovering the syscall number from the return address, removes them and keeps the ABI. Do it only if space demands.
@@ -141,7 +153,7 @@ New device code (UCI, the filesystem interface) all lands in the kernel, so the 
 - **M0-2. Own keyboard.** Matrix scan, key buffer, RUN/STOP handling and key repeat in the kernel, replacing `SCNKEY`, `GETIN`, `UDTIM`, `$C6`, `$0276` and `$91`. *Depends on M0-1.*
 - **M0-3. Own screen driver.** Direct writes to screen and colour RAM, scrolling and cursor in `con.s`, replacing `CHROUT` and `PLOT`. *Depends on M0-1; independent of M0-2.*
 - **M0-4. Own IEC driver and channel handling.** Talk and listen, byte transfer and the drive's command and status channels, replacing `OPEN`, `CLOSE`, `CHKIN`, `CHKOUT`, `CHRIN`, `CLRCHN`, `SETLFS`, `SETNAM`. The most delicate step: it needs real-hardware validation. *Depends on M0-1.*
-- **M0-5. Drop the shadow and relayout.** The linker config puts kernel code in `$E000–$FFFF`, the pool grows, and per-process zero page extends into `$90–$FF` with used-range saving. Measure the gain and update the limits table above. *Depends on M0-2, M0-3, M0-4.*
+- **M0-5. Drop the shadow and relayout.** The linker config puts kernel code in `$E000–$FFFF` and the pool grows. Zero page stays stock-shaped (see "Zero page policy"). Measure the gain and update the limits table above. *Depends on M0-2, M0-3, M0-4.*
 - **M0-6. Stream primitive:** move a run of pages between memory and an open channel in one call. Used first by `exec`, then by overlays. *Depends on M0-4.*
 
 ### M1: Safety net
