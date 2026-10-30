@@ -6,7 +6,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from vicetest import Vice  # noqa: E402
+from vicetest import Vice, make_target  # noqa: E402
 
 IMAGE = os.path.join(ROOT, "build", "breadbin.d64")
 
@@ -19,7 +19,7 @@ class Boot(unittest.TestCase):
         cls.img = os.path.join(ROOT, "build", "test.d64")
         with open(IMAGE, "rb") as f, open(cls.img, "wb") as g:
             g.write(f.read())
-        cls.v = Vice(cls.img)
+        cls.v = make_target(cls.img)
         cls.v.wait_shell()
 
     @classmethod
@@ -118,8 +118,7 @@ class Boot(unittest.TestCase):
         self.v.wait_for("$ cat")
         import time
         time.sleep(3)
-        self.v._cmd("keybuf \\x03")
-        self.v._cmd("x")
+        self.v.keybuf(b"\x03")
         self.v._wait(lambda ls: any(l.endswith(" $") for l in ls[1:]), 60)
         self.assertNotIn("cat", self.run_("ps").split()[5:])
 
@@ -128,8 +127,7 @@ class Boot(unittest.TestCase):
         self.v.wait_for("$")
         self.v.type("count\n")
         self.v.wait_for("3")
-        self.v._cmd("keybuf \\x03")
-        self.v._cmd("x")
+        self.v.keybuf(b"\x03")
         import time
         time.sleep(3)
         self.assertNotIn("count", self.run_("ps"))
@@ -214,14 +212,11 @@ class Boot(unittest.TestCase):
         self.v.wait_for("edit:", timeout=60)
         self.v.type("hello\nworld")
         time.sleep(2)
-        self.v._cmd("keybuf \\x91\\x1d\\x1dX")   # up, right, right, X
-        self.v._cmd("x")
+        self.v.keybuf(b"\x91\x1d\x1dX")   # up, right, right, X
         time.sleep(2)
-        self.v._cmd("keybuf \\x0f")                  # ^O save
-        self.v._cmd("x")
+        self.v.keybuf(b"\x0f")                  # ^O save
         self.v.wait_for(" saved")
-        self.v._cmd("keybuf \\x18")                  # ^X quit
-        self.v._cmd("x")
+        self.v.keybuf(b"\x18")                  # ^X quit
         time.sleep(3)
         self.assertEqual(self.run_("cat /home/e.txt | wc"), "     1      2     12")
 
