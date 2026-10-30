@@ -46,11 +46,18 @@ class Console(unittest.TestCase):
         lines = self.v.screen_lines()
         self.assertEqual(lines[0], "/ $")
         self.assertEqual([l for l in lines[1:] if l], [])
-        self.assertEqual((self.byte(ROW), self.byte(COL)), (0, 3))
+        self.assertEqual((self.byte(ROW), self.byte(COL)), (0, 4))
 
     def test_long_line_wraps_at_column_40(self):
-        out = self.v.run("echo " + "x" * 50)
-        self.assertEqual(out.splitlines(), ["x" * 40, "x" * 10])
+        # the command line wraps too, so read the screen rather than use run()
+        self.v.type("clear\n")
+        self.v.wait_for("/ $")
+        self.v.type("echo " + "x" * 50 + "\n")
+        time.sleep(2)
+        lines = [l for l in self.v.screen_lines() if l]
+        i = lines.index("x" * 40)                 # the echoed output, not the command line
+        self.assertEqual(lines[i + 1], "x" * 10)
+        self.assertEqual(lines[-1], "/ $")
 
     def test_backspace_erases(self):
         self.v.type("clear\n")
@@ -89,9 +96,12 @@ class Console(unittest.TestCase):
         self.v.type("hello")
         time.sleep(1.5)
         self.assertEqual((self.byte(ROW), self.byte(COL)), (0, 5))   # ESC = put it after the text
+        self.v._cmd("keybuf \\x0f")                                  # ^O save
+        self.v._cmd("x")
+        self.v.wait_for(" saved")
         self.v._cmd("keybuf \\x18")                                  # ^X quit
         self.v._cmd("x")
-        time.sleep(3)
+        self.v.wait_for("/ $", timeout=30, after="edit /home/c.txt")
         self.assertEqual(self.byte(REVERSE), 0)
 
     def test_theme_colours_the_whole_screen(self):
