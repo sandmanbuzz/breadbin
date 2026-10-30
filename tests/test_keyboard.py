@@ -13,7 +13,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from vicetest import Vice, real_keys_available  # noqa: E402
+from vicetest import make_target, real_keys_available  # noqa: E402
 
 IMAGE = os.path.join(ROOT, "build", "breadbin.d64")
 
@@ -21,14 +21,15 @@ KEYSHF = 0x028D     # SHIFT 1, C= 2, CTRL 4
 JIFFY = 0x00A0      # $A0-$A2, big-endian
 
 
-@unittest.skipUnless(real_keys_available(), "needs xdotool and a display (xvfb-run)")
+@unittest.skipUnless(real_keys_available() or os.environ.get("BREADBIN_TARGET") == "ultimate",
+                     "needs xdotool and a display (xvfb-run), or an Ultimate")
 class Keyboard(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.img = os.path.join(ROOT, "build", "test_kbd.d64")
         with open(IMAGE, "rb") as f, open(cls.img, "wb") as g:
             g.write(f.read())
-        cls.v = Vice(cls.img)
+        cls.v = make_target(cls.img)
         cls.v.wait_shell()
         cls.v.focus()
 

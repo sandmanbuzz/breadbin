@@ -1,12 +1,12 @@
 # Breadbin
 
-A Unix-like OS for the Commodore 64 (6502 assembly, ca65), forked to be developed further. Read `docs/roadmap.md` first: it holds the direction, the decisions below in full, and the story list. `README.md` describes the system; `docs/testing.md` says which tests to run.
+A Unix-like OS for the Commodore 64 (6502 assembly, ca65), forked to be developed further. Read `docs/roadmap.md` first: it holds the direction, the decisions below in full, and the story list. `docs/wip.md` says where things stand right now and who is doing what; `docs/hardware-notes.md` is where findings from the real Ultimate and 1541 are recorded. `README.md` describes the system; `docs/testing.md` says which tests to run.
 
 ## Build and test
 
 ```sh
 make                  # build/breadbin.d64 (needs cc65; about 2 seconds)
-make test-host        # image tools and key tables, no emulator, under a second
+make test-host        # image tools, key tables, Ultimate client; no emulator, about 12 seconds
 make size             # bytes per kernel module and the headroom; quote it in commits
 xvfb-run -a make test-smoke       # boot, echo, pipe, Ctrl-C: about 2 minutes
 xvfb-run -a make test-only T="tests.test_system.Boot.test_24_editor"
@@ -31,7 +31,7 @@ M0 (taking over the KERNAL): M0-1 shadow KERNAL and own vectors, M0-2 keyboard (
 
 ## Hardware and external references
 
-- An Ultimate 64 is being set up. Its REST API (`machine:readmem`, `machine:input`, `runners:run_prg`, drive mounting) is the plan for a hardware test bench, mirroring `tools/vicetest.py`. Docs: <https://github.com/GideonZ/1541u-documentation> (`uci/`, `api/api_calls.rst`).
+- An Ultimate 64 is being set up. A REST client (`tools/ultimate.py`), a fake server for tests (`tools/fake_ultimate.py`) and a test backend with the same interface as `tools/vicetest.py` (`tools/ultimatetest.py`) exist but have never run on hardware. Run tests on the real machine with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (tests built with `make_target`: the `Boot` class, the keyboard and the console tests). Docs: <https://github.com/GideonZ/1541u-documentation> (`uci/`, `api/api_calls.rst`).
 - A real 1541 is available for validating the IEC driver. A 1581 is too, but see "non-1541 devices" above.
 - `mist64/fastboot1541` (credit Michael Steil if adapted) is the basis for the fast boot and fast read story M0-8.
 - Nothing has run on hardware yet; claims about the Ultimate come from its documentation.

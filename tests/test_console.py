@@ -10,7 +10,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from vicetest import Vice  # noqa: E402
+from vicetest import make_target  # noqa: E402
 
 IMAGE = os.path.join(ROOT, "build", "breadbin.d64")
 
@@ -29,7 +29,7 @@ class Console(unittest.TestCase):
         cls.img = os.path.join(ROOT, "build", "test_con.d64")
         with open(IMAGE, "rb") as f, open(cls.img, "wb") as g:
             g.write(f.read())
-        cls.v = Vice(cls.img)
+        cls.v = make_target(cls.img)
         cls.v.wait_shell()
 
     @classmethod
@@ -63,8 +63,7 @@ class Console(unittest.TestCase):
         self.v.type("clear\n")
         self.v.wait_for("/ $")
         self.v.type("echo abcd")
-        self.v._cmd("keybuf \\x14\\x14")        # DEL DEL
-        self.v._cmd("x")
+        self.v.keybuf(b"\x14\x14")        # DEL DEL
         time.sleep(1)
         self.v.type("\n")
         time.sleep(1.5)
@@ -96,11 +95,9 @@ class Console(unittest.TestCase):
         self.v.type("hello")
         time.sleep(1.5)
         self.assertEqual((self.byte(ROW), self.byte(COL)), (0, 5))   # ESC = put it after the text
-        self.v._cmd("keybuf \\x0f")                                  # ^O save
-        self.v._cmd("x")
+        self.v.keybuf(b"\x0f")                                  # ^O save
         self.v.wait_for(" saved")
-        self.v._cmd("keybuf \\x18")                                  # ^X quit
-        self.v._cmd("x")
+        self.v.keybuf(b"\x18")                                  # ^X quit
         self.v.wait_for("/ $", timeout=30, after="edit /home/c.txt")
         self.assertEqual(self.byte(REVERSE), 0)
 
