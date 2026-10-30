@@ -31,6 +31,40 @@ Three kinds of storage back a mount, and the kernel should treat them uniformly 
 | **CBM DOS** (`cbm.s`) | files | Already file-level. This is the natural home for the Ultimate's **Software IEC** drives, which present a host filesystem as a CBM DOS device. Needs subdirectory (`CD`) support and a way to run programs from it. |
 | **UCI DOS target** (`uci.s`, new) | files, with random access | The Ultimate's own file API over cartridge-port registers: open, read, write, 32-bit seek, stat, rename, delete, mkdir, directory listing, a clock, and host-file to REU DMA. No block size, no serial bus, FAT long names, effectively unlimited files. See "The Ultimate Command Interface". |
 
+## Memory strategy
+
+**Where we are.** BASIC is already out: the boot stub sets `$01=$36` (`src/kernel/main.s`), and the kernel image runs from `$8000` and is about 18.3 KB, so it already occupies `$A000–$BFFF`, the old BASIC ROM space. Process pages come from `$0800–$7FFF` (120 pages, 30 KB). The only ROM left in the CPU's map is the KERNAL at `$E000–$FFFF` (8 KB) plus the I/O area at `$D000–$DFFF`.
+
+**How much the kernel leans on the KERNAL.** Measured by grep over `src/`:
+
+| Group | Calls | Where |
+|---|---|---|
+| Screen editor | `CHROUT` (9 sites), `PLOT` (`$FFF0`) | `con.s` |
+| Keyboard | `SCNKEY`, `GETIN` (2), `UDTIM`; also the KERNAL's key buffer (`$C6`, `$0276`) and stop-key flag (`$91`) | `proc.s` IRQ, `con.s` |
+| IEC and file channels | `OPEN` (3), `CLOSE` (4), `CHKIN` (2), `CHKOUT` (3), `CHRIN` (4), `CLRCHN` (14), `SETLFS` (3), `SETNAM` (3) | `blk.s`, `cbm.s` |
+| Interrupt plumbing | `jmp $EA81` (IRQ exit), vectors `$0314`, `$0316`, `$0318` | `proc.s`, `main.s` |
+
+That is a thin surface: console, keyboard, and an IEC driver. No tape, RS-232, BASIC or floating-point routines are called.
+
+**Spike (not committed).** The KERNAL was copied onto itself in `kmain`, the machine switched to `$01=$35` (RAM at `$E000–$FFFF`, I/O visible), and the first 1 KB (`$E000–$E3FF`, the tail of BASIC that lives at the start of the KERNAL ROM) was filled with `BRK`. Six system tests passed unchanged under VICE: banner, echo, a three-stage pipe, Ctrl-C on a blocked reader, the assembler, and the full-screen editor. This shows a RAM-resident KERNAL works and that BASIC's tail is not used. It is not a proof of reachability for the rest of the ROM.
+
+**Approach.** Copy-and-patch gets us the shadow, but it does not free memory by itself: the leftover ROM routines sit at fixed addresses with holes between them that nothing can use. The memory comes from *replacing* the KERNAL dependencies one group at a time, and finally dropping the shadow so all of `$E000–$FFFF` belongs to us. The shadow copy is the safe scaffolding for that, and every step is individually testable.
+
+**What it is worth** (estimates, to be confirmed as each step lands):
+
+- **About 6 KB net of RAM** at the top of memory (8 KB freed, less about 1.5–2 KB for our own keyboard, screen and IEC code). With the kernel's code moved up there, the process pool can grow from 30 KB to roughly 36–38 KB.
+- **About 112 bytes of zero page** (`$90–$FF`) that the KERNAL owns today. Zero page is the scarcest resource for a compiler: a program has about 13 free bytes now. Per-process zero page can be enlarged, and saving only the range a program uses (recorded in its CX header) keeps context switches cheap.
+- About 512 bytes at `$0200–$03FF` (KERNAL and BASIC variables, tape buffer), and the hardware vectors become ours.
+- **Control over the IRQ and the bus.** Our own IRQ entry skips the KERNAL's indirection, and an own IEC driver is the precondition for making disk I/O less of a stall later.
+
+**What it costs.**
+
+- The IEC driver must be correct on real hardware, not just under VICE. VICE emulates the bus well, and an Ultimate's emulated drive is forgiving, but a real 1541 is the final judge.
+- JiffyDOS acceleration of the KERNAL's serial routines is lost, since we would no longer call them. On an Ultimate this is moot because file access goes over the UCI. On a stock machine with JiffyDOS it is a regression unless we later implement a fast protocol.
+- The reset path still maps ROM, so a reset always lands in the KERNAL and then reboots from disk. That is fine for us.
+
+**LOAD and SAVE as a primitive.** They are memory-to-file block moves, and a kernel primitive that streams a run of pages to or from an open channel serves `exec`, overlays and swapping alike. The speed gain depends on the transport: modest on a stock 1541, large through the REU and the Ultimate (`LOAD_REU`, DMA `LOAD`). It is cheap to add once the IEC driver is ours.
+
 ## The Ultimate Command Interface
 
 Read from the [1541 Ultimate documentation source](https://github.com/GideonZ/1541u-documentation) (`uci/*.rst`, `api/api_calls.rst`). Nothing here has been run on hardware yet.
@@ -52,6 +86,17 @@ What this means for the plan:
 ## Milestones and stories
 
 Dependencies are noted. Two tracks run in parallel and meet at M5.
+
+### M0: Memory (do this before new device support)
+
+New device code (UCI, the filesystem interface) all lands in the kernel, so the room has to exist first. M0-4 also rewrites call sites in `blk.s` and `cbm.s`, so it goes before S5 and S6, which touch the same code.
+
+- **M0-1. Shadow the KERNAL and own the hardware vectors.** Copy the ROM into RAM at boot, run at `$01=$35`, point `$FFFA–$FFFF` at our own NMI, reset and IRQ entries, and stop jumping into the ROM's `$EA81`. No memory gain yet. The spike above is the proof of concept. *Depends on S1.*
+- **M0-2. Own keyboard.** Matrix scan, key buffer, RUN/STOP handling and key repeat in the kernel, replacing `SCNKEY`, `GETIN`, `UDTIM`, `$C6`, `$0276` and `$91`. *Depends on M0-1.*
+- **M0-3. Own screen driver.** Direct writes to screen and colour RAM, scrolling and cursor in `con.s`, replacing `CHROUT` and `PLOT`. *Depends on M0-1; independent of M0-2.*
+- **M0-4. Own IEC driver and channel handling.** Talk and listen, byte transfer and the drive's command and status channels, replacing `OPEN`, `CLOSE`, `CHKIN`, `CHKOUT`, `CHRIN`, `CLRCHN`, `SETLFS`, `SETNAM`. The most delicate step: it needs real-hardware validation. *Depends on M0-1.*
+- **M0-5. Drop the shadow and relayout.** The linker config puts kernel code in `$E000–$FFFF`, the pool grows, and per-process zero page extends into `$90–$FF` with used-range saving. Measure the gain and update the limits table above. *Depends on M0-2, M0-3, M0-4.*
+- **M0-6. Stream primitive:** move a run of pages between memory and an open channel in one call. Used first by `exec`, then by overlays. *Depends on M0-4.*
 
 ### M1: Safety net
 
@@ -89,7 +134,7 @@ Dependencies are noted. Two tracks run in parallel and meet at M5.
 
 ## Critical path
 
-The shortest route to *a compiler exists* is **S12, S13, S14**, and it does not need any filesystem work. The storage stories decide how pleasant and scalable it is. The Ultimate path (S6, then S10 and S11) makes the dev loop fast and the file limits disappear, and the REU path (S5, S8) does the same for a stock machine with an REU. A sensible order is S1 first, then S12 to S14 in parallel with S2, S3, S5 and S6, and S9 as soon as hardware is reachable. S11 lands before the dev-loop milestone; S7 is the least urgent.
+The shortest route to *a compiler exists* is **S12, S13, S14**, and it does not need any filesystem work. The storage stories decide how pleasant and scalable it is. The Ultimate path (S6, then S10 and S11) makes the dev loop fast and the file limits disappear, and the REU path (S5, S8) does the same for a stock machine with an REU. Memory comes before new devices: S1, then M0-1 to M0-5, with S9 as soon as hardware is reachable. The compiler track (S12 to S14) is independent and also benefits from M0-5's extra zero page and RAM, so it can run alongside. After M0, S2, S3, S5 and S6 prepare the storage interface, S10 and S11 add the Ultimate backend, and S11 lands before the dev-loop milestone. S7 is the least urgent.
 
 ## Open questions
 
