@@ -96,7 +96,7 @@ ST     = $90
 .globalzp k_a, k_x, k_n, k_vec, tmp0, tmp1, tmp2, tmp3, stop_prev, intr_pending
 
 ; main.s
-.global kmain, panic, pool_first, pool_last
+.global kmain, panic, pool_first, pool_last, irq_exit
 ; con.s
 .global con_init, con_putc, con_puts_ax, con_write, con_read, con_hex, con_dec
 .global con_cursor_tick, con_eof

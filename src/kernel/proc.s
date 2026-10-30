@@ -294,12 +294,12 @@ irq:
         bne @die
         lda #0
         sta in_kernel
-@out:   jmp $ea81           ; pla/tay/pla/tax/pla/rti
+@out:   jmp irq_exit
 @kern:  dec slice
         bne @out
         lda #1
         sta need_resched
-        jmp $ea81
+        jmp irq_exit
 @die:   lda #1
         sta in_kernel
         lda p_sig,x

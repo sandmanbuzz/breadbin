@@ -29,6 +29,14 @@ class Boot(unittest.TestCase):
     def run_(self, cmd):
         return self.v.run(cmd)
 
+    def test_00_kernal_is_shadowed(self):
+        """The KERNAL ROM is out: RAM at $E000-$FFFF, vectors are ours."""
+        self.assertEqual(self.v.mem(0x0001, 0x0001), [0x35])
+        vec = self.v.mem(0xfffa, 0xffff)
+        nmi, irq = vec[0] | vec[1] << 8, vec[4] | vec[5] << 8
+        for target in (nmi, irq):
+            self.assertTrue(0x8000 <= target < 0xcf00, hex(target))
+
     def test_01_banner(self):
         s = self.v.screen()
         self.assertIn("breadbin 0.2", s)
