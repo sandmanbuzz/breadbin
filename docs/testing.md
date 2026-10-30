@@ -4,7 +4,7 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 
 | Level | Command | Time (measured in a cloud container) |
 |---|---|---|
-| Host tests | `make test-host` | under a second; no emulator |
+| Host tests | `make test-host` | about 12 seconds; no emulator (includes the Ultimate client against a fake server) |
 | Smoke | `make test-smoke` | about 2 to 3 minutes: boot, echo, a three-stage pipe, Ctrl-C |
 | Targeted | `make test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `xvfb-run -a make test-console` | about 3 minutes: screen RAM, colour RAM and VIC registers read back |
@@ -12,6 +12,10 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 | Full | `make test` | about 32 minutes for 31 tests |
 
 The keyboard tests inject real X key events with `xdotool` (`apt install xdotool xvfb`). The other system tests type into VICE's key buffer with `keybuf`, which bypasses the matrix scan, so they cannot catch a bug in it. The system tests drive VICE (`x64sc`) through its monitor, so they need the C64 ROMs (`tools/setup-vice-roms.sh`) and, on a machine without a display, a virtual one: `xvfb-run -a make test-smoke`.
+
+## On a real Ultimate
+
+The `Boot` class, `test_keyboard` and `test_console` pick their backend with `make_target`: the VICE emulator by default, a real Ultimate with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (and `BREADBIN_ULTIMATE_PASSWORD` if set). The backend mounts `build/breadbin.d64` in drive A, resets, loads and runs it. `type()` and `keybuf()` write the key buffer by DMA, as VICE's `keybuf` does; `xkey` and friends use real key events (Ultimate 64 only). Tests that need the emulator (`-reu`, extra drives, reboot persistence) stay on VICE. `make test-host` includes the client's 24 tests against a fake server. See `docs/hardware-notes.md` for what has and has not been verified.
 
 ## Which tests for which change
 
