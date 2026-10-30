@@ -437,12 +437,12 @@ con_read:
         jmp raw_read
 @wait:  lda lb_ready
         bne @copy
-        jsr GETIN
+        jsr key_get
         cmp #0
         bne @key
         lda #1
         sta cur_on
-        lda #CH_TICK
+        lda #CH_KEY
         jsr block_on
         jmp @wait
 @key:   pha
@@ -519,12 +519,12 @@ con_read:
 ;   up ^P($10) down ^N($0e) left ^B($02) right ^F($06) home ^A($01)
 ;   clr ^L($0c) del ^H($08) return $0a; F1-F8 as $85-$8c; ctrl-letters $01-$1a
 raw_read:
-@w:     jsr GETIN
+@w:     jsr key_get
         cmp #0
         bne @k
         lda #1
         sta cur_on
-        lda #CH_TICK
+        lda #CH_KEY
         jsr block_on
         jmp @w
 @k:     pha

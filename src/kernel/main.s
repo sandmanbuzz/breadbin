@@ -153,6 +153,7 @@ kmain:
         lda #>irq_entry
         sta $ffff
 
+        jsr kbd_init
         jsr con_init
         lda #<banner
         ldx #>banner

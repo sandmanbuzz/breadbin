@@ -26,7 +26,8 @@ PS_BLOCKED = 2
 PS_ZOMBIE  = 3
 
 ; wait channels
-CH_TICK  = $01      ; woken every tick (console polling)
+CH_TICK  = $01      ; woken every tick
+CH_KEY   = $04      ; woken when the keyboard buffer is not empty
 CH_SLEEP = $02      ; woken when ticks reach p_wk (sleep)
 CH_CHILD = $80      ; | parent slot
 CH_PIPE  = $40      ; | pipe index
@@ -77,7 +78,6 @@ k_entry = $1E
 
 ; KERNAL
 CHROUT = $FFD2
-GETIN  = $FFE4
 CHKIN  = $FFC6
 CHKOUT = $FFC9
 CHRIN  = $FFCF
@@ -86,8 +86,6 @@ SETLFS = $FFBA
 SETNAM = $FFBD
 OPEN   = $FFC0
 CLOSE  = $FFC3
-UDTIM  = $FFEA
-SCNKEY = $FF9F
 ST     = $90
 
 ; ---- shared symbols ----
@@ -97,6 +95,8 @@ ST     = $90
 
 ; main.s
 .global kmain, panic, pool_first, pool_last, irq_exit
+; kbd.s
+.global kbd_init, kbd_scan, key_get
 ; con.s
 .global con_init, con_putc, con_puts_ax, con_write, con_read, con_hex, con_dec
 .global con_cursor_tick, con_eof

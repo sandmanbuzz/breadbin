@@ -230,8 +230,7 @@ wakeup:
 irq:
         cld
         lda $dc0d           ; acknowledge CIA1 timer
-        jsr UDTIM
-        jsr SCNKEY
+        jsr kbd_scan
         inc ticks
         bne @t
         inc ticks+1
@@ -267,17 +266,21 @@ irq:
         bne @nokb
         dec $c6
         jsr sigint_fg
-@nokb:  ; RUN/STOP edge -> SIGINT to foreground processes
+@nokb:  ; RUN/STOP edge -> SIGINT to foreground processes ($91 bit 7 low = down)
         lda $91
-        cmp #$7f
-        bne @nostop
+        and #$80
         cmp stop_prev
         beq @stopd
         sta stop_prev
+        cmp #0
+        bne @stopd          ; released
         jsr sigint_fg
-        jmp @stopd
-@nostop: sta stop_prev
-@stopd: lda in_kernel
+@stopd: ; readers blocked on the keyboard wake when a key is waiting
+        lda $c6
+        beq @nokey
+        lda #CH_KEY
+        jsr wakeup
+@nokey: lda in_kernel
         bne @kern
         ldx cur
         cpx #$ff
