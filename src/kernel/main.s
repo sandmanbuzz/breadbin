@@ -128,19 +128,30 @@ kmain:
         lda #1
         sta in_kernel
 
-        ; vectors
-        lda #<irq
-        sta $0314
-        lda #>irq
-        sta $0315
-        lda #<brk_handler
-        sta $0316
-        lda #>brk_handler
-        sta $0317
+        ; Shadow the KERNAL: copy the ROM onto the RAM under it and run with
+        ; RAM at $E000-$FFFF. The kernel still calls into the copy for the
+        ; console, keyboard and IEC; the hardware vectors are ours.
+        lda #0
+        sta p1
+        lda #$e0
+        sta p1+1
+        tay
+@sh:    lda (p1),y
+        sta (p1),y
+        iny
+        bne @sh
+        inc p1+1
+        bne @sh
+        lda #$35            ; BASIC and KERNAL out, I/O in
+        sta $01
         lda #<nmi_handler
-        sta $0318
+        sta $fffa
         lda #>nmi_handler
-        sta $0319
+        sta $fffb
+        lda #<irq_entry
+        sta $fffe
+        lda #>irq_entry
+        sta $ffff
 
         jsr con_init
         lda #<banner
@@ -192,6 +203,29 @@ kmain:
         jmp sched           ; never returns here (cur = $FF, nothing saved)
 
 nmi_handler:
+        rti
+
+; Hardware IRQ/BRK entry: save the registers in the order the scheduler
+; expects (A, X, Y), then dispatch on the B flag of the pushed status.
+irq_entry:
+        pha
+        txa
+        pha
+        tya
+        pha
+        tsx
+        lda $0104,x
+        and #$10
+        bne brk_handler
+        jmp irq
+
+; irq_exit: leave an interrupt (registers saved by irq_entry)
+irq_exit:
+        pla
+        tay
+        pla
+        tax
+        pla
         rti
 
 brk_handler:

@@ -31,6 +31,46 @@ Three kinds of storage back a mount, and the kernel should treat them uniformly 
 | **CBM DOS** (`cbm.s`) | files | Already file-level. This is the natural home for the Ultimate's **Software IEC** drives, which present a host filesystem as a CBM DOS device. Needs subdirectory (`CD`) support and a way to run programs from it. |
 | **UCI DOS target** (`uci.s`, new) | files, with random access | The Ultimate's own file API over cartridge-port registers: open, read, write, 32-bit seek, stat, rename, delete, mkdir, directory listing, a clock, and host-file to REU DMA. No block size, no serial bus, FAT long names, effectively unlimited files. See "The Ultimate Command Interface". |
 
+## Platform tiers
+
+Decided 2026-10-30. One disk boots everywhere, and features are chosen by probing at boot, not by build variant.
+
+| Tier | Machine | What we promise |
+|---|---|---|
+| **Classic** | Stock C64, a 1541 or compatible, no REU | Boots to a shell. Pipes, jobs, the editor, `basic` and `as` work. Maintained and tested (VICE CI), but gets no new features and no speed promises. "It's going to suck on the thing you pulled out of the attic." |
+| **Expanded** | Classic plus an REU, and/or a 1571 or 1581, real or emulated | Everything in Classic, plus the REU RAM disk and, when built, overlays and swapping; larger disks (see "Block devices and the filesystem"). |
+| **Recommended** | Ultimate 64, C64 Ultimate, or Ultimate-II+ cartridge, UCI enabled | Everything: Ultimate file storage, a large REU, turbo, the fast paths. New work targets this tier first and degrades downward. |
+
+Rules:
+
+- **The core never requires the REU or an Ultimate.** The kernel, shell and base commands run on Classic. Features beyond the core are capability-gated; one that cannot degrade says what it needs and refuses (a compiler job that needs the REU says so).
+- **Each capability has a probe and a fallback.** Turbo: read `$D031`, and if it is not `$FF`, set the CPU speed index. UCI: read `$DF1D` for `$C9`. REU: detect size (extend detection beyond the current 8 MB scan to 16 MB). Drive geometry per device, below.
+- **CI covers Classic and Expanded with VICE** (including `-reu`), and Recommended through the hardware bench (S9). That keeps the common case automatically tested and the Ultimate paths tested on real hardware.
+- **Real drives.** A physical 1541 and 1581 are available for validation of the IEC driver (M0-4), in addition to the Ultimate's emulated drives.
+
+**REU today.** It is optional and only backs `/tmp`; the system tests run both with and without one. It becomes de facto required for Expanded features that need fast backing store (overlays, swapping, REU-resident `/bin`). That is acceptable, because those are Expanded and Recommended features and Classic keeps working without them.
+
+**Turbo.** On the Ultimate 64, `$D031` exists only when the Turbo Mode setting in the Ultimate's menu is "U64 Turbo Registers" or "Turbo Enable Bit"; otherwise it reads `$FF`, as does a stock C64's unused VIC register space, so the probe and the write are harmless everywhere. Bits 0 to 3 are the speed index. Index 15 is the maximum on both models: 48 MHz (Ultimate 64) and 64 MHz (Ultimate 64 Elite-II). Two cautions:
+
+- The CIAs, VIC and the serial bus stay at 1 MHz. Any cycle-counted loop, including the KERNAL's IEC routines, runs far too fast under turbo, so the IEC driver (M0-4) must switch turbo off around bus transfers, or time by CIA timer. Turbo must not be enabled before then.
+- Bad-line behaviour is configurable (`$D031` bit 7). Leave the default.
+
+Enabling turbo is a one-line story once M0-4 lands, and it should be a runtime setting (a `turbo` command) as well as a boot default.
+
+## Block devices and the filesystem
+
+The decision turns on device size, so it follows what we support:
+
+| Device | Blocks (256 B) | c64fs today |
+|---|---|---|
+| 1541 | 683 | fits |
+| 1571 | 1366 | fits (under the 2048-block bitmap limit) |
+| 1581 | 3200 | **does not fit**: the one-block bitmap addresses 2048 |
+| REU RAM disk | up to 65,536 (16 MB) | capped at 2048 |
+| SD2IEC, CMD-style native partitions, IEC hard drives | many thousands | does not fit |
+
+So **c64fs v2 is required as soon as a 1581 is in the supported set**, and the physical 1581 makes that a concrete target and a useful one: a Classic machine with a 1581 (800 KB) is a realistic development machine. The plan therefore keeps the generalised block driver (S5: per-device geometry, a track mapping function per drive type) together with a scoped v2 (S7: multi-block bitmap, wider inode numbers, geometry from the superblock). Block commands (`U1`, `U2`, `B-P`) are known to work on the 1541; the 1581 and the others still have to be checked against the real drives. Devices that do not support them are served by the file-level paths instead (CBM DOS backend, UCI DOS).
+
 ## Memory strategy
 
 **Where we are.** BASIC is already out: the boot stub sets `$01=$36` (`src/kernel/main.s`), and the kernel image runs from `$8000` and is about 18.3 KB, so it already occupies `$A000–$BFFF`, the old BASIC ROM space. Process pages come from `$0800–$7FFF` (120 pages, 30 KB). The only ROM left in the CPU's map is the KERNAL at `$E000–$FFFF` (8 KB) plus the I/O area at `$D000–$DFFF`.
@@ -107,9 +147,9 @@ New device code (UCI, the filesystem interface) all lands in the kernel, so the 
 
 ### M2: Storage abstraction (Track A)
 
-- **S5. Block driver table** replacing `cmp #1` in `blk.s`: read, write, block count, type per device. REU detection and sizing lifted past 8 MB and the 2048-block cap. *Depends on S1.*
+- **S5. Block driver table** replacing `cmp #1` in `blk.s`: read, write, block count, type and track mapping per device (1541, 1571, 1581, REU). REU detection and sizing lifted past 8 MB and the 2048-block cap. *Depends on S1.*
 - **S6. Filesystem interface**, replacing the scattered `dev_type` branches in `file.s`, `fs.s`, `exec.s`, `cbm.s`. Backends: c64fs, CBM DOS. *Depends on S2, S3.*
-- **S7. c64fs scaling** (v1 removed): multi-block bitmap, wider inode numbers, geometry read from the superblock instead of fixed at block 376, a file layout that goes past 35 KB. Image tools updated to match. Scope is set by the REU RAM disk and future block devices, so keep it small. *Depends on S2, S3, S6.*
+- **S7. c64fs scaling** (v1 removed): multi-block bitmap, wider inode numbers, geometry read from the superblock instead of fixed at block 376, a file layout that goes past 35 KB. Image tools updated to match. Required once a 1581 (3200 blocks) is supported; see "Block devices and the filesystem". Keep the scope small. *Depends on S2, S3, S6.*
 - **S8. REU-resident `/bin`:** copy commands to the REU RAM disk at boot, so command loads stop costing seconds. `exec.s` appears to run programs from any c64fs device already; confirm. *Depends on S5. Unblocks:* a tolerable dev loop on the Ultimate without further storage work.
 
 ### M3: Ultimate storage (Track A, needs hardware)
@@ -134,7 +174,7 @@ New device code (UCI, the filesystem interface) all lands in the kernel, so the 
 
 ## Critical path
 
-The shortest route to *a compiler exists* is **S12, S13, S14**, and it does not need any filesystem work. The storage stories decide how pleasant and scalable it is. The Ultimate path (S6, then S10 and S11) makes the dev loop fast and the file limits disappear, and the REU path (S5, S8) does the same for a stock machine with an REU. Memory comes before new devices: S1, then M0-1 to M0-5, with S9 as soon as hardware is reachable. The compiler track (S12 to S14) is independent and also benefits from M0-5's extra zero page and RAM, so it can run alongside. After M0, S2, S3, S5 and S6 prepare the storage interface, S10 and S11 add the Ultimate backend, and S11 lands before the dev-loop milestone. S7 is the least urgent.
+The shortest route to *a compiler exists* is **S12, S13, S14**, and it does not need any filesystem work. The storage stories decide how pleasant and scalable it is. The Ultimate path (S6, then S10 and S11) makes the dev loop fast and the file limits disappear, and the REU path (S5, S8) does the same for a stock machine with an REU. Memory comes before new devices: S1, then M0-1 to M0-5, with S9 as soon as hardware is reachable. The compiler track (S12 to S14) is independent and also benefits from M0-5's extra zero page and RAM, so it can run alongside. After M0, S2, S3, S5 and S6 prepare the storage interface, S10 and S11 add the Ultimate backend, and S11 lands before the dev-loop milestone. S5 and S7 are scheduled with 1571 and 1581 support, which needs real-drive validation.
 
 ## Open questions
 
