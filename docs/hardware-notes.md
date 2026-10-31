@@ -6,10 +6,10 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 
 | Item | Value |
 |---|---|
-| Ultimate model and firmware (`GET /v1/info`) | |
-| REST password set? Reachable from where? | |
+| Ultimate model and firmware (`GET /v1/info`) | C64 Ultimate, firmware 1.1.0, FPGA 122, core 1.49 |
+| REST password set? Reachable from where? | No password. Reachable over the LAN from the test host. |
 | Drive A (device 8): type and ROM | |
-| Physical drives on the IEC bus, and their device numbers | |
+| Physical drives on the IEC bus, and their device numbers | 2026-10-30: a physical 1541 (fresh media) at device 8; the Ultimate's emulated 1541 at device 9. The two collide with the harness and kernel, which assume device 8 (see log). |
 | REU: configured size | |
 | "Command Interface" enabled in the Ultimate's menu? | |
 | "Turbo Mode" setting (Off, Manual, U64 Turbo Registers, Turbo Enable Bit)? | |
@@ -19,7 +19,7 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 
 | # | Question | Why it matters | Result |
 |---|---|---|---|
-| H1 | Are POST attachments multipart or raw? Which `mount` and `run_prg` forms work? | `tools/ultimate.py` guesses multipart. | |
+| H1 | Are POST attachments multipart or raw? Which `mount` and `run_prg` forms work? | `tools/ultimate.py` guesses multipart. | `mount` with multipart works (default is right). `run_prg` not yet tried. |
 | H2 | How long must a key tap last for our 60 Hz scan to see it? What is the smallest `delay` in `xkey`/`xtype` that never drops a key? | `xtype` defaults to 0.15 s per key. | |
 | H3 | Does a held key (`xdown`) repeat as in VICE? | `test_keyboard.test_repeat` | |
 | H4 | What does a DMA read of `$0001` return once Breadbin runs: `$35` (the port) or the RAM under it? | `test_00_kernal_is_shadowed` asserts `$35`. | |
@@ -33,3 +33,11 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 ## Log
 
 (newest last)
+
+### 2026-10-30, `hw-bench` at 10dbf3c (hardware session)
+
+- `make test-host`: 45 tests pass on the hardware session's host.
+- `python3 tools/ultimate.py` returns `/v1/info` (product and firmware in Setup).
+- `Ultimate(host).mount("a", d64, mode="unlinked")` with the default multipart attachment succeeds (H1). The reply carried odd fields (`'command': 21792`, `'file': '/Temp/disk.d64'`) and an empty `errors` list; the fake server may want to mimic that shape.
+- `python3 tools/ultimatetest.py build/breadbin.d64` **failed at boot**: the machine ran `load"*",8,1` and device 8 was the physical 1541 with a blank disk, so the screen showed `?file not found`. The emulated drive was device 9 and was never read. Screen showed JiffyDOS 6.01 (the Ultimate's installed KERNAL), not the stock ROM.
+- Note for the cloud session: the kernel also mounts root from device 8 (`src/kernel/fs.s`), so booting from 9 would still fail. Mounting root from the boot device would make the bench independent of what else is on the bus, and is needed anyway to use a physical 1541 and the emulated drive together. Until then the bench needs the emulated drive on 8 and the physical drive off the bus.
