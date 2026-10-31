@@ -27,7 +27,7 @@ $(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc include/breadbin.inc
 $(BUILD)/breadbin.prg: $(KOBJ) src/kernel.cfg
 	ld65 -C src/kernel.cfg -m $(BUILD)/kernel.map -Ln $(BUILD)/kernel.lbl -o $@ $(KOBJ)
 
-$(BUILD)/lib/%.o: src/lib/%.s include/breadbin.inc
+$(BUILD)/lib/%.o: src/lib/%.s src/lib/lib.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
 	ca65 -g $< -o $@
 
