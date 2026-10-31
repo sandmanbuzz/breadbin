@@ -8,6 +8,7 @@
 """
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -148,6 +149,9 @@ class Vice(Target):
         if reu:
             args += ["-reu", "-reusize", "512"]
         args += list(extra)
+        # extra emulator options for a whole run, e.g. other ROM images kept outside
+        # the repo: BREADBIN_VICE_ARGS="-kernal /path/kernal.bin -dos1541II /path/drive.bin"
+        args += shlex.split(os.environ.get("BREADBIN_VICE_ARGS", ""))
         if boot_device == 8:
             args += ["-autostart", image]
         else:       # attach to that drive and LOAD from it ourselves once BASIC is up
