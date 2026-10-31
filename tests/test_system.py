@@ -31,7 +31,8 @@ class Boot(unittest.TestCase):
 
     def test_00_kernal_is_shadowed(self):
         """The KERNAL ROM is out: RAM at $E000-$FFFF, vectors are ours."""
-        self.assertEqual(self.v.mem(0x0001, 0x0001), [0x35])
+        if self.v.sees_cpu_port:      # a DMA read of $0001 returns the RAM under the port
+            self.assertEqual(self.v.mem(0x0001, 0x0001), [0x35])
         vec = self.v.mem(0xfffa, 0xffff)
         nmi, irq = vec[0] | vec[1] << 8, vec[4] | vec[5] << 8
         for target in (nmi, irq):
@@ -347,6 +348,15 @@ class Drives(unittest.TestCase):
         out = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "mkimage.py"),
                               "cat", img9, "/x/f"], capture_output=True, text=True)
         self.assertEqual(out.stdout, "hi\n")
+
+    def test_boot_from_drive_9(self):
+        """The root disk is on the drive we booted from, not always drive 8."""
+        with Vice(IMAGE, boot_device=9) as v:
+            v.wait_shell()
+            self.assertEqual(v.run("mount").splitlines()[0], "drive 9 on / (c64fs)")
+            self.assertIn("busy", v.run("mount 9 /mnt"))        # the running system's drive
+            v.run("echo hi > /home/x")
+            self.assertEqual(v.run("cat /home/x"), "hi")
 
     def test_format(self):
         blank = os.path.join(ROOT, "build", "t_blank9.d64")

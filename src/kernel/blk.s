@@ -39,8 +39,8 @@ sct:     .res 1
 reu_banks: .res 1
 dev_present: .res NDEV
 dev_type: .res NDEV
-cur_lcmd: .res 1
-cur_ldata: .res 1
+cur_drv: .res 1          ; drive number the IEC routines below talk to
+dev_drive: .res NDEV    ; drive number of each device (0 = the boot drive)
 cmdbuf:  .res 40
 cmdlen:  .res 1
 reu_tmp: .res 1
@@ -53,9 +53,6 @@ trk_lo: .lobytes 0,21,42,63,84,105,126,147,168,189,210,231,252,273,294,315,336,3
 trk_hi: .hibytes 0,21,42,63,84,105,126,147,168,189,210,231,252,273,294,315,336,357,376,395,414,433,452,471,490,508,526,544,562,580,598,615,632,649,666,683
 s_hash: .byte "#"
 s_init: .byte "i0"
-dev_drive: .byte 8, 0, 9, 10, 11
-dev_lcmd:  .byte 15, 0, 14, 13, 12
-dev_ldata: .byte 2, 0, 3, 4, 5
 
 .segment "CODE"
 blk_init:
@@ -64,59 +61,55 @@ blk_init:
 @l:     sta b_valid,x
         dex
         bpl @l
+        ; the root disk is on the drive we were booted from: the KERNAL leaves
+        ; its number in $BA (stock "current device"). Drives 9-11 are for mount.
+        lda $ba
+        cmp #8
+        bcc @bd
+        cmp #12
+        bcc @bk
+@bd:    lda #8
+@bk:    sta dev_drive
+        lda #0
+        sta dev_drive+1
+        lda #9
+        sta dev_drive+2
+        lda #10
+        sta dev_drive+3
+        lda #11
+        sta dev_drive+4
         ldx #0
         jsr iec_open
         lda #1
         sta dev_present
         jmp reu_detect
 
-; iec_open: X = dev. Open the drive's command channel and a data channel
-; with a drive buffer. Carry set (A = ENODEV) if the drive is not there.
+; iec_open: X = dev. Open the drive's command channel (15) and a data channel
+; (2) with a drive buffer. Carry set (A = ENODEV) if the drive is not there.
 iec_open:
         stx tmp2
-        lda #0
-        sta ST
-        lda #2
-        ldx #<s_init
-        ldy #>s_init
-        jsr SETNAM
-        ldx tmp2
-        lda dev_drive,x
-        tay
-        lda dev_lcmd,x
-        pha
-        tya
-        tax
-        pla
-        ldy #15
-        jsr SETLFS
-        jsr OPEN
-        bcs @nodev
-        lda ST
-        bmi @nodev
-        lda #1
-        ldx #<s_hash
-        ldy #>s_hash
-        jsr SETNAM
-        ldx tmp2
-        lda dev_drive,x
-        tay
-        lda dev_ldata,x
-        pha
-        tya
-        tax
-        pla
+        lda #<s_init
+        sta p4
+        lda #>s_init
+        sta p4+1
         ldy #2
-        jsr SETLFS
-        jsr OPEN
+        lda dev_drive,x
+        ldx #15
+        jsr iec_ch_open
         bcs @nodev
-        lda ST
-        bmi @nodev
-        jsr CLRCHN
+        lda #<s_hash
+        sta p4
+        lda #>s_hash
+        sta p4+1
+        ldy #1
+        ldx tmp2
+        lda dev_drive,x
+        ldx #2
+        jsr iec_ch_open
+        bcs @nodev
         clc
         rts
-@nodev: jsr CLRCHN
-        ldx tmp2
+@nodev: ldx tmp2
         jsr iec_close
         lda #ENODEV
         sec
@@ -125,20 +118,19 @@ iec_open:
 ; iec_close: X = dev
 iec_close:
         stx tmp2
-        lda dev_ldata,x
-        jsr CLOSE
+        lda dev_drive,x
+        ldx #2
+        jsr iec_ch_close
         ldx tmp2
-        lda dev_lcmd,x
-        jsr CLOSE
-        jmp CLRCHN
+        lda dev_drive,x
+        ldx #15
+        jmp iec_ch_close
 
-; cur_dev_set: A = dev -> channels used by the IEC routines below
+; cur_dev_set: A = dev -> the drive number the IEC routines below talk to
 cur_dev_set:
         tax
-        lda dev_lcmd,x
-        sta cur_lcmd
-        lda dev_ldata,x
-        sta cur_ldata
+        lda dev_drive,x
+        sta cur_drv
         rts
 
 ; iec_command: A = dev, cmdbuf/cmdlen = command. Sends it and reads the
@@ -398,36 +390,38 @@ cmd_us:
 
 ; send cmdbuf to the command channel
 cmd_send:
-        ldx cur_lcmd
-        jsr CHKOUT
+        lda cur_drv
+        ldx #15
+        jsr iec_out_begin
         bcs @e
         ldy #0
 @l:     lda cmdbuf,y
-        jsr CHROUT
+        jsr iec_out_byte
         iny
         cpy cmdlen
         bne @l
-        jsr CLRCHN
+        jsr iec_out_end
         clc
         rts
-@e:     jsr CLRCHN
-        sec
+@e:     sec
         rts
 
 ; read the drive's error channel: carry set unless "00"
 cmd_status:
-        ldx cur_lcmd
-        jsr CHKIN
-        jsr CHRIN
+        lda cur_drv
+        ldx #15
+        jsr iec_in_begin
+        bcs @bad
+        jsr iec_in_byte
         sta tmp0
-        jsr CHRIN
+        jsr iec_in_byte
         sta tmp1
-@skip:  jsr CHRIN
+@skip:  jsr iec_in_byte
         cmp #$0d
         beq @d
         lda ST
         beq @skip
-@d:     jsr CLRCHN
+@d:     jsr iec_in_end
         lda tmp0
         cmp #'0'
         bne @bad
@@ -447,19 +441,19 @@ iec_read:
         bcs @e
         jsr cmd_status
         bcs @e
-        ldx cur_ldata
-        jsr CHKIN
+        lda cur_drv
+        ldx #2
+        jsr iec_in_begin
         bcs @e
         ldy #0
-@l:     jsr CHRIN
+@l:     jsr iec_in_byte
         sta (bp),y
         iny
         bne @l
-        jsr CLRCHN
+        jsr iec_in_end
         clc
         rts
-@e:     jsr CLRCHN
-        sec
+@e:     sec
         rts
 
 s_bp:   .byte "B-P:2 0"
@@ -474,22 +468,22 @@ iec_write:
         sta cmdlen
         jsr cmd_send
         bcs @e
-        ldx cur_ldata
-        jsr CHKOUT
+        lda cur_drv
+        ldx #2
+        jsr iec_out_begin
         bcs @e
         ldy #0
 @l:     lda (bp),y
-        jsr CHROUT
+        jsr iec_out_byte
         iny
         bne @l
-        jsr CLRCHN
+        jsr iec_out_end
         lda #'2'
         jsr cmd_us
         jsr cmd_send
         bcs @e
         jmp cmd_status
-@e:     jsr CLRCHN
-        sec
+@e:     sec
         rts
 
 ; ---- REU ----
