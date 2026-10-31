@@ -23,7 +23,8 @@ REU_CTRL   = $df0a
 ; byte per block, then block b at page 4+b. It is write-through, and keyed by the build
 ; id in the c64fs superblock: a different id on the disk discards it. Needs 11 banks.
 .ifndef CACHE_DEFAULT
-CACHE_DEFAULT = 1       ; reads use the cache after boot (make CACHE=0: always the bus)
+CACHE_DEFAULT = 1       ; make CACHE=0: reads always use the bus; 1: the cache; 2: the cache, but
+                        ; every boot starts cold (nothing a previous boot left is trusted)
 .endif
 CACHE_BANK  = 8
 CACHE_NBLK  = 683       ; a 35-track 1541
@@ -850,6 +851,7 @@ cache_attach:
         sta cd_regs+5
         lda #$91
         jsr cdma
+.if CACHE_DEFAULT <> 2
         ldx #7
 @c:     lda c_rd,x
         cmp c_hdr,x
@@ -857,10 +859,13 @@ cache_attach:
         dex
         bpl @c
         bmi @ok
+.endif
 @fmt:   jsr cache_clear
 @ok:    lda #1
         sta cache_ok
-        lda #CACHE_DEFAULT
+.if CACHE_DEFAULT = 0
+        lda #0
+.endif
         sta cache_on
         jsr cache_wr            ; the superblock (bp) goes in
 @r:     rts
