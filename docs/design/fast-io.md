@@ -134,7 +134,7 @@ Order: (1) clean-room JiffyDOS if open-roms has no adoptable literal code; (2) a
   - detect: the 400 us side channel as above, done at each command; DATA going low during the delay means a JiffyDOS device.
   - `jiffydos_load.s` (340 lines) is the file-level LOAD, which we do not need since our reads are blocks.
 - **Estimated size in our kernel:** tx + rx + detect + bit table is about 300 to 400 bytes in ca65, less than the LOAD stub. It fits easily; the squash pass can share `$DD00` helpers with `iec.s`.
-- **A caution that came in from the hardware session:** the bench has seen *all devices answer ATN whether connected or not* (a bench behaviour, not our code). Both `bus_listen` presence detection and the JiffyDOS probe (DATA pulled during the long delay) depend on a clean DATA line. Until that is understood, a JiffyDOS probe on the bench could report a device that is not there. Design rule: the probe is only made after the device has already answered the ATN and delivered the first real byte.
+- **Correction (hardware session, 2026-10-31):** the earlier report that all devices answer ATN whether connected or not was a mistake of the test (`OPEN n,dev,15` with no filename sends nothing on the bus); the bus is clean. The real open item is a stall of the root mount on the **physical 1541** (5 of 7 boots), not yet localised (our receive code, or the drive/bus; a stock-KERNAL control run is in progress). Design rule kept: a JiffyDOS probe result counts only after the device has acknowledged the command byte normally.
 
 ### 10.2 Step 2: scope of the demoscene research pass
 
@@ -305,4 +305,4 @@ What it settles: rank 4's transfer scheme (2 bits plus ATN, drive code uploaded 
 
 ### Hardware tasks queued (for when the hardware session has its open questions closed)
 
-Recorded in `docs/wip.md` as WP5. Nothing here is to start before the session says it is confident of the bus quirks (phantom ATN responses and the rest).
+Recorded in `docs/wip.md` as WP5. Nothing here is to start before the session says it is confident of the bus quirks (the physical-1541 root-mount stall and the rest).
