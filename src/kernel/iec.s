@@ -35,7 +35,6 @@ D_TS   = 8          ; bit set-up (>= 20 us)
 D_TV   = 10         ; bit valid (>= 20 us, 60 for a talker)
 D_TBB  = 20         ; between bytes (>= 100 us)
 D_TR   = 4          ; frame to release of ATN (>= 20 us)
-D_TTK  = 6          ; talk-attention release (20 to 100 us)
 D_EOIH = 14         ; hold DATA to acknowledge EOI (>= 60 us)
 
 .export iec_ch_open, iec_ch_close, iec_out_begin, iec_out_byte, iec_out_end
@@ -256,24 +255,12 @@ bus_tksa:
         bcs @r
         ldx #D_TR
         jsr dly
-        lda io_out
-        and #<~A_ATN
-        jsr io_set
-        ldx #D_TTK
-        jsr dly
-        lda #A_DAT          ; we are the listener: CLK released, DATA low
-        jsr io_set
-        ldx #8              ; the device takes over the clock: CLK goes low
-        ldy #0
-@w:     bit PORT
-        bvc @got            ; CLK low: the device has the clock
-        dey
-        bne @w
-        dex
-        bne @w
-        jsr io_fail         ; the device never took the clock
-        bcs @r
-@got:   clc
+        lda #A_DAT          ; ATN off, CLK released, DATA low, all in one write: we
+        jsr io_set          ; are the listener from this instant. Any pause here
+                            ; hides the device's short clock pulse behind our own
+@w:     bit PORT            ; the device takes over the clock: CLK goes low. It
+        bvs @w              ; may be finishing a command first; it has answered
+        clc                 ; both bytes, so wait as long as it takes
 @r:     plp
         rts
 
@@ -365,7 +352,7 @@ bus_acptr:
         lda io_out
         and #<~A_DAT        ; ready for data
         jsr io_set
-        ldy #30             ; the talker answers within 200 us unless this is EOI
+        ldy #90             ; the talker answers within 200 us unless this is EOI; wait ~1 ms to be sure
 @a:     bit PORT
         bvc @st             ; CLK low again: no EOI
         dey

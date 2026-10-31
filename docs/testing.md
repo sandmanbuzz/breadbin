@@ -17,6 +17,18 @@ The keyboard tests inject real X key events with `xdotool` (`apt install xdotool
 
 The `Boot` class, `test_keyboard` and `test_console` pick their backend with `make_target`: the VICE emulator by default, a real Ultimate with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (and `BREADBIN_ULTIMATE_PASSWORD` if set). The backend mounts `build/breadbin.d64` in drive A, resets, loads and runs it. `type()` and `keybuf()` write the key buffer by DMA, as VICE's `keybuf` does; `xkey` and friends use real key events (Ultimate 64 only). Tests that need the emulator (`-reu`, extra drives, reboot persistence) stay on VICE. `make test-host` includes the client's 24 tests against a fake server. See `docs/hardware-notes.md` for what has and has not been verified.
 
+## With other ROMs (JiffyDOS)
+
+`BREADBIN_VICE_ARGS` adds emulator options to every VICE the harness starts, so ROM images that must not be in the repository can still be used:
+
+```sh
+BREADBIN_VICE_ARGS="-kernal /path/JiffyDOS_6.01-Kernal.bin \
+  -dos1541 /path/JiffyDOS_6.01-1541.bin -dos1541II /path/JiffyDOS_6.01-1541.bin" \
+  xvfb-run -a make test-only T="tests.test_system.Boot.test_02_echo"
+```
+
+This is how the bus driver was checked against the drives the Ultimate has. Stock ROMs hide timing assumptions; run bus changes under both.
+
 ## Which tests for which change
 
 By test name; refine this as we learn what actually catches what.
