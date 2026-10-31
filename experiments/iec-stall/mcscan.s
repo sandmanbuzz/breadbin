@@ -13,6 +13,7 @@ CHKOUT = $FFC9
 CLRCHN = $FFCC
 
 burn = $C7E0                ; 0 = off; else every IRQ tick burns burn * ~1.3 ms before the stock handler
+crflag = $C7E5             ; nonzero: end each command with a carriage return (BASIC does); zero: only EOI (the kernel does)
 oldirq = $C7E2              ; the vector we replaced (2 bytes)
 done = $C7F0
 cnt  = $C7F1                ; 2 bytes
@@ -97,9 +98,11 @@ loop:   lda cnt             ; track = (13 * cnt) mod 35 + 1
         jsr CHROUT
         lda ss
         jsr pr2
+        lda crflag
+        beq @nocr
         lda #13
         jsr CHROUT
-        jsr CLRCHN
+@nocr:  jsr CLRCHN
         ldx #15             ; the status
         jsr CHKIN
 @s:     jsr CHRIN
