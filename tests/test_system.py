@@ -1,7 +1,10 @@
 """End-to-end tests: boot Breadbin in VICE and drive the shell."""
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -293,6 +296,83 @@ class REU(unittest.TestCase):
 def c1541_dir(img):
     out = subprocess.run(["c1541", img, "-dir"], capture_output=True, text=True).stdout
     return out
+
+
+class Cache(unittest.TestCase):
+    """The REU block cache: a second boot on the same REU reads from it, a different
+    disk discards it, writes stay in step."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.img = os.path.join(self.tmp.name, "disk.d64")
+        self.reu = os.path.join(self.tmp.name, "reu.img")
+        shutil.copy(IMAGE, self.img)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def boot(self, *cmds):
+        """Boot once with the shared REU image (2 MB); run cmds, then `cache`: its counters."""
+        with Vice(self.img, reu=2048, reu_image=self.reu) as v:
+            v.wait_shell()
+            outs = [v.run(c) for c in cmds]
+            return outs, self.stat(v.run("cache"))
+
+    @staticmethod
+    def stat(text):
+        m = re.search(r"reu cache: (\w+)(?:\s+hits (\d+)\s+bus reads (\d+)\s+bus errors (\d+))?", text)
+        assert m, text
+        return m.group(1), *(int(x) for x in m.groups()[1:] if x is not None)
+
+    def test_warm_boot_hits(self):
+        state, hits, misses, errs = self.boot()[1]
+        self.assertEqual(state, "on")
+        self.assertGreater(misses, 20)      # cold: everything came from the bus
+        self.assertEqual(errs, 0)
+        state, hits2, misses2, errs = self.boot()[1]
+        self.assertGreater(hits2, 20)
+        self.assertLess(misses2, 5)
+        self.assertEqual(errs, 0)
+
+    def test_new_disk_discards(self):
+        self.boot()
+        with open(self.img, "r+b") as f:    # another build: a different id
+            f.seek(376 * 256 + 15)
+            f.write(b"\xde\xad\xbe\xef")
+        _, hits, misses, _ = self.boot()[1]
+        self.assertGreater(misses, 20)
+        self.assertLess(hits, misses)
+
+    def test_write_through(self):
+        self.boot("echo one > /home/f")
+        outs, _ = self.boot("cat /home/f", "echo two > /home/f")
+        self.assertEqual(outs[0], "one")
+        outs, (_, hits, misses, _) = self.boot("cat /home/f")
+        self.assertEqual(outs[0], "two")
+        self.assertGreater(hits, misses)
+
+    def test_off_and_flush(self):
+        self.boot()
+        with Vice(self.img, reu=2048, reu_image=self.reu) as v:
+            v.wait_shell()
+            v.run("cache off")
+            st = self.stat(v.run("cache"))
+            self.assertEqual(st[0], "off")
+            h = st[1]               # taken once it is off: loading `cache off` itself hit
+            v.run("ls /bin")
+            self.assertEqual(self.stat(v.run("cache"))[1], h)    # no hits while off
+            v.run("cache on")
+            self.assertEqual(self.stat(v.run("cache"))[0], "on")
+            v.run("cache flush")
+            m = self.stat(v.run("cache"))[2]
+            v.run("ls /bin")
+            self.assertGreater(self.stat(v.run("cache"))[2], m)   # flushed: back to the bus
+
+    def test_no_reu(self):
+        with Vice(self.img) as v:
+            v.wait_shell()
+            self.assertEqual(self.stat(v.run("cache"))[0], "none")
+            self.assertIn("usage", v.run("cache bogus"))
 
 
 class Drives(unittest.TestCase):
