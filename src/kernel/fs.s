@@ -66,7 +66,7 @@ ba_dev:  .res 1
 .export bfree, mnt_active, mnt_ino, fs_count_inodes, sb_ninodes, ci_load_type
 .export inode_blk, s_dot, s_dotdot, sb_nblocks_lo, sb_nblocks_hi
 .export mt_used, mt_pdev, mt_pino, mt_dev, mt_path, mnt_point, mnt_of_dev, mount_dev
-.import cbm_iget, cbm_lookup
+.import cbm_iget, cbm_lookup, cache_attach
 
 .segment "RODATA"
 magic:  .byte "C64FS"
@@ -79,6 +79,7 @@ s_tmpp: .byte "/tmp", 0
 ; ---------------------------------------------------------------------
 ; fs_mount: mount dev 0 (and the REU RAM disk at /tmp if present)
 fs_mount:
+        jsr cache_attach
         lda #0
         ldx #<376
         ldy #>376
