@@ -159,3 +159,28 @@ Next, in this order (each needs the 1541 powered on and the 1581 absent):
 2. If they remain: stock KERNAL (reboot after changing `Kernal ROM`), `LOAD` the 14 KB boot program from device 8 five times and read blocks with `U1`. That is the standard protocol from the ROM against this drive. If it is solid, the stall is in our driver's timing against a real drive; if it also fails, it is the drive, the cable, or the drive's own JiffyDOS ROM.
 3. A stage-1 image on a second physical disk (a sector copy again) would give the direct A/B: same drive, same disk, only the bus code differs.
 
+### 2026-10-31, state of play on the physical-1541 stall (hardware session), for whoever continues
+
+Tools: `experiments/iec-stall/` (README there). Commits referred to: kernel experiments on the branch `iec-bit-waits` (not merged, not proven).
+
+**Facts, measured**
+- Only the physical 1541 on the bus (the emulated drive and Software IEC disabled, the 1581 removed), Breadbin stage 2 loaded by DMA with the root on device 8: the root mount stalls in most boots. Counting every clean-bus run so far the original kernel passed about 3 times in 14. The same drive, the same disk and the same file loaded with the stock KERNAL's receive code (`stockload.py`): **5 of 5 byte-identical** loads of 14,362 bytes, screen on.
+- The stall state: kernel alive and in `bus_acptr`'s `@rdy` wait (unbounded, interrupts on), `$DD00 = $87` (the drive holds CLK low, DATA released), the drive's motor stopped and its LED steady on. `$90` bit 1 is only ever set by `bus_acptr`'s timeout exit, so an earlier call timed out and every later call then blocks in `@rdy`: **one timeout, then a hang**.
+- The bit counter at the first timeout was 5 remaining (3 bits received) in one stall, 2 remaining in another: different positions, so not a fixed cut-off point.
+- Kernel variants tried on the real drive, none shown to help: waiting 0.8 s per bit instead of 3 ms (2 stalls, 1 pass); a shorter blind window between seeing the clock rise and watching it fall (1 stall, 2 passes at the time of writing). Neither is a fix.
+
+**What an Opus advisor said (reasoning from the 1541 DOS source, unverified here; a hypothesis list, not evidence)**
+- After the 8th bit a stock talker waits forever for the listener to pull DATA (`isr04`; only ATN ends it). That is exactly our stall state, so the drive believes it sent 8 bits: **we miss CLK-high pulses**; the drive is not dropping out.
+- Suspected cause: the CLK-high pulse is short (about 34 us; about 75 us in the drive's slow "UI+" mode) and the VIC's badlines (40 to 43 stolen cycles) or sprites can swallow it. A byte spans about two badlines.
+- Cheap tests it proposed: (a) send `UI+` on the command channel to the physical drive before the boot (a C64 reset does not reset the drive); (b) `M-R` of `$0023` (the speed-mode flag) on the physical and the emulated drive; (c) screen off during the mount; (d) a straight-line capture of `$DD00` inside `bus_acptr` (480 samples of `lda PORT / sta cap+i`, 8 cycles each, with a CIA timer read before and after to see cycles stolen by the VIC) decoded offline for pulse widths; and recover from a timeout by asserting ATN (UNTALK), not by calling `bus_acptr` again.
+- Tests (a), (b) and (d) are not done. (c) was started: round 1 with the screen blanked by DMA still stalled (one sample), and it is not yet confirmed that the blanking took effect.
+
+**Not yet explained, and the questions that remain**
+- Why the ROM's receive handles this drive and ours does not, with the same VIC and the same drive. The obvious differences are the ROM's debounced double read of `$DD00`, its sampling points, and how long it is blind between bits.
+- Whether the JiffyDOS 5.0 drive ROM changes the drive's speed mode or pulse width compared to the emulated image (`M-R` the same ROM regions on both and diff them).
+- Whether the 1581's earlier effect (attached, even switched off) points at weak pull-ups or load on the lines.
+
+**Corrections to earlier entries and to other notes**
+- The "phantom ATN responders" mentioned in `docs/wip.md` do not exist: that was `OPEN n,dev,15` with no filename, which puts nothing on the bus.
+- Polling the screen during a disk transfer can itself corrupt the transfer (see the 2026-10-31 DMA entry); every stall above was reproduced with no DMA read for the first 20 s.
+
