@@ -221,3 +221,28 @@ The drive: a long-board 1541 (second revision, twist-lock), JiffyDOS 5.0 install
 - The drive's speed-mode byte `$0023` reads `00` (slow, C64-compatible pulses) on both. A full 16 KB `M-R` dump with the JiffyDOS KERNAL as host was unusable (a zero after most bytes, offset streams); do not repeat that. A full dump with the stock KERNAL takes about nine minutes.
 - A side result: reading 16,384 bytes one `GET#` at a time (16,000 attention sequences, 561 s) on the physical drive did not wedge it, consistent with the 393 and 227 block reads earlier.
 
+### 2026-10-31, the stall predates our work; what has been ruled out (hardware session)
+
+All on the physical 1541 as device 8, nothing else on the bus (the 1581 removed, Drive A and Software IEC disabled), kernels loaded by DMA, the stock KERNAL as the host, the disk that was already in the drive. `experiments/iec-stall/bisect.sh` (the version that copies images) and `plainboot.py`.
+
+**Regression bisect by loading older kernels against the same disk** (the disk format is the same for every commit: `mkimage.py` has not changed since the upstream baseline, and the disk ID is the constant `BB`). Five boots each, interleaved:
+
+| Kernel | Passes in 5 |
+|---|---|
+| upstream baseline `aa58d27` (before any of our work) | 1 |
+| M0-1 `a5ad5dd` (KERNAL shadowed, own vectors) | 0 |
+| M0-3 `9fd51a0` (own keyboard and screen) | 3 |
+| M0-4 stage 1 `07813bb` (own channel layer, ROM bus routines) | 1 |
+
+5 passes in 20 boots overall, a quarter, with no kernel separable from the others at these sizes (M0-3's 3 of 5 is within chance of a 25% rate). **The stall is not something our changes introduced: the pre-fork upstream kernel has it.** A pass is a login prompt in 42 to 52 s; a stall is the screen frozen in the mount (at the `reu:` line or just after the banner), the drive holding CLK, motor stopped, LED steady.
+
+**Ruled out, with the evidence** (cumulative, this and earlier entries):
+- our receive code, the bit timing and the interrupt window inside it (stage 1, upstream and the ROM's own routines stall the same way);
+- the drive's CLK pulse width (histogram identical on passing and stalling boots, and identical to VICE's stock 1541);
+- the drive's ROM: swapped to an OEM `901229-05` (verified by hash of the `$FF00` window against the Ultimate's stock `1541.rom`; the physical drive had been running a different JiffyDOS 5.0 build from the Ultimate's image), then 2 passes in 6, the same rate;
+- other devices on the bus, JiffyDOS vs stock host, turbo, the screen being on (untested properly), head seeks, the `I0` initialisation, a gap between transactions, interrupts held off through a block read (not yet run);
+- the media: a timed read of all 683 sectors, one `U1` each, 0 drive errors, every block 4 to 8 jiffies, nothing slow;
+- the access pattern and cadence: BASIC did 393 sequential and 227 random-track block reads, and a machine-code program calling the stock KERNAL's routines in the kernel's exact sequence did **512 block reads over a spread of tracks at full machine speed**, all with no stall and no drive error; the same drive loads a 14 KB file byte-identically 5 of 5.
+
+**What is left, i.e. what differs between the runs that stall (every Breadbin kernel, including upstream) and those that don't (BASIC, the machine-code stress, LOAD):** the C64's own state under Breadbin (its interrupt handler and tick, the CIA and VIC setup, the REU probe, memory map), or something in the environment that only some host behaviours expose (the cable: long, a repurposed synth cable; the drive's power or RAM). In progress: the same machine-code stress with a deliberately slow IRQ handler (`BURN=4`, about 5 ms per tick) to see whether interrupt latency alone can wedge the drive. Next, with hands: a different cable (the 1581's), the 1541's second IEC socket, and a RAM test of the drive via `M-W`/`M-R`.
+
