@@ -36,6 +36,7 @@ D_TV   = 10         ; bit valid (>= 20 us, 60 for a talker)
 D_TBB  = 20         ; between bytes (>= 100 us)
 D_TR   = 4          ; frame to release of ATN (>= 20 us)
 D_EOIH = 14         ; hold DATA to acknowledge EOI (>= 60 us)
+W_GAP  = 8
 
 .export iec_ch_open, iec_ch_close, iec_out_begin, iec_out_byte, iec_out_end
 .export iec_in_begin, iec_in_byte, iec_in_end
@@ -85,6 +86,11 @@ io_atn_begin:
         sta io_base
         lda #0
         sta io_pend
+        ldy #W_GAP          ; EXPERIMENT: let a real drive finish with the previous transaction
+@gap:   ldx #0              ; (about 1.3 ms a round)
+        jsr dly
+        dey
+        bne @gap
         ldx #D_TBB
         jsr dly
         lda #A_ATN | A_CLK
