@@ -48,6 +48,15 @@ python3 -m unittest tests.test_system.Boot.test_02_echo
 
 This runs the monitor-driven tests (`Boot`, `test_console`) with no X server. `test_keyboard` needs `xdotool` and an X display, which macOS does not have. A VICE window appears on the desktop while a test runs. On 2026-10-31 this ran `test_07`, `test_10`, `test_13`, `test_14`, `test_24` and `test_console` (11 tests, about 7.5 minutes) green on the stage-2 kernel.
 
+## Windowless VICE on macOS
+
+`-console` (VICE's console mode) starts without a window, so a test run no longer steals focus,
+and it used about a third less CPU. The monitor-driven tests pass with it:
+
+```sh
+BREADBIN_VICE_ARGS="$BREADBIN_VICE_ARGS -console" python3 -m unittest tests.test_system.Cache
+```
+
 ## Which tests for which change
 
 By test name; refine this as we learn what actually catches what.
@@ -59,8 +68,8 @@ By test name; refine this as we learn what actually catches what.
 | Keyboard (`kbd.s`) | `make test-keyboard` (matrix scan, decode, modifiers, rollover, repeat, RUN/STOP, jiffy clock), plus `test_13`, `test_24`, `test_25` |
 | File layer, pipes, signals (`file.s`) | `test_05`, `test_06`, `test_11`, `test_12`, `test_13` |
 | c64fs (`fs.s`) | `test_06`, `test_07`, `test_10`, `test_16`, `Persistence` |
-| Block layer, IEC, CBM DOS, `format`, mounts (`blk.s`, `cbm.s`) | `Drives`, `Persistence`, `REU`, plus a boot |
-| REU, `/tmp` | `REU` |
+| Block layer, IEC, CBM DOS, `format`, mounts (`blk.s`, `cbm.s`) | `Drives`, `Persistence`, `REU`, `Cache`, plus a boot |
+| REU, `/tmp`, the REU block cache | `REU`, `Cache` (about 11 minutes: it boots VICE about 20 times, with a 2 MB REU image kept across boots) |
 | Loader, `as`, `basic` (`exec.s`, `as.s`, `basic.s`) | `test_17`, `test_18`, `test_19` |
 | A single command in `src/bin/` | the test that uses it (`grep -n <name> tests/test_system.py`) |
 | Image tools, key tables (`tools/`) | `make test-host` |

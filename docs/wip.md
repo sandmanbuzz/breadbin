@@ -70,3 +70,15 @@ Where the cloud session stands, so a fresh context can resume:
 
 **For a fresh context:** `make test-host` first; the hardware needs `BREADBIN_ULTIMATE` set to the machine's address (ask the user; keep the address out of the repo); read the last four entries of `docs/hardware-notes.md`.
 
+
+## Cache session state (2026-10-31, second co-agent; all co-agents are peer committers)
+
+**Branch `reu-cache`** (worktree `.claude/worktrees/reu-cache` in the shared clone; pushed). Done: the REU block cache (see `docs/roadmap.md`, "Disk speed"), `cache` command, `make CACHE=0|1|2`, mkimage build id, `Cache` test class (9 tests; with `REU`, 10 pass under VICE with stock ROMs), an adversarial review whose BLOCK (stale blocks when a pristine image is mounted again on a warm REU) is fixed and has a regression test. Code room 5,295 bytes.
+
+**Not run:** the JiffyDOS-ROM disk and bus subset, hardware, the full suite. Treat a hardware surprise as NEEDSFIX on this branch. **Open requests:** the hardware A/B (`CACHE=0` against `CACHE=2`, cold REU) is queued behind the regression bisect on the hardware side; `experiments/illegal-ops` wants one run on the C64 Ultimate.
+
+**Decisions from the user:** undocumented (stable) 6510 opcodes are allowed in the kernel once the Ultimate core passes `experiments/illegal-ops`; SuperCPU is declared unsupported; CPU list = anything OEM-shipped, whatever upstream was tested on, and modern enthusiast hardware that is not niche. Branches may be pushed freely; nothing goes to `main` without the user.
+
+**Next (planned, not started):** the M0-7 footprint pass: baseline `make size`, then `fs`, `cbm`, `blk` and the 1.2 KB of library per program; drive-module modularisation is the open design question (user in favour, tradeoffs first); illegal opcodes only where the byte count justifies them. Early next sprint: containerised VICE and Xvfb (`docs/roadmap.md`, "Keep the lights on").
+
+**Known gaps:** the cache covers the boot drive only; two disks of the same build written by other machines can still look alike (the label and the per-boot id make that unlikely, not impossible); the first write of a boot costs one extra superblock write.
