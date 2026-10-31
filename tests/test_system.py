@@ -123,13 +123,23 @@ class Boot(unittest.TestCase):
         self.assertNotIn("cat", self.run_("ps").split()[5:])
 
     def test_14_ctrl_c_busy_foreground(self):
-        self.v.type("clear\n")
-        self.v.wait_for("$")
-        self.v.type("count\n")
-        self.v.wait_for("3")
-        self.v.keybuf(b"\x03")
         import time
-        time.sleep(3)
+
+        def wait_lines(done, timeout=60):
+            # wait for the screen to show something, not for text already on it
+            end = time.time() + timeout
+            while True:
+                lines = [l for l in self.v.screen_lines() if l]
+                if done(lines) or time.time() > end:
+                    return lines
+                time.sleep(0.2)
+
+        self.v.type("clear\n")
+        wait_lines(lambda l: l == ["/ $"])
+        self.v.type("count\n")
+        wait_lines(lambda l: "3" in l)                  # the line "3", not a 3 in the banner
+        self.v.keybuf(b"\x03")
+        self.assertEqual(wait_lines(lambda l: l[-1] == "/ $")[-1], "/ $")
         self.assertNotIn("count", self.run_("ps"))
 
     def test_15_too_many_processes(self):

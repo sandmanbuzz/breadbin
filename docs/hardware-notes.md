@@ -20,15 +20,15 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 | # | Question | Why it matters | Result |
 |---|---|---|---|
 | H1 | Are POST attachments multipart or raw? Which `mount` and `run_prg` forms work? | `tools/ultimate.py` guesses multipart. | `mount` with multipart works (default is right). `run_prg` not yet tried. |
-| H2 | How long must a key tap last for our 60 Hz scan to see it? What is the smallest `delay` in `xkey`/`xtype` that never drops a key? | `xtype` defaults to 0.15 s per key. | |
-| H3 | Does a held key (`xdown`) repeat as in VICE? | `test_keyboard.test_repeat` | |
-| H4 | What does a DMA read of `$0001` return once Breadbin runs: `$35` (the port) or the RAM under it? | `test_00_kernal_is_shadowed` asserts `$35`. | |
-| H5 | Time from mount and reset to the shell prompt. | Sizes the value of the fast boot (M0-8). | |
-| H6 | Does `machine:pause` leave the key buffer update in `keybuf()` atomic? Any visible glitch? | `UltimateTarget.keybuf` relies on it. | |
-| H7 | What do DMA reads of `$D031` (turbo) and `$DF1D` (UCI identification, expect `$C9`) return? Can they be read by DMA at all? | Probes for turbo and UCI. They may need to run on the C64 instead. | |
-| H8 | Do the VICE-reference tests pass? List each that differs: `test_02`, `test_13`, `test_14`, `test_24`, `test_keyboard`, `test_console`. | The point of the bench. | |
-| H9 | Video stream: does `streams/video:start` deliver frames to the test host? Format, port (default 11000), and a way to grab one frame. | A pixel-exact screenshot for the tests. | |
-| H10 | With a physical 1541 on the bus, does `mount 9 /mnt` work from Breadbin (it uses the KERNAL IEC routines today)? | Baseline before M0-4 replaces them. | |
+| H2 | **Not answerable on this firmware: `POST /v1/machine:input` answers 404 (see log).** How long must a key tap last for our 60 Hz scan to see it? What is the smallest `delay` in `xkey`/`xtype` that never drops a key? | `xtype` defaults to 0.15 s per key. | |
+| H3 | Does a held key (`xdown`) repeat as in VICE? | `test_keyboard.test_repeat` | Not answerable: no key injection (see H2). |
+| H4 | What does a DMA read of `$0001` return once Breadbin runs: `$35` (the port) or the RAM under it? | `test_00_kernal_is_shadowed` asserts `$35`. | **`$00`.** A DMA read returns the RAM under the CPU port, not the port. The assertion cannot hold on hardware. |
+| H5 | Time from mount and reset to the shell prompt. | Sizes the value of the fast boot (M0-8). | About 46 s from mount to the login prompt with the `login` typed in (JiffyDOS boot, `load"*",8,1`, `run`, Breadbin init). One measurement. |
+| H6 | Does `machine:pause` leave the key buffer update in `keybuf()` atomic? Any visible glitch? | `UltimateTarget.keybuf` relies on it. | No glitch seen over about 15 runs of key-buffer typing. Caveat: a run that dies between `pause` and `resume` leaves the machine paused, and a reset does not un-pause it (see log). |
+| H7 | What do DMA reads of `$D031` (turbo) and `$DF1D` (UCI identification, expect `$C9`) return? Can they be read by DMA at all? | Probes for turbo and UCI. They may need to run on the C64 instead. | Both readable by DMA while Breadbin runs: `$D031` reads `$FF` (turbo is not reported there; treat as unknown), `$DF1D` reads `$C9` (UCI present, Command Interface enabled). |
+| H8 | Do the VICE-reference tests pass? List each that differs: `test_02`, `test_13`, `test_14`, `test_24`, `test_keyboard`, `test_console`. | The point of the bench. | On Breadbin 10dbf3c: `test_02`, `test_13`, `test_14`, `test_24` and all six `test_console` tests pass once the test races below are fixed. `test_00` fails (H4). `test_keyboard` cannot run (H2). |
+| H9 | Video stream: does `streams/video:start` deliver frames to the test host? Format, port (default 11000), and a way to grab one frame. | A pixel-exact screenshot for the tests. | Not tried yet. |
+| H10 | With a physical 1541 on the bus, does `mount 9 /mnt` work from Breadbin (it uses the KERNAL IEC routines today)? | Baseline before M0-4 replaces them. | Not tried yet. Drive A is device 8; the physical 1581 is at 10 and Software IEC at 11. |
 
 ## Log
 
@@ -55,3 +55,14 @@ Read-only: `GET /v1/drives`, `GET /v1/configs/Drive%20A%20Settings`, then from B
 
 - Every device on the bus, physical or emulated, is running a JiffyDOS ROM, and the machine has JiffyDOS in its KERNAL. All of them will speak the JiffyDOS fast protocol to a JiffyDOS host. The M0-4 driver should speak only the standard protocol, and the M0-8 fast loader must not assume a stock drive ROM. Tests under VICE with stock ROMs will not show the JiffyDOS handshake.
 - The Software IEC drive is a DOS-emulation device, not a 1541: it has no job queue to talk to, so fast loaders (M0-8) cannot be used with it.
+
+### 2026-10-30, tests on hardware (hardware session)
+
+Setup: the 1541 off the bus, drive A renumbered to 8, the 1581 left at 10, Software IEC at 11. REU: 32 x 64k, reported by the boot banner.
+
+- `python3 tools/ultimatetest.py build/breadbin.d64` boots to the login prompt. `tests.test_system.Boot.test_02_echo` and `test_13_ctrl_c_blocked_reader` pass.
+- **`POST /v1/machine:input` answers 404 on the C64 Ultimate, firmware 1.1.0** (and so does a PUT probe). The docs list it as "U64 only" and this is a different product. Every real-keystroke test (`tests.test_keyboard`: `xtype`, `xkey`, `xdown`) therefore errors with `UltimateError ... HTTP 404`. Typing through Breadbin's key buffer (`type`, `keybuf`) works. Nothing exercises the keyboard scan on this machine until another injection path is found. `ultimate.py` should probably turn the 404 into a clear "no key injection on this product" error; not done.
+- **Reset does not un-pause.** After a run was interrupted while the machine was paused, `reset` left it frozen, and the next boot waited 60 s on a stale screen with no error. Fixed in `UltimateTarget.boot` (resume first); the fake now keeps the pause across a reset, and a test pins it. Unknown how that run ended up paused.
+- **Timing, not drivers.** The Ultimate runs the drive at real speed and the C64 at real speed (PAL, so `count` prints about every 1.2 s). `clear` takes about 3.2 s and `echo` about 4 s because they load from disk. Tests that slept 1 to 2 s, or used `wait_for("$")` / `wait_for("3")` (which match text already on screen: the old prompt, the `3` in `32 x 64k`), raced. `test_console` (3 tests) and `test_system.Boot.test_14_ctrl_c_busy_foreground` now wait for screen state instead. Measured: Ctrl-C stops `count` 0.6 s after the key-buffer write, so the kernel is fine. **These test edits have not been run under VICE**; the cloud session should run `tests.test_console` and `test_14` there.
+- `test_00_kernal_is_shadowed` fails on `$0001` (H4). Suggested: on the Ultimate target, skip the port assertion and keep the vector check.
+- The Ultimate target `screen()` takes a DMA read each poll; at 0.2 s polls there was no sign of load.
