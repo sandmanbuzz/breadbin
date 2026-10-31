@@ -81,3 +81,21 @@ Requests, when convenient (none block the cloud session):
 1. **H10 on the new build:** with the physical 1541 at 8 and the emulated drive at 9, does Breadbin boot from 9 (`UltimateTarget.boot` types `load"*",8,1`; it will need a drive parameter)? Then `mount 8 /mnt`, `ls /mnt`, `cp` a file. Record what each of the two drives does under the ROM's JiffyDOS routines.
 2. **Baseline timings** on the new build: boot time and `echo`/`clear` load time, so the IEC driver (stage 2) and the fast-boot work have numbers to beat.
 3. **Next from the cloud side:** stage 2 replaces the ROM's bus routines, so the first thing to learn on hardware is whether our standard-protocol code works against JiffyDOS drives at all. I will ask for that run when it exists.
+
+### 2026-10-31, request for the hardware session: the stage-2 IEC driver (cloud session)
+
+**What is new.** `src/kernel/iec.s` now does the whole serial bus itself (standard protocol, no ROM bus routines, no JiffyDOS handshake). It passes the disk tests under VICE with stock drive ROMs. It has never talked to a real drive, and every drive on your bus runs JiffyDOS, so the first question is simply: does it work at all? It is on the cloud branch, commit message "kernel: own IEC bus (M0-4 stage 2)". Take that commit and `make`.
+
+**Setup.** The simplest case first: only the Ultimate's emulated 1541 on the bus as device 8 (the physical 1541 and the others off the bus or renumbered), then repeat with the physical 1541 as 8.
+
+**Run, in order, and record the result of each:**
+
+1. Does it boot to the login prompt (`python3 tools/ultimatetest.py build/breadbin.d64`)? If not, what does the screen say? Most likely failures are a panic "cannot mount root filesystem" or "cannot start /bin/init", which mean the first or a later block read failed.
+2. `BREADBIN_TARGET=ultimate python3 -m unittest tests.test_system.Boot.test_02_echo tests.test_system.Boot.test_13_ctrl_c_blocked_reader tests.test_system.Boot.test_07_directories tests.test_system.Boot.test_10_mv_cp`. Reads and writes of blocks.
+3. By hand: `format` needs a spare disk; skip it on the physical drive unless the media is expendable. If you do run it, expect the clock and keyboard to freeze until it finishes (that is deliberate, as with the ROM).
+4. Compare boot time and `echo`/`clear` load times with the baseline from the stage-1 build.
+5. Repeat on the physical 1541 as device 8, and, if you like, `mount 9 /mnt` (the emulated drive) while booted from the physical one.
+
+**If it fails**, the most useful thing is the exact screen text plus, if you can, which bus operation it was (the status byte is at `$0090`: `$80` device not present, `$42` EOI plus read timeout, `$01` write timeout). Please also say what the drive's front panel or the Ultimate menu shows.
+
+**What I would expect to be fragile on hardware, and why.** Timing: the bit timing is the middle of the published windows (set-up about 55 µs, valid about 65 µs) and assumes a 1 MHz CPU, so turbo must be off. The talk turnaround waits up to about 25 ms for the drive to take the clock. Drives with JiffyDOS may detect a non-JiffyDOS host and fall back; that is the thing to find out.
