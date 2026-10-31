@@ -8,8 +8,8 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 |---|---|
 | Ultimate model and firmware (`GET /v1/info`) | C64 Ultimate, firmware 1.1.0, FPGA 122, core 1.49 |
 | REST password set? Reachable from where? | No password. Reachable over the LAN from the test host. |
-| Drive A (device 8): type and ROM | |
-| Physical drives on the IEC bus, and their device numbers | 2026-10-30: a physical 1541 (fresh media) at device 8; the Ultimate's emulated 1541 at device 9. The two collide with the harness and kernel, which assume device 8 (see log). |
+| Drive A: type and ROM | 1541, `JiffyDOS_1541-II.bin`, bus ID 9 (`GET /v1/drives`). Drive B disabled. "Resets when C64 resets": Yes. |
+| Physical drives on the IEC bus, and their device numbers | 2026-10-30: a physical 1541 (fresh media) at device 8; the Ultimate's emulated 1541 at device 9. The two collide with the harness and kernel, which assume device 8 (see log). Also a 1581 at 10 and the Ultimate's Software IEC ("IEC Drive", partition `/USB0/`) at 11. |
 | REU: configured size | |
 | "Command Interface" enabled in the Ultimate's menu? | |
 | "Turbo Mode" setting (Off, Manual, U64 Turbo Registers, Turbo Enable Bit)? | |
@@ -41,3 +41,17 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 - `Ultimate(host).mount("a", d64, mode="unlinked")` with the default multipart attachment succeeds (H1). The reply carried odd fields (`'command': 21792`, `'file': '/Temp/disk.d64'`) and an empty `errors` list; the fake server may want to mimic that shape.
 - `python3 tools/ultimatetest.py build/breadbin.d64` **failed at boot**: the machine ran `load"*",8,1` and device 8 was the physical 1541 with a blank disk, so the screen showed `?file not found`. The emulated drive was device 9 and was never read. Screen showed JiffyDOS 6.01 (the Ultimate's installed KERNAL), not the stock ROM.
 - Note for the cloud session: the kernel also mounts root from device 8 (`src/kernel/fs.s`), so booting from 9 would still fail. Mounting root from the boot device would make the bench independent of what else is on the bus, and is needed anyway to use a physical 1541 and the emulated drive together. Until then the bench needs the emulated drive on 8 and the physical drive off the bus.
+
+### 2026-10-30, drive probe (hardware session)
+
+Read-only: `GET /v1/drives`, `GET /v1/configs/Drive%20A%20Settings`, then from BASIC on the stock-JiffyDOS machine `open15,<dev>,15:input#15,a,b$,c,d` for each device:
+
+| Dev | Reply | What it is |
+|---|---|---|
+| 8 | `62,FILE NOT FOUND` (left over from the failed boot load) | physical 1541, fresh media |
+| 9 | `73,JIFFYDOS 5.0 1541` | the Ultimate's emulated drive A |
+| 10 | `73,(C) 1989 JIFFYDOS 6.0 1581` | physical 1581 |
+| 11 | `73,U64IEC ULTIMATE DOS V1.1` | Software IEC, `/USB0/` |
+
+- Every device on the bus, physical or emulated, is running a JiffyDOS ROM, and the machine has JiffyDOS in its KERNAL. All of them will speak the JiffyDOS fast protocol to a JiffyDOS host. The M0-4 driver should speak only the standard protocol, and the M0-8 fast loader must not assume a stock drive ROM. Tests under VICE with stock ROMs will not show the JiffyDOS handshake.
+- The Software IEC drive is a DOS-emulation device, not a 1541: it has no job queue to talk to, so fast loaders (M0-8) cannot be used with it.
