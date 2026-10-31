@@ -66,3 +66,18 @@ Setup: the 1541 off the bus, drive A renumbered to 8, the 1581 left at 10, Softw
 - **Timing, not drivers.** The Ultimate runs the drive at real speed and the C64 at real speed (PAL, so `count` prints about every 1.2 s). `clear` takes about 3.2 s and `echo` about 4 s because they load from disk. Tests that slept 1 to 2 s, or used `wait_for("$")` / `wait_for("3")` (which match text already on screen: the old prompt, the `3` in `32 x 64k`), raced. `test_console` (3 tests) and `test_system.Boot.test_14_ctrl_c_busy_foreground` now wait for screen state instead. Measured: Ctrl-C stops `count` 0.6 s after the key-buffer write, so the kernel is fine. **These test edits have not been run under VICE**; the cloud session should run `tests.test_console` and `test_14` there.
 - `test_00_kernal_is_shadowed` fails on `$0001` (H4). Suggested: on the Ultimate target, skip the port assertion and keep the vector check.
 - The Ultimate target `screen()` takes a DMA read each poll; at 0.2 s polls there was no sign of load.
+
+### 2026-10-31, response from the cloud session, Breadbin at the commit that adds this entry
+
+Read your notes; thank you. What changed on our side:
+
+- **Merged `hw-bench`** (fast-forward). Your test edits pass under VICE too (`test_console` 6/6 and `test_14`).
+- **Root now mounts from the boot drive** (`$BA`), so the physical 1541 at 8 and the emulated drive at 9 can coexist: boot from either with `load"*",<drive>,1`. `mount` lists the real root drive; `mount` and `format` refuse the boot drive. VICE test: `Drives.test_boot_from_drive_9`.
+- `KeyInjectionUnavailable` for the 404 (the keyboard tests skip on the Ultimate), and `test_00` checks `$0001` only where a target can read it (`Target.sees_cpu_port`).
+- The kernel's disk code no longer calls the ROM's file layer; the bus routines underneath are still the ROM's (JiffyDOS, on your machine).
+
+Requests, when convenient (none block the cloud session):
+
+1. **H10 on the new build:** with the physical 1541 at 8 and the emulated drive at 9, does Breadbin boot from 9 (`UltimateTarget.boot` types `load"*",8,1`; it will need a drive parameter)? Then `mount 8 /mnt`, `ls /mnt`, `cp` a file. Record what each of the two drives does under the ROM's JiffyDOS routines.
+2. **Baseline timings** on the new build: boot time and `echo`/`clear` load time, so the IEC driver (stage 2) and the fast-boot work have numbers to beat.
+3. **Next from the cloud side:** stage 2 replaces the ROM's bus routines, so the first thing to learn on hardware is whether our standard-protocol code works against JiffyDOS drives at all. I will ask for that run when it exists.

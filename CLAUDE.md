@@ -27,14 +27,14 @@ The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/set
 
 ## Status
 
-M0 (taking over the KERNAL): M0-1 shadow KERNAL and own vectors, M0-2 keyboard (`kbd.s`) and M0-3 screen (`con.s`) are done. Next is M0-4, the IEC driver, which needs validation on a real 1541. Kernel headroom is 835 bytes below the syscall table at `$CF00`; M0-4 will not fit without the second code region at `$E000–$E3FF` described in the roadmap. The full suite was last run after M0-1.
+M0 (taking over the KERNAL): M0-1 shadow KERNAL and own vectors, M0-2 keyboard (`kbd.s`), M0-3 screen (`con.s`) and M0-4 stage 1 (own IEC channel layer `iec.s`, root from the boot drive) are done. Next is M0-4 stage 2, our own bus routines in place of the ROM's, which needs validation on a real 1541. Kernel headroom is 616 bytes below the syscall table at `$CF00`; stage 2 may still need the second code region at `$E000–$E3FF` described in the roadmap. The full suite was last run after M0-1.
 
 ## Hardware and external references
 
 - An Ultimate 64 is being set up. A REST client (`tools/ultimate.py`), a fake server for tests (`tools/fake_ultimate.py`) and a test backend with the same interface as `tools/vicetest.py` (`tools/ultimatetest.py`) exist but have never run on hardware. Run tests on the real machine with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (tests built with `make_target`: the `Boot` class, the keyboard and the console tests). Docs: <https://github.com/GideonZ/1541u-documentation> (`uci/`, `api/api_calls.rst`).
 - A real 1541 is available for validating the IEC driver. A 1581 is too, but see "non-1541 devices" above.
 - `mist64/fastboot1541` (credit Michael Steil if adapted) is the basis for the fast boot and fast read story M0-8.
-- Nothing has run on hardware yet; claims about the Ultimate come from its documentation.
+- The hardware is a C64 Ultimate (firmware 1.1.0, 2 MB REU, UCI enabled) with a JiffyDOS KERNAL and JiffyDOS ROMs in every drive on the bus; it has no REST key injection. See `docs/hardware-notes.md` for what has been verified.
 
 ## Working conventions
 
