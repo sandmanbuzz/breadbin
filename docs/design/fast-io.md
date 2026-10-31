@@ -187,3 +187,38 @@ Raw notes are in the session scratchpad (`research/*.md`), not in the repo. **Ne
 Take-aways for the plan: nothing found changes the order. The clean-room JiffyDOS sketch (`jiffydos-cleanroom.md`) stays the known-good path; the fastboot1541 read path stays adoptable (permissive); a fast **write** has no adoptable prior art yet, so it is likely our own work built on the job queue, with the pitfalls listed above (write protect, BAM consistency, verify).
 
 Bitfire and Sparkle are the first demoscene candidates with a verified permissive licence. Both use custom disk formats, so what we would take from them is the **drive-side GCR/bit-transfer technique and the protocol shape**, not a drop-in sector API; a quick source read of Bitfire's drive code (GitHub is reachable, so this needs no allowlist change) is the next cheap step and would answer the sector-access, save and JiffyDOS questions. Spindle needs `linusakesson.net` allowed.
+
+## 12. Candidate matrix after the source reads (2026-10-31)
+
+Network note: after the allowlist change, WebFetch still could not resolve some hosts but `curl` through the proxy worked, so later agents used curl. Every row below was read from source archives or repository files unless marked unverified. Raw notes stay in the session scratchpad (`research2/`).
+
+| | Krill's Loader v194 | Spindle 3.1 | Bitfire (bboxy, dotscha fork for save) | SparkleCPP 3.4 | ELoad (Chaco) write | JiffyDOS (clean-room) |
+|---|---|---|---|---|---|---|
+| Licence | BSD-style, 3 clauses, credit "Loader by Krill" (v146: "no strings attached") | MIT (src); credit "Loader by lft" | BSD-3 (Bindhammer 2021); dotscha fork has no licence file of its own | BSD-3 (Sparta/OMG). `Sparkle2` repo: no licence, all rights reserved | zlib-style permissive, attribution | n/a (ours, from the spec) |
+| Disk | **normal DOS disk, by filename** | own layout on whole tracks, coexists with DOS | own chain format | custom GCR, nonstandard sector order | raw sector write on a formatted disk | normal DOS, any |
+| Sector API | none in v194 (v146 had a TRACK_SECTOR option) | none | sector write (save) in the fork; read side is chain-based | none (file-level) | write only | whatever `blk.s` asks |
+| Save | limited: overwrite an existing file in place | none | **one sector per call** (T/S + 256 bytes), WPS check, read-back verify | hi-score file only, fixed chain | one sector, WPS check, no verify | yes (send protocol), drive's own DOS writes |
+| Host resident | `$1F9` (ZX0), `$E0` raw | 1 page + 5 zero-page bytes | `$7B` to `$1FE` by config | about `$1A0` | n/a | about 300 (est.) |
+| Speed (author) | 7.7 KB/s max, ~7 typical | ~6.8 KB/s at full raster, ~1.85 at 20% | 4.5 KB/s incl. spin-up (forum) | ~13.7 KB/s bus ceiling (derived) | not stated | ~4.2 KB/s (c64-wiki) |
+| Transfer | 2 bits + ATN, 72 cycles/byte | 18 cycles per bit pair | 2-bit ATN method | 2 bits + ATN, 72 cycles/byte | n/a | 2 bits per 11-13 cycles, no ATN, windowed |
+| IRQs / screen on | IRQ, NMI, sprites, badlines allowed | yes (raster-time budget) | base IRQ and safe-load hooks | IRQs off during load | n/a | no: interrupts off per byte |
+| Multi-drive | ok (sd2iec "proper support") | silences others | forbidden by the ATN method | **refused** | n/a | yes (device-by-device) |
+| JiffyDOS drive | unverified; unknown ROM treated as 1541-II | unverified | unverified | not mentioned | n/a | the point |
+
+### What the evidence says
+
+- **The 7 KB/s class is the same trick everywhere** (2 bits per step with ATN as a clock, 72 cycles per byte); Krill's, Sparkle and Bitfire differ in packaging, not in speed. Spindle's 18 cycles per bit pair is the same family. Breadbin does not need to choose among them on speed.
+- **The differentiators are the constraints:** normal-DOS disks and by-name loading (only Krill's), multi-drive (not Sparkle, not Bitfire's ATN method), interrupts allowed (Krill, Spindle), a real single-sector write (the Bitfire fork and ELoad).
+- **Transwarp** (Krill of Plush, 2020) is the "50x" claim, but needs custom-interleave images (`cc1541`); another custom-format design, so ruled out by our "normal disks" requirement. The 25 to 31 KB/s figure for the GCR ceiling is derived, not measured.
+- **No ground for cutting JiffyDOS:** it is the only candidate that works unchanged on the JiffyDOS-drive bench and on every device regardless of disk layout. It is slower than the 2-bit+ATN family, but it needs no upload.
+- **ELoad's write** is the clearest model of "write one already-formatted sector from custom drive code": WPS check (`$1C00` bit 4), motor and LED, search the header, skip nine header bytes, write mode (`$1C0C=$CE`), five sync bytes then 325 GCR bytes, back to read mode. Its job codes are its own (`$04`/`$0E`/`$0F` in zero page), not the DOS `$90` job; **no source found uses the DOS job queue for writes**. No verify; add a read-back. Not hardware-verified for us.
+- **Cut (no differentiator for us):** DolphinDOS (parallel cable), cartridge loaders (Epyx, AR, FC III), Sparkle2 (no licence), Sparkle (custom format, multi-drive refused, IRQs off), Spindle (custom layout, no sector access, no save), Transwarp, MafioDOS. Keep for reference only.
+
+### Leading plan, pending the remaining reports
+
+1. REU cache and UCI backend as decided.
+2. Per-byte **JiffyDOS clean-room** on detected JiffyDOS devices (the bench has them; no upload; any disk).
+3. A **Krill-style drive-side loader reading raw sectors** for stock drives: port the transfer idea (72 cycle/byte 2-bit+ATN, documented in Krill's `docs/Protocol.txt`) with Krill's BSD-style credit, adding the sector-granular entry point that v194 lacks; the drive code can be adapted from Krill/Bitfire under their licences. The write is ELoad-style or Bitfire-fork-style.
+4. All of it probed at run time, with the plain protocol as the fallback.
+
+Open: the Bitfire source report (drive-side detail), the loader comparison and the modern-speeds report are still coming; the Ultimate behaviour of the 2-bit+ATN family is untested (an Ultimate II+ firmware 3.10 issue was reported against some loaders).
