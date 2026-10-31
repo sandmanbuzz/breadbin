@@ -1,0 +1,30 @@
+#!/bin/sh
+# Run a command while holding the shared machine lock, so that only one session at a
+# time runs VICE or touches the Ultimate and the drives (the tests are timing-sensitive).
+#   tools/with-lock [-r ultimate|vice] [-t SECONDS] -- command args...
+# Locks live in $BREADBIN_LOCKDIR (default /tmp/breadbin-locks). "vice" is the default
+# resource; the hardware session takes "ultimate" (and also "vice" when it runs the
+# emulator). While waiting the holder is printed. Needs flock(1).
+res=vice; wait=3600
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -r) res=$2; shift 2 ;;
+        -t) wait=$2; shift 2 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
+[ $# -gt 0 ] || { echo "usage: with-lock [-r vice|ultimate] [-t secs] -- cmd..." >&2; exit 2; }
+dir=${BREADBIN_LOCKDIR:-/tmp/breadbin-locks}
+mkdir -p "$dir"
+f="$dir/$res.lock"
+exec 9>>"$f"
+if ! flock -n 9; then
+    echo "with-lock: '$res' is held by: $(cat "$dir/$res.holder" 2>/dev/null || echo unknown); waiting up to ${wait}s" >&2
+    flock -w "$wait" 9 || { echo "with-lock: timeout waiting for '$res'" >&2; exit 75; }
+fi
+echo "$(id -un)@$(hostname) pid $$ $(date -u +%FT%TZ) $*" > "$dir/$res.holder"
+"$@"
+rc=$?
+rm -f "$dir/$res.holder"
+exit $rc

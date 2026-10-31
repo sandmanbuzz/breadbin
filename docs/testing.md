@@ -1,6 +1,6 @@
 # Testing
 
-Three levels, cheapest first. Run the cheapest one that covers your change, and the full suite at milestones.
+Three levels, cheapest first. Run the cheapest one that covers your change, and the full suite at milestones. The policy is in `CLAUDE.md`: targeted tests inside a story, the full regression (stock ROMs, then the disk and bus tests with JiffyDOS ROMs, then the hardware list) at milestones.
 
 | Level | Command | Time (measured in a cloud container) |
 |---|---|---|
