@@ -1,6 +1,6 @@
 # Breadbin
 
-A Unix-like OS for the Commodore 64 (6502 assembly, ca65), forked to be developed further. Read `docs/roadmap.md` first: it holds the direction, the decisions below in full, and the story list. `docs/wip.md` says where things stand right now and who is doing what; `docs/hardware-notes.md` is where findings from the real Ultimate and 1541 are recorded. `README.md` describes the system; `docs/testing.md` says which tests to run.
+A Unix-like OS for the Commodore 64 (6502 assembly, ca65), forked to be developed further. Read `docs/process.md` (how sessions work together: branches, the machine lock, kickoff) and `docs/roadmap.md` first: it holds the direction, the decisions below in full, and the story list. `docs/wip.md` says where things stand right now and who is doing what; `docs/hardware-notes.md` is where findings from the real Ultimate and 1541 are recorded. `README.md` describes the system; `docs/testing.md` says which tests to run.
 
 ## Build and test
 
@@ -14,7 +14,7 @@ xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard   # real keystrokes (
 xvfb-run -a -s "-screen 0 1280x1024x24" make test-console
 ```
 
-The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 32 minutes) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive.
+The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 32 minutes) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive. Wrap VICE and hardware runs in `tools/with-lock` (see `docs/process.md`).
 
 ## Test policy
 
