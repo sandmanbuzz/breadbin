@@ -306,3 +306,5 @@ What it settles: rank 4's transfer scheme (2 bits plus ATN, drive code uploaded 
 ### Hardware tasks queued (for when the hardware session has its open questions closed)
 
 Recorded in `docs/wip.md` as WP5. Nothing here is to start before the session says it is confident of the bus quirks (the physical-1541 root-mount stall and the rest).
+
+The sub-agent research reports (raw, with VERIFIED/UNVERIFIED marks and URLs) are kept in `docs/design/research/`; the POC scripts are in `experiments/loader-poc/`.
