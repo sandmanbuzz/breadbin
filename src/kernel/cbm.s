@@ -36,7 +36,7 @@ mo_ent:  .res 1
 .segment "RODATA"
 magic:   .byte "C64FS"
 
-.segment "CODE"
+.segment "CODEHI"            ; runs above the BSS, out of the way of the user pool
 ; ---------------------------------------------------------------------
 ; dir_entry: A = k -> bp/Y = that 32-byte entry; carry set if past the end
 dir_entry:
