@@ -27,7 +27,7 @@ The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/set
 
 ## Status
 
-M0 (taking over the KERNAL): M0-1 shadow KERNAL and own vectors, M0-2 keyboard (`kbd.s`), M0-3 screen (`con.s`) and M0-4 stage 1 (own IEC channel layer `iec.s`, root from the boot drive) are done. Next is M0-4 stage 2, our own bus routines in place of the ROM's, which needs validation on a real 1541. Kernel headroom is 616 bytes below the syscall table at `$CF00`; stage 2 may still need the second code region at `$E000–$E3FF` described in the roadmap. The full suite was last run after M0-1.
+M0 (taking over the KERNAL): M0-1 shadow KERNAL and own vectors, M0-2 keyboard (`kbd.s`), M0-3 screen (`con.s`) and M0-4 (own IEC bus and channels in `iec.s`, root from the boot drive) are done under VICE; M0-4 has not yet run on real drives (see `docs/hardware-notes.md`). **Kernel headroom is 5 bytes** below the syscall table at `$CF00`: the second code region at `$E000–$E3FF` or the space pass (M0-7) must come before any more kernel code. The full suite was last run after M0-1.
 
 ## Hardware and external references
 
