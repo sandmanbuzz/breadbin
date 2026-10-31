@@ -29,6 +29,9 @@ CACHE_DEFAULT = 1       ; make CACHE=0: reads always use the bus; 1: the cache; 
 CACHE_BANK  = 8
 CACHE_NBLK  = 683       ; a 35-track 1541
 SB_BLOCK    = 376
+CH_LEN      = 24        ; cache header: magic(4) build id(4) disk label(16)
+BAM_BLOCK   = 357       ; track 18 sector 0: the CBM disk label is at offset $90
+BAM_LABEL   = $90
 SB_BUILD_ID = 15        ; superblock offset of the 4-byte build id (tools/mkimage.py)
 
 .segment "ZEROPAGE"
@@ -62,8 +65,8 @@ cache_on: .res 1         ; reads consult it
 c_hit:   .res 2
 c_miss:  .res 2          ; reads that went to the bus
 c_err:   .res 2          ; bus read/write errors
-c_hdr:   .res 8          ; magic + build id of the disk
-c_rd:    .res 8
+c_hdr:   .res CH_LEN     ; magic, build id, disk label of the disk
+c_rd:    .res CH_LEN
 cd_regs: .res 7          ; C64 addr, REU addr (lo, hi, bank), length: the REU registers $df02-$df08
 cd_ctl:  .res 1
 
@@ -798,7 +801,7 @@ cache_clear:
         sta cd_regs
         lda #>c_hdr
         sta cd_regs+1
-        lda #8
+        lda #CH_LEN
         sta cd_regs+5
         lda #0
         sta cd_regs+6
@@ -807,6 +810,7 @@ cache_clear:
 
 ; cache_attach: before the root is mounted. Reads the superblock from the bus, and
 ; discards the REU cache unless it belongs to this disk (same build id).
+ca_r:   rts
 cache_attach:
         lda #0
         sta cache_ok
@@ -814,12 +818,24 @@ cache_attach:
         sta cd_ctl
         lda reu_banks
         cmp #CACHE_BANK+3
-        bcc @r
+        bcc ca_r
+        lda #0
+        ldx #<BAM_BLOCK
+        ldy #>BAM_BLOCK
+        jsr bread               ; cache_ok is clear: from the bus
+        bcs ca_r
+        ldx #15                 ; the label tells disks apart even when the build id cannot
+        ldy #BAM_LABEL+15
+@lb:    lda (bp),y
+        sta c_hdr+8,x
+        dey
+        dex
+        bpl @lb
         lda #0
         ldx #<SB_BLOCK
         ldy #>SB_BLOCK
-        jsr bread               ; cache_ok is clear: from the bus
-        bcs @r
+        jsr bread
+        bcs ca_r
         ldy #3
 @m:     lda cmagic,y
         sta c_hdr,y
@@ -836,7 +852,7 @@ cache_attach:
         ora c_hdr+5
         ora c_hdr+6
         ora c_hdr+7
-        beq @r
+        beq ca_r
         lda #<c_rd
         sta cd_regs
         lda #>c_rd
@@ -847,12 +863,12 @@ cache_attach:
         sta cd_regs+6
         lda #CACHE_BANK
         sta cd_regs+4
-        lda #8
+        lda #CH_LEN
         sta cd_regs+5
         lda #$91
         jsr cdma
 .if CACHE_DEFAULT <> 2
-        ldx #7
+        ldx #CH_LEN-1
 @c:     lda c_rd,x
         cmp c_hdr,x
         bne @fmt
@@ -867,8 +883,7 @@ cache_attach:
         lda #0
 .endif
         sta cache_on
-        jsr cache_wr            ; the superblock (bp) goes in
-@r:     rts
+        jmp cache_wr            ; the superblock (bp) goes in
 
 ; sys_cache(A = op, r0 = buf): 0 = status into buf: state (0 none, 1 off, 2 on), hits,
 ; bus reads, bus errors (16 bits each); 1 = off, 2 = on, 3 = flush
