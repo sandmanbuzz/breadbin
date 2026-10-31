@@ -343,9 +343,8 @@ bus_acptr:
         pha
         tya
         pha
-        ; the talker is ready when it lets go of CLK; a busy drive can take as
-        ; long as it likes, so wait with interrupts enabled
-        cli
+        ; EXPERIMENT: interrupts stay off for the whole receive, like the ROM's ACPTR
+        sei
 @rdy:   bit PORT
         bvc @rdy            ; CLK still low: the talker is not ready
         sei
