@@ -352,6 +352,19 @@ class Cache(unittest.TestCase):
         self.assertGreater(misses, 20)
         self.assertLess(hits, misses)
 
+    def test_pristine_disk_after_writes(self):
+        """The hardware flow: a session writes, then the pristine image is mounted again
+        on the same (warm) REU. Nothing the earlier session wrote may show up."""
+        self.boot("echo x > /home/f")
+        shutil.copy(IMAGE, self.img)
+        outs, (_, hits, misses, errs) = self.boot("ls /home")
+        self.assertNotIn("f", outs[0].split())
+        self.assertGreater(misses, 20)
+        self.assertEqual(errs, 0)
+        outs, _ = self.boot("echo y > /home/g", "ls /home")
+        self.assertIn("g", outs[1].split())
+        self.assertNotIn("f", outs[1].split())
+
     def test_write_through(self):
         self.boot("echo one > /home/f")
         outs, _ = self.boot("cat /home/f", "echo two > /home/f")
@@ -382,6 +395,21 @@ class Cache(unittest.TestCase):
             v.wait_shell()
             self.assertEqual(self.stat(v.run("cache"))[0], "none")
             self.assertIn("usage", v.run("cache bogus"))
+
+    def test_small_reu(self):
+        with Vice(self.img, reu=256) as v:      # 4 banks: /tmp works, no room for the cache
+            v.wait_shell()
+            self.assertEqual(self.stat(v.run("cache"))[0], "none")
+            v.run("echo hi > /tmp/x")
+            self.assertEqual(v.run("cat /tmp/x"), "hi")
+
+    def test_cache0_kernel_has_no_cache(self):
+        img = os.path.join(ROOT, "build0", "breadbin.d64")
+        subprocess.run(["make", "BUILD=build0", "CACHE=0"], cwd=ROOT, check=True,
+                       capture_output=True)
+        with Vice(img, reu=2048) as v:
+            v.wait_shell()
+            self.assertEqual(self.stat(v.run("cache"))[0], "none")
 
 
 class Drives(unittest.TestCase):

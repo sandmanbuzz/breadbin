@@ -272,3 +272,8 @@ The shortest route to *a compiler exists* is **S12, S13, S14**, and it does not 
 - **Kernel space.** S5, S6, S10 and S11 all add kernel code with 1.9 KB free. Plan for moving rarely used code out (overlay, or into REU) before S11, or accept deleting v1 code and the CBM DOS write path to pay for it.
 - **Emulation gap.** VICE does not emulate UCI, so S10 and S11 have no automated test in CI. Options: a small fake UCI in the test harness (VICE cannot do it, so it would have to be a unit-level model), or hardware-only tests via S9.
 - **Language choice for S14.** A small C subset is the current assumption. A Forth-style language or compiling `basic` are cheaper alternatives if memory proves too tight.
+
+## Keep the lights on (early next sprint, not this one)
+
+- **Containerize VICE and Xvfb** (podman): removes the single-VICE contention between sessions, allows parallel test runs, no focus-stealing window on a desktop, and pins the VICE version, ROM set and any tooling we overlay. Record the image recipe in `docs/testing.md`. Until then, `-console` (no window) is worth trying for macOS runs.
+- **Later still: a remote podman runner** (`podman system connection`), for long-lived containers shared across sessions and agents. Only once the local container recipe exists and feature work is deeper.
