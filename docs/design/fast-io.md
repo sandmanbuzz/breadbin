@@ -62,6 +62,7 @@ Where JiffyDOS gives us what C does not: file-level LOAD semantics and the Jiffy
 |---|---|---|
 | `fastboot1541` | Yes, with credit (author asks for an email too; ask the user) | yes |
 | cbmbus_doc, open-roms JiffyDOS notes | Documentation: yes; keep attribution | yes |
+| **open-roms JiffyDOS code** (`src/kernal/iec_fast/jiffydos_*.s`, acme syntax) | **Literal code exists**, licensed **LGPLv3** (see 10). Usable only with the files kept LGPL and the user's agreement | yes |
 | JiffyDOS ROM images | **No** (not in the repo; for experiments only) | observing bus behaviour: yes |
 | sd2iec | **No** (GPLv2 vs MIT) | yes, read-only, for understanding |
 | Epyx, AR, FC | **No** | techniques are public |
@@ -116,3 +117,49 @@ Per `docs/testing.md` policy: targeted in the story, milestone for the full set.
 - Michael Steil, `fastboot1541`, <https://github.com/mist64/fastboot1541>; blog post pagetable.com/?p=568.
 - `sd2iec` (GPLv2), read-only reference.
 - Ultimate documentation, <https://github.com/GideonZ/1541u-documentation> (`uci/`).
+
+## 10. Revised order (user preference, 2026-10-31) and what the first step found
+
+Order: (1) clean-room JiffyDOS if open-roms has no adoptable literal code; (2) a scoped research pass over demoscene loaders; (3) `fastboot1541` and a matching fastsave, with the email to Michael Steil only if it ships and is not just a POC; (4) from-scratch work last, since we are unlikely to beat decades of community work.
+
+### 10.1 Step 1 result: open-roms does have literal JiffyDOS code
+
+`MEGA65/open-roms` (cloned for reading to `/home/user/mega65/open-roms`, outside the repo) has `src/kernal/iec_fast/jiffydos_{tx_byte,rx_byte,load,detect,prepare,wait_line,bittable,preserve_bits}.s`, 752 lines in acme assembler syntax with `#LAYOUT#` tags, hooked into `src/kernal/iec/iec_{tx,rx}_byte.s`. It was written from VICE bus logs and Steil's analysis (the file comments cite both), not from a disassembly.
+
+- **Licence:** the package `LICENSE` says **GNU LGPL v3 or later** (Gardner-Stephen 2019, Standzikowski 2019-2021), with `COPYING` holding the GPLv3 text that the LGPL refers to. It is not GPL proper, and it is not MIT.
+- **What that means for us:** a port to ca65 is a derivative work. The ported files would stay LGPLv3 with the notices intact and the credit lines, while the rest of Breadbin stays MIT. The LGPL requires that users can modify and relink the LGPL part; for a source-distributed 6502 image in one public repo that is satisfied, but a mixed MIT/LGPL kernel binary is the kind of thing a lawyer would want to look at. **This is the user's decision**; the alternative is to write our own routines from the description (an afternoon of work for tx/rx; the code is ~110 and ~120 lines).
+- **Technical shape (useful either way):**
+  - tx: `sei`; wait for DATA release; wait for a safe raster line (`jiffydos_wait_line`); release both lines to say "go"; four writes to `$DD00` carry the nibbles (high nibble pair, then low pair, with a lookup table `jiffydos_bittable` for the low nibble's bit shuffle); EOI by a delay before the last step. Sprites are turned off (`jiffydos_prepare`) and restored. About 24 + 21 cycles between writes.
+  - rx: wait for CLK release, "go", then four samples of `$DD00` with the inversion; the window is about 55 us.
+  - detect: the 400 us side channel as above, done at each command; DATA going low during the delay means a JiffyDOS device.
+  - `jiffydos_load.s` (340 lines) is the file-level LOAD, which we do not need since our reads are blocks.
+- **Estimated size in our kernel:** tx + rx + detect + bit table is about 300 to 400 bytes in ca65, less than the LOAD stub. It fits easily; the squash pass can share `$DD00` helpers with `iec.s`.
+- **A caution that came in from the hardware session:** the bench has seen *all devices answer ATN whether connected or not* (a bench behaviour, not our code). Both `bus_listen` presence detection and the JiffyDOS probe (DATA pulled during the long delay) depend on a clean DATA line. Until that is understood, a JiffyDOS probe on the bench could report a device that is not there. Design rule: the probe is only made after the device has already answered the ATN and delivered the first real byte.
+
+### 10.2 Step 2: scope of the demoscene research pass
+
+A pass over demoscene code is large, so this scopes it and does not do it. What the scene offers and what we need do not match perfectly, and that must be decided first:
+
+- **Our need:** block (sector) reads and block writes on a 1541-class drive, usable from a multitasking kernel with a periodic IRQ, uploaded at run time or resident in the drive, stock and JiffyDOS ROMs, with the plain protocol as a fallback.
+- **The scene's habit:** whole-file loading with an IRQ-friendly bit protocol, designed to run in a demo with the screen on, often with a built-in decompressor and a custom disk format (which we must not use: we want normal 1541 DOS disks).
+- **Candidates to look at first** (from a quick search; licences not yet verified from the repositories):
+  - **Spindle** (Linus Akesson, lft): v3, "fully open source"; the stated licence is informal ("go ahead and use this in your demos", credit "Loader by lft"); the formal terms are in a `COPYING` file not yet read. Loader plus a linker; loads whole files from custom-format disks.
+  - **Krill's Loader** (Krill / Plush): supports 1541 and relatives, widely used; described as "no strings attached" on one distribution page, no formal licence found; saving is listed as planned in v146 and not confirmed in later versions (v194, CSDb release 226124).
+  - **Bitfire** (Bitbreaker / Performers; fork at `iszell/bitfire`): fixed-interleave loader with depacker; licence not yet read.
+  - **Sparkle** (Sparta / Maurizio; `spartaomg/SparkleCPP` holds the tooling): licence not yet read; custom disk format.
+  - Not yet looked at: Doynax's loader work, Dreamload, the turbo-disk family; none verified.
+- **Questions for the pass, in priority order:**
+  1. Which of them can read or write *arbitrary* sectors of a normal-format disk? (A custom-format loader would still teach the bit protocol but not give us code.)
+  2. Which has a save? Is it documented?
+  3. Per candidate: licence text read from the repository, the size of the host side, whether it is IRQ-safe, and which drive ROMs it was tested on (JiffyDOS in particular).
+  4. What is the transfer rate with the screen on vs. blanked?
+- **Cost to scope:** read the licences and READMEs of the four candidates first (half a day of agent time); stop there unless one of them answers question 1 with a yes. A full survey is a task for a separate research agent and is not committed to by this document.
+
+### 10.3 Step 3 (later): `fastboot1541` and a fastsave
+
+As in section 3.1. It stays POC-grade until the plan is committed to shipping; at that point the email to the author goes out.
+
+### 10.4 Decisions needed from the user
+
+1. LGPLv3 open-roms code: port with the files kept LGPL, or reimplement clean-room from the description?
+2. Is the demoscene survey approved at the half-day scoping level above?
