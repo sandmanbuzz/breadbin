@@ -289,3 +289,20 @@ Within rank 4 the pieces to take: the bit-serial installer and the 4-step GCR ta
 1. **Licence handling for BSD-3 sources** (Bitfire, Krill's, Spindle MIT, ELoad zlib-style): keep each author's notice in the file header and in `docs/design/fast-io.md`; this satisfies BSD-3 and fits "credit and greetings". The forks without licence files (dotscha, iszell) are treated as BSD-3 derivatives with the evidence recorded.
 2. **Order of rank 3 vs rank 4.** Rank 4 gets roughly twice the speed and the only write, but costs a drive blob, a probe, and a hardware validation of the 2-bit+ATN family on the Ultimate (open). Rank 3 is smaller and safer and fits the hardware we have. Recommendation: build rank 3 first as the proof of the "fast byte" seam in `iec.s` (a per-device protocol hook), then rank 4 behind the same seam once the hardware agent has confirmed the Ultimate behaviour with a POC (WP2).
 3. Whether to ask the hardware session to run a **Krill's Loader v194 and Bitfire POC** on the bench: unmodified, from a normal disk image, on the Ultimate with a JiffyDOS drive ROM and with a stock ROM. That would answer the open compatibility question cheaply (they use standard files, no source change needed).
+
+## 16. POC 1: Krill's Loader v194 under VICE, unmodified (2026-10-31)
+
+What was run: the `loadertest-c64.d64` that ships in Krill's v194 release archive (no rebuild, nothing changed), autostarted in `x64sc` with true-drive emulation and warp on, via the existing `tools/vicetest.py` harness (scratch script, not in the repo). The program loops over `LoadRaw` and `LoadCompd:ZX0` of the disk's test files and prints a rate per load. Run twice: stock drive ROM, and the JiffyDOS 6.01 ROM in the drive (`-dos1541` and `-dos1541II`; the active ROM was confirmed by reading drive memory at `$F7CE`, which holds the JiffyDOS bytes only in the second run).
+
+| Drive ROM | Loop runs without error | LoadRaw | LoadCompd:ZX0 |
+|---|---|---|---|
+| stock 1541 | 95 of 95 (about 7 minutes of VICE time) | 6.0 to 6.4 kB/s | 10.2 and 13.0 kB/s |
+| JiffyDOS 6.01 | 77 of 77 (about 5.5 minutes) | 6.0 to 6.4 kB/s | 10.2 and 13.0 kB/s |
+
+Reading: **Krill's loader works unmodified on a JiffyDOS 6.01 drive ROM in the emulator, at the same rate**, and its documentation lists the 1541U ("1541 Ultimate") among natively supported drives. The measured 6.0 to 6.4 kB/s is below its 7.7 kB/s maximum because the test files are small and the numbers include directory lookup. Caveats: this is the emulator, not a drive; the C64 KERNAL here is the stock one; nothing in this test exercises interrupts during loads (the sample `test.s` does, but this was not checked); no hardware, no Ultimate. Krill's install code treats unknown ROM signatures as a 1541-II, which is the likely reason JiffyDOS needs no special case.
+
+What it settles: rank 4's transfer scheme (2 bits plus ATN, drive code uploaded by `M-W`/`M-E`) is not obstructed by the JiffyDOS drive ROM in VICE. What it does not settle: the real JiffyDOS hardware (the bench), the Ultimate's emulated 1541, and the other open questions below.
+
+### Hardware tasks queued (for when the hardware session has its open questions closed)
+
+Recorded in `docs/wip.md` as WP5. Nothing here is to start before the session says it is confident of the bus quirks (phantom ATN responses and the rest).
