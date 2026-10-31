@@ -200,6 +200,23 @@ class Target(Base):
             (["left_shift", "h"], "tap"), (["i"], "tap"),
             (["left_shift"], "press"), (["left_shift"], "release")])
 
+    def test_boot_resumes_a_machine_left_paused(self):
+        import os
+        import tempfile
+        self.u.pause()
+        self.u.reset()
+        self.assertTrue(self.fake.paused)       # as on hardware: a reset keeps the pause
+        self.fake.ram[0x0289] = 10
+        self.fake.poke(0x0400, b"\x20" * 1000)
+        self.fake.poke(0x0400, bytes([0x12, 0x05, 0x01, 0x04, 0x19, 0x2E]))
+        self.drain()
+        with tempfile.NamedTemporaryFile(suffix=".d64", delete=False) as f:
+            f.write(b"X")
+        self.addCleanup(os.unlink, f.name)
+        self.fake.paused_at_reset.clear()
+        UltimateTarget(f.name, client=self.u, settle=0)
+        self.assertEqual(self.fake.paused_at_reset, [False])    # the pause did not reach the reset
+
     def test_boot_mounts_resets_and_types_the_load_command(self):
         import os
         import tempfile

@@ -47,6 +47,7 @@ class FakeUltimate:
         self.requests = []      # (method, path) of every request
         self.resets = 0
         self.paused = False
+        self.paused_at_reset = []      # was the machine paused when each reset arrived
         self.lock = threading.Lock()   # a stand-in C64 thread takes it to work: pause waits for it
         self.mounts = []        # dicts: drive, type, mode, size, how, name
         self.runs = []          # dicts: how ("upload" or "file"), size, loaded
@@ -128,7 +129,9 @@ class FakeUltimate:
     def _machine(self, h, method, sub, cmd, q, body):
         if cmd in ("reset", "reboot"):
             self.resets += 1
-            self.paused = False
+            self.paused_at_reset.append(self.paused)
+            if cmd == "reboot":
+                self.paused = False     # reset keeps a pause: seen on hardware (2026-10-30)
             return self._json(h)
         if cmd == "pause":
             with self.lock:
