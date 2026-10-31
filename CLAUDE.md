@@ -32,6 +32,7 @@ Targeted tests inside a story, the full regression at milestones. Tests are slow
 - **Zero page stays stock-shaped.** A stock address keeps its stock meaning wherever we still provide the service; poach only what we have retired, and document it. Do not turn zero page into foreign territory.
 - **Kernel space is scarce.** Measure with `make size`; a deliberate space pass (M0-7) comes after all KERNAL replacements.
 - **Contract drift:** internal behavior may improve if the call looks the same and does not violate least surprise. The user-facing contract matters more than the vintage one.
+- **Licence policy:** the repo is MIT and our own code is informal/public domain. Do not bring in GPL/LGPL code (open-roms, sd2iec): a PR upstream must be acceptable. Adoptable: original work, and demoscene code under community norms (stated intent or evident reuse; credit the author in the source and give greetings). Record the source, the author and the evidence in the file header and in `docs/design/fast-io.md`. Proprietary ROMs are never copied; clean-room from public descriptions and bus traces.
 - Never buy the next milestone's problems.
 
 ## Status
