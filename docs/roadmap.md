@@ -67,6 +67,46 @@ Enabling turbo is a one-line story once M0-4 lands, and it should be a runtime s
 
 For when the decision is revisited: the c64fs bitmap is one block and addresses 2048 blocks, so a 1581 (3200 blocks), a 16 MB REU RAM disk or an IEC hard drive does not fit without a scoped v2 (multi-block bitmap, wider inode numbers, geometry from the superblock). A 1571 (1366 blocks) fits as is. Block commands (`U1`, `U2`, `B-P`) are known to work on the 1541; other drives need checking on real hardware. The file-level paths (CBM DOS backend, UCI DOS) do not have this problem.
 
+## Memory budget
+
+Measured 2026-10-31, after M0-1 to M0-4. The takeover cost the kernel 1.9 KB (18.3 KB to 20.2 KB: keyboard 747, bus and channels about 590 more than the ROM calls they replaced, screen about 290, the rest vectors) and freed 8186 bytes of ROM space, which is the net 6 KB predicted when M0 was planned.
+
+| What | Bytes |
+|---|---|
+| Kernel image now: code 13,444, read-only data 745, BSS 6,002 | 20,191 |
+| Where it lives: `$8000–$CEFF` | 20,224 (33 spare) |
+| Free and unused: `$E000–$FFF9` (the dead ROM shadow) | 8,186 |
+| Free and unused: `$CF5D–$CFFF` (past the syscall table) | 163 |
+| User process pool: `$0800–$7FFF` | 30,720 (120 pages) |
+
+Where the kernel's bytes go: `proc` 4321 (3315 BSS, of which 2304 are the per-process save areas), `file` 2986, `fs` 2847, `blk` 2682 (1536 BSS is the block cache), `cbm` 1956, `exec` 1373, `con` 1363, `iec` 780, `kbd` 747.
+
+**Levers, biggest first** (all are independent):
+
+1. **M0-5, use `$E000–$FFF9`: +8186 bytes, almost free.** Either as room for kernel growth (the UCI driver, the filesystem interface) or, by moving the pool's upper edge from `$8000` to `$A000`, as 8 KB more for user programs (30 to 38 KB). All the kernel fits below `$A000` and `$E000` together with about 190 bytes to spare, so the second choice leaves no growth room until the space pass has run. The boundary is one constant, so decide it last: build for growth first, and move the boundary when the kernel's real size is known.
+2. **Make the block cache and the save areas dynamic: about 2.6 KB.** The 1.5 KB block cache and the 2.3 KB of per-process save areas are fixed BSS whether or not they are needed. Cache buffers can come from the free end of the page pool (idle memory becomes cache, and processes take it back), and a process's save area can be sized to the zero page and stack it actually uses.
+3. **Overlays for rarely used kernel code: about 2 KB now, more later.** The CBM DOS layer (`cbm`, 1.9 KB) is used only when a CBM disk is mounted. A loadable-module facility is wanted anyway for program overlays and text paging.
+4. **The space pass (M0-7): about 1 KB.** Syscall stubs 248, shifted and control key tables about 150, factoring in `file` and `fs`, working-directory strings (12 x 48 = 576 bytes, could be an inode and rebuilt on demand).
+5. **Small and free: `$CF5D–$CFFF` (163 bytes)**, one more linker region.
+6. **For user programs, not the kernel:** each program carries about 1.2 KB of library (the smallest, `clear`, is 1229 bytes). A shared resident library would save that per running program. Program overlays and REU staging help the big ones (`as` 6.4 KB, `basic` 5.6 KB).
+7. **Not worth it yet:** page `$03` (about 256 bytes of dead tape buffer and vectors) and the 4 KB under the I/O area (reachable only with I/O switched out).
+
+## Disk speed
+
+Measured on the real C64 Ultimate by the hardware session: with our own bus code (standard protocol only) boot takes about 75.5 s against 46.5 s for the stage-1 build, and `clear` 6.7 s against 3.3 s. Stage 1 was riding on the ROM's JiffyDOS fast protocol. At the bus, a standard talker sends a byte in about 1.8 ms (the drive sets that pace, so our receive side cannot go faster), a block read is about 0.55 s, and booting reads about 70 blocks.
+
+Options, with what each costs and which machines it helps:
+
+| Option | Helps | Cost and risk |
+|---|---|---|
+| **REU-backed block cache**, validated by a build id in the superblock | Anything with an REU (the Ultimate has 2 MB): repeat boots and every repeated command load become near-instant, whatever the drive | Moderate, no bus work, no ROM or protocol dependency. Write-through keeps it consistent; the build id guards against a rebuilt image. First boot after a rebuild is still slow. |
+| **Ultimate file backend (UCI DOS)** (S10, S11) | The Recommended tier, and removes the bus altogether | Larger; needs kernel room (M0-5) and the filesystem interface (S6). The real answer for the Ultimate. |
+| **Fast loader code uploaded to the drive** (M0-8, `fastboot1541`) | Any 1541-class drive, stock or JiffyDOS: faster boot, optionally faster reads | Moderate; the drive routines it calls must be checked against the JiffyDOS ROM; not for the 1581 or Software IEC. |
+| **JiffyDOS host protocol** | Machines and drives that have JiffyDOS, which includes the hardware bench | Proprietary and reverse-engineered; the only reference is the ROM images (kept outside the repo) or third-party drive code, which raises the licensing question we have deferred. Does nothing for stock drives. Under VICE the JiffyDOS ROMs are a working reference to observe at the bus level. |
+| Skip the status read after each block read | Every drive: about 10 to 15 percent | Small, but it removes error detection per block. |
+
+Recommendation: do the REU cache first (it fixes the test-run time on the hardware we have, with no protocol work), then the UCI file backend as the principal fast path, and treat JiffyDOS and drive-side loaders as optional extras for later. Deferring JiffyDOS is reasonable because the platform we are building toward does not need it.
+
 ## Memory strategy
 
 **Where we are.** BASIC is already out: the boot stub sets `$01=$36` (`src/kernel/main.s`), and the kernel image runs from `$8000` and is about 18.3 KB, so it already occupies `$A000–$BFFF`, the old BASIC ROM space. Process pages come from `$0800–$7FFF` (120 pages, 30 KB). The only ROM left in the CPU's map is the KERNAL at `$E000–$FFFF` (8 KB) plus the I/O area at `$D000–$DFFF`.
@@ -161,7 +201,7 @@ New device code (UCI, the filesystem interface) all lands in the kernel, so the 
   - **Wait without a limit** for a device that has answered attention but is busy: it takes the clock only after finishing its command (about 100 ms for a block read).
   - **A generous EOI window (about 1 ms)** when receiving: a talker doing real EOI waits for us indefinitely, so being slow to decide costs nothing.
   Two more lessons from earlier: the drive abandons a talk if its channel is not ready, and an interrupt between the listener's "ready" and our first clock edge makes the drive take the byte for the last one.
-- **M0-5. Drop the shadow and relayout.** The linker config puts kernel code in `$E000–$FFFF` and the pool grows. Zero page stays stock-shaped (see "Zero page policy"). Measure the gain and update the limits table above. *Depends on M0-2, M0-3, M0-4.*
+- **M0-5. Drop the shadow and relayout.** *Unblocked (measured 2026-10-31).* With the whole `$E000–$FFF9` shadow overwritten by `BRK`, boot, disk reads and writes, the editor, login and Ctrl-C all pass, so nothing in the kernel touches the ROM any more and all 8186 bytes are ours. The work is a linker configuration (kernel code, data and BSS spread over `$E000–$FFF9` and the old region) plus the boot stub's copy loops; the user pool's upper edge is one constant (`KSTART`, and `mem.s` follows it), so where to put the boundary can be decided last. See "Memory budget". Zero page stays stock-shaped. *Depends on M0-2, M0-3, M0-4: all done.*
 - **M0-6. Stream primitive:** move a run of pages between memory and an open channel in one call. Used first by `exec`, then by overlays. *Depends on M0-4.*
 - **M0-7. Space pass.** Once all the replacements exist, a second, deliberately brutal pass over the kernel's size, driven by `make size`. Every byte freed is a byte for user programs or for new kernel and driver work. Rules: measure first, record the before and after of each saving in the commit message, and run the full suite at the end. Candidates already visible in the baseline (2026-10-30, after M0-2):
 
