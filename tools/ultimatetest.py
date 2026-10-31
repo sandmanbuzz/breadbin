@@ -156,6 +156,7 @@ class UltimateTarget(Target):
             data = f.read()
         self.u.mount("a", data, type="d64", mode="readwrite" if persist else "unlinked",
                      name=os.path.basename(image))
+        self.u.resume()          # a reset leaves a paused machine paused (seen on hardware)
         self.u.reset()
         time.sleep(self.settle)  # let the old screen go before waiting for the new one
         self.wait_for("ready.", timeout=60)
