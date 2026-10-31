@@ -260,3 +260,32 @@ Byte counts not measured (nothing assembled); the rest is from the repositories.
 - **Known problems:** wobble and 300 rpm sensitivity, the 72-cycle loop failing with some cables, 1541-II stepping, SX-64 bus lock. **JiffyDOS: not mentioned anywhere**; the stock-ROM table reads and the job-queue bootstrap are the risks on the bench's JiffyDOS drives.
 
 Consequences for the plan: the block-read side should be a Krill/Bitfire-style drive loader written for **normal-format sector reads** (our own drive code, borrowing the bit-serial installer, the 4-step GCR table loop and the 2-bit+ATN host loop), and the write side is the dotscha/ELoad raw-GCR write plus read-back verify. The drive code does not need the ROM except for the reset vector and (on first upload) the `M-E` entry; that matters for JiffyDOS drives, whose ROM differs.
+
+## 15. Measured speeds and the shortlist (modern-speeds agent, 2026-10-31)
+
+Independent measurements (Obliterator918's DTB table, updated 2026, https://www.obliterator918.com/comparison-of-commodore-64-speed-loaders/), B/s for a 177-block file: stock 403; Epyx 2,121; Warp Speed 3,017; **JiffyDOS (1541-II) 3,746**; Super Snapshot 4,163; Action Replay 5,352; **Transwarp 0.84 16,056**; Ultimate II+ Hyperspeed 64,223 (not applicable). The benchmark cannot test loaders that unload themselves, so Krill's, Bitfire, Sparkle and Spindle are absent from it. Author and archive figures: Krill's v194 7.7 KB/s max, 7 typical (method not stated; inferred ceiling 6.7 to 9.0); Bitfire 1.1 raw load 5.29 KiB/s (98,719 bytes in 17.94 M cycles, PAL); Sparkle and Spindle publish no throughput.
+
+Physical ceiling at 300 rpm with 223 payload bytes per sector (Transwarp docs): **23.4 KB/s on tracks 1 to 17 falling to 19.0 KB/s on 31 to 35**. Transwarp's "just under 20 KB/s" is that outer-track ceiling; end-to-end it measured 16 KB/s.
+
+Corrections to earlier sections:
+- **Transwarp is GPLv3** (`transwarp.s`): excluded by policy, and it also needs pre-encoded files, a blanked screen, sprites and IRQs off, cannot save, and hangs with a second drive on the bus.
+- **Krill's v194 is permissive** (copyright 2022 Gunnar Ruthenberg, attribution requested), supports DMA, sprites and badlines, standard DOS format, and tolerates other drives on the bus.
+- Spindle 3.1 and Sparkle 2.2/3.4 specs: Sparkle resident `$2A0`, three zero-page bytes, 124-cycle drive GCR loop, 269 to 314 rpm tolerance; Spindle 18 cycles per bit pair; neither measured.
+
+### Shortlist (what survives the cuts)
+
+| Rank | Method | Why it survives | Differentiator it keeps |
+|---|---|---|---|
+| 1 | REU block cache | Zero protocol risk; repeat reads at DMA speed | Beats every loader on repeats; fixes the bench |
+| 2 | UCI file backend | Removes the bus | Recommended-tier answer |
+| 3 | JiffyDOS-class per-byte protocol, clean-room | ~4 KB/s (3.7 KB/s measured on a 1541-II), any disk, any device, no upload, ~300 bytes | Works on the bench drives unchanged; smallest |
+| 4 | Krill/Bitfire-style drive loader for normal sectors, with a raw-GCR write plus verify | 7 to 8 KB/s class, permissive licences, IRQs allowed (Krill), normal disks | Roughly twice JiffyDOS on stock drives; the only route to a fast write |
+| cut | Transwarp (GPL, custom disks), Sparkle (no licence for v2, custom format, multi-drive refused), Spindle (custom layout, no sector API, no save), DolphinDOS (cable), all cartridge loaders, MafioDOS, Epyx/Warp/AR/FC | no differentiator for the platform tiers or a licence we cannot use | |
+
+Within rank 4 the pieces to take: the bit-serial installer and the 4-step GCR table loop (Bitfire, BSD-3), the 72-cycle 2-bit+ATN host loop (Krill/Bitfire; documented in Krill's `docs/Protocol.txt`), and the raw write with read-back verify (dotscha fork over ELoad's zlib-style code). What we write: the sector-granular entry point and the glue to `blk.s`. Estimated cost in the kernel: host receive and send loops about 150 bytes, glue 60, drive blob about 600 bytes in RODATA (Bitfire's drive image runs `$0200` to `$0500`).
+
+### Decisions needed
+
+1. **Licence handling for BSD-3 sources** (Bitfire, Krill's, Spindle MIT, ELoad zlib-style): keep each author's notice in the file header and in `docs/design/fast-io.md`; this satisfies BSD-3 and fits "credit and greetings". The forks without licence files (dotscha, iszell) are treated as BSD-3 derivatives with the evidence recorded.
+2. **Order of rank 3 vs rank 4.** Rank 4 gets roughly twice the speed and the only write, but costs a drive blob, a probe, and a hardware validation of the 2-bit+ATN family on the Ultimate (open). Rank 3 is smaller and safer and fits the hardware we have. Recommendation: build rank 3 first as the proof of the "fast byte" seam in `iec.s` (a per-device protocol hook), then rank 4 behind the same seam once the hardware agent has confirmed the Ultimate behaviour with a POC (WP2).
+3. Whether to ask the hardware session to run a **Krill's Loader v194 and Bitfire POC** on the bench: unmodified, from a normal disk image, on the Ultimate with a JiffyDOS drive ROM and with a stock ROM. That would answer the open compatibility question cheaply (they use standard files, no source change needed).
