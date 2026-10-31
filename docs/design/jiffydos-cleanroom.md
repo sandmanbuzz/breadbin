@@ -16,7 +16,7 @@ Sketch: in the ATN byte loop, at bit 7 (the last) of a command byte whose high b
 
 Cost: +400 us per TALK/LISTEN. Our protocol already pays about 1.8 ms per byte, so the overhead is noise. The side effect is harmless to non-JiffyDOS devices by the spec (the standard protocol only fixes a minimum delay).
 
-**Bench caveat** (from the hardware session): the Ultimate rig has been seen to answer ATN for *every* device number, connected or not. If DATA is pulled by a phantom, the probe reports "JiffyDOS" falsely. Rule: the session flag is set only if the *device also acknowledged the command byte normally* (the existing present check), and the first real transfer must succeed; any error in a jiffy transfer clears the flag and retries once on the standard protocol.
+**Bench caveat** (corrected 2026-10-31): the hardware session first reported that every device number answers ATN, then retracted it (the test sent nothing on the bus). The open item is a stall on the physical 1541, not yet localised. A false JiffyDOS positive is still possible with a noisy DATA line, so the rule stands: the session flag is set only if the *device also acknowledged the command byte normally* (the existing present check), and the first real transfer must succeed; any error in a jiffy transfer clears the flag and retries once on the standard protocol.
 
 ## 3. Byte send (LISTEN session, controller to device)
 
@@ -79,4 +79,4 @@ Not needed. `blk.s` reads blocks, the LOAD protocol skips the load address and h
 1. Safe window on a PAL/NTSC C64 with the screen on: wait for a raster line, or blank for the transfer? The device waits indefinitely at S2, so waiting for a safe line costs time but not correctness; the decision is empirical.
 2. Do we keep the jiffy clock (`$A0..$A2`) and keyboard scan accurate across a window? Interrupts are off for ~60 us per byte, which is invisible, but the per-byte setup (about 150 us) adds up over a block; at 256 bytes that is 40 ms with interrupts off between windows if we do not re-enable them. Re-enable between bytes (`cli`/`sei` pair) or accept a 50 ms stall per block (the same trade the original JiffyDOS makes).
 3. EOI / error encodings: settle with the trace.
-4. The phantom-ATN behaviour on the bench (section 2).
+4. The physical-1541 stall (hardware session, in progress); the probe must not make it worse.
