@@ -25,6 +25,7 @@ stubs:
 .endrep
 
 dispatch:
+        cld                     ; the kernel's adc/sbc are binary whatever the caller left in D
         sta k_n
         lda #1
         sta in_kernel
