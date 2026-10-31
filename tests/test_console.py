@@ -36,38 +36,43 @@ class Console(unittest.TestCase):
     def tearDownClass(cls):
         cls.v.close()
 
+    def wait_lines(self, done, timeout=30):
+        """The non-empty screen lines once done(lines) holds: a command that loads a
+        program from disk takes seconds on a real drive, so do not sleep and hope."""
+        end = time.time() + timeout
+        while True:
+            lines = [l for l in self.v.screen_lines() if l]
+            if done(lines) or time.time() > end:
+                return lines
+            time.sleep(0.2)
+
     def byte(self, addr):
         return self.v.mem(addr, addr)[0]
 
     def test_clear_homes_the_cursor(self):
         self.v.type("clear\n")
-        self.v.wait_for("/ $")
-        time.sleep(1)
-        lines = self.v.screen_lines()
-        self.assertEqual(lines[0], "/ $")
-        self.assertEqual([l for l in lines[1:] if l], [])
+        lines = self.wait_lines(lambda l: l == ["/ $"])
+        self.assertEqual(lines, ["/ $"])
         self.assertEqual((self.byte(ROW), self.byte(COL)), (0, 4))
 
     def test_long_line_wraps_at_column_40(self):
         # the command line wraps too, so read the screen rather than use run()
         self.v.type("clear\n")
-        self.v.wait_for("/ $")
+        self.wait_lines(lambda l: l == ["/ $"])
         self.v.type("echo " + "x" * 50 + "\n")
-        time.sleep(2)
-        lines = [l for l in self.v.screen_lines() if l]
+        lines = self.wait_lines(lambda l: "x" * 40 in l and l[-1] == "/ $")
         i = lines.index("x" * 40)                 # the echoed output, not the command line
         self.assertEqual(lines[i + 1], "x" * 10)
         self.assertEqual(lines[-1], "/ $")
 
     def test_backspace_erases(self):
         self.v.type("clear\n")
-        self.v.wait_for("/ $")
+        self.wait_lines(lambda l: l == ["/ $"])
         self.v.type("echo abcd")
         self.v.keybuf(b"\x14\x14")        # DEL DEL
         time.sleep(1)
         self.v.type("\n")
-        time.sleep(1.5)
-        lines = [l for l in self.v.screen_lines() if l]
+        lines = self.wait_lines(lambda l: "ab" in l and l[-1] == "/ $")
         self.assertEqual(lines[0], "/ $ echo ab")
         self.assertEqual(lines[1], "ab")
 
