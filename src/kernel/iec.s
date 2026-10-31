@@ -36,6 +36,11 @@ D_TV   = 10         ; bit valid (>= 20 us, 60 for a talker)
 D_TBB  = 20         ; between bytes (>= 100 us)
 D_TR   = 4          ; frame to release of ATN (>= 20 us)
 D_EOIH = 14         ; hold DATA to acknowledge EOI (>= 60 us)
+; A real 1541 can fall silent in the middle of a byte for milliseconds while its
+; disk-job interrupt runs (seen on hardware at the first sector reads, CLK low
+; for more than 3 ms), and the KERNAL waits for it without a limit. 255 loops
+; of about 3 ms each: long enough for any drive, short enough to report a dead one.
+W_BIT  = 255
 
 .export iec_ch_open, iec_ch_close, iec_out_begin, iec_out_byte, iec_out_end
 .export iec_in_begin, iec_in_byte, iec_in_end
@@ -379,10 +384,13 @@ bus_acptr:
         beq @tmo
 @st:    lda #8
         sta io_n
-@bit:   ldy #0
+@bit:   ldx #W_BIT
+        ldy #0
 @c:     bit PORT            ; wait for CLK released: the bit is valid
         bvs @v
         dey
+        bne @c
+        dex
         bne @c
         beq @tmo
 @v:     bpl @zero           ; DATA low is a 0
@@ -390,10 +398,13 @@ bus_acptr:
         bcs @in
 @zero:  clc
 @in:    ror io_b
+        ldx #W_BIT
         ldy #0
 @d:     bit PORT            ; wait for CLK low again
         bvc @nx
         dey
+        bne @d
+        dex
         bne @d
         beq @tmo
 @nx:    dec io_n
