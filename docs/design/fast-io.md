@@ -222,3 +222,27 @@ Network note: after the allowlist change, WebFetch still could not resolve some 
 4. All of it probed at run time, with the plain protocol as the fallback.
 
 Open: the Bitfire source report (drive-side detail), the loader comparison and the modern-speeds report are still coming; the Ultimate behaviour of the 2-bit+ATN family is untested (an Ultimate II+ firmware 3.10 issue was reported against some loaders).
+
+## 13. Speed comparison from published tables (comparison agent, 2026-10-31)
+
+Baseline is the 64'er test table as reproduced on c64-wiki (LOAD, 202 blocks): standard serial 407 B/s (124 s). Multipliers are the table's; B/s are derived unless noted. Cartridge and ROM products are proprietary and listed only to calibrate.
+
+| Method | B/s (LOAD) | Needs | Save speed-up |
+|---|---|---|---|
+| Standard serial | 407 | nothing | 1.0x |
+| Epyx FastLoad | ~2,500 (vendor claim) | cartridge | none |
+| Warp Speed 2.0 | ~3,350 | cartridge | 7.2x |
+| Final Cartridge III | ~3,800 | cartridge | 5.4x |
+| JiffyDOS | ~4,280 (124 s to 12 s) | ROMs both sides | 75 s to 24 s |
+| Krill's Loader | 4,000 raw, ~8,500 with decrunch (author page, v146); 7.7 KB/s max in the v194 README | nothing | in-place file overwrite only |
+| Action Replay 7.5 | ~5,700 to 6,200 | cartridge | 7.0x |
+| Dolphin DOS 2 | ~10,500 | parallel cable | 14.9x |
+| Transwarp | ~19,000 (c64-wiki; 50x in the 64'er table) | custom-interleave disks | cannot be saved by standard copiers |
+
+Ceilings (from a pagetable.com commenter and `?p=1107`; derived, not measured by us):
+- two-bit software protocol: host at about 80 cycles per byte (~12.5 KB/s), drive at about 130 cycles per byte (~7.8 KB/s); the 72-cycle host loops of Krill's and Sparkle sit at this edge;
+- the media itself: 26 to 32 us per raw byte, so roughly 25 to 31 KB/s of payload after GCR decoding. The limit for IRQ-friendly loaders is the protocol and the decode, not the platter. Only the custom-format designs (Transwarp) approach the media.
+
+Derived 10 KB and 40 KB load times: standard 25 s / 101 s; JiffyDOS 2.4 / 9.6 s; Krill 2.6 / 10.2 s (4 KB/s) or about 1.3 / 5.2 s (7.7 KB/s); Dolphin 1.0 / 3.9 s; Transwarp 0.5 / 2.2 s.
+
+What this settles. For stock drives on normal disks, **JiffyDOS-class and Krill-class land within a factor of 2 of each other** (4.3 vs 4 to 7.7 KB/s), and everything faster needs a custom disk format (Transwarp), a parallel cable (Dolphin) or a cartridge. That supports the plan in section 12: the speed class we can reach with normal disks is about 4 to 8 KB/s, 10 to 19 times the baseline; beyond that the cost is a format change, which is a different decision (see the roadmap's note on the REU cache, which beats all of these on repeat reads).
