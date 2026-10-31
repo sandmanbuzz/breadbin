@@ -183,7 +183,10 @@ bread:
         cmp #1
         beq @reu
         jsr cur_dev_set
+        php                 ; EXPERIMENT: no interrupt between the first attention byte and the end
+        sei                 ; of the block read (bus_acptr no longer re-enables them either)
         jsr iec_read
+        plp
         jmp @chk
 @reu:   jsr reu_read
 @chk:   ldx b_idx
