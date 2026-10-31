@@ -343,6 +343,15 @@ class Cache(unittest.TestCase):
         self.assertGreater(misses, 20)
         self.assertLess(hits, misses)
 
+    def test_new_label_discards(self):
+        self.boot()
+        with open(self.img, "r+b") as f:    # same build id, another disk label
+            f.seek(357 * 256 + 0x90)
+            f.write(b"OTHERDISK")
+        _, hits, misses, _ = self.boot()[1]
+        self.assertGreater(misses, 20)
+        self.assertLess(hits, misses)
+
     def test_write_through(self):
         self.boot("echo one > /home/f")
         outs, _ = self.boot("cat /home/f", "echo two > /home/f")
