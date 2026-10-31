@@ -77,15 +77,6 @@ sb7 = $1B
 k_entry = $1E
 
 ; KERNAL
-CHROUT = $FFD2
-CHKIN  = $FFC6
-CHKOUT = $FFC9
-CHRIN  = $FFCF
-CLRCHN = $FFCC
-SETLFS = $FFBA
-SETNAM = $FFBD
-OPEN   = $FFC0
-CLOSE  = $FFC3
 ST     = $90
 
 ; ---- shared symbols ----
@@ -97,6 +88,9 @@ ST     = $90
 .global kmain, panic, pool_first, pool_last, irq_exit
 ; kbd.s
 .global kbd_init, kbd_scan, key_get
+; iec.s
+.global iec_ch_open, iec_ch_close, iec_out_begin, iec_out_byte, iec_out_end
+.global iec_in_begin, iec_in_byte, iec_in_end
 ; con.s
 .global con_init, con_putc, con_puts_ax, con_write, con_read, con_hex, con_dec
 .global con_cursor_tick, con_eof

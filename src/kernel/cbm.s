@@ -552,19 +552,15 @@ cbm_open_write:
         lda #>s_w1
         sta p1+1
         jsr cmd_str
-        lda cmdlen
-        ldx #<cmdbuf
-        ldy #>cmdbuf
-        jsr SETNAM
+        lda #<cmdbuf
+        sta p4
+        lda #>cmdbuf
+        sta p4+1
+        ldy cmdlen
         ldx mo_dev
         lda dev_drive,x
-        tax
-        lda mo_dev
-        clc
-        adc #20             ; logical file 20+dev, secondary address 3
-        ldy #3
-        jsr SETLFS
-        jsr OPEN
+        ldx #3              ; secondary address 3; the caller's handle is 20+dev
+        jsr iec_ch_open
         bcs @err
         lda mo_dev
         .import iec_status
@@ -578,12 +574,11 @@ cbm_open_write:
         adc #20
         clc
         rts
-@err2:  lda mo_dev
-        clc
-        adc #20
-        jsr CLOSE
-@err:   jsr CLRCHN
-        lda mo_dev
+@err2:  ldx mo_dev
+        lda dev_drive,x
+        ldx #3
+        jsr iec_ch_close
+@err:   lda mo_dev
         jsr binval
         lda #EIO
         sec
@@ -593,8 +588,12 @@ cbm_open_write:
 cbm_write:
         ldx sb6
         lda f_pipe,x
+        sec
+        sbc #20             ; handle = 20 + device
         tax
-        jsr CHKOUT
+        lda dev_drive,x
+        ldx #3
+        jsr iec_out_begin
         bcs @e
         lda r0
         sta p1
@@ -609,7 +608,7 @@ cbm_write:
         beq @d
         ldy #0
         lda (p1),y
-        jsr CHROUT
+        jsr iec_out_byte
         inc p1
         bne @c
         inc p1+1
@@ -618,22 +617,23 @@ cbm_write:
         dec cb_n+1
 @dl:    dec cb_n
         jmp @l
-@d:     jsr CLRCHN
+@d:     jsr iec_out_end
         clc
         rts
-@e:     jsr CLRCHN
-        lda #EIO
+@e:     lda #EIO
         sec
         rts
 
 ; cbm_wclose: A = lfn (20+dev). Finish the DOS file.
 cbm_wclose:
-        pha
-        jsr CLOSE
-        jsr CLRCHN
-        pla
         sec
         sbc #20
+        pha                 ; the device
+        tax
+        lda dev_drive,x
+        ldx #3
+        jsr iec_ch_close
+        pla
         tax
         lda #0
         sta w_busy,x
@@ -683,9 +683,12 @@ sys_mount:
         bcs @inval
         sta mo_dev
         tax
+        lda dev_drive,x
+        cmp dev_drive       ; the boot drive holds the running system
+        beq @onboot
         lda dev_present,x
         beq @np
-        lda #EBUSY
+@onboot: lda #EBUSY
         sec
         rts
 @inval: lda #EINVAL
@@ -822,9 +825,12 @@ sys_diskio:
         bcs @inval
         sta mo_dev
         tax
+        lda dev_drive,x
+        cmp dev_drive       ; the boot drive holds the running system
+        beq @onboot
         lda dev_present,x
         beq @free
-        lda #EBUSY
+@onboot: lda #EBUSY
         sec
         rts
 @inval: lda #EINVAL
@@ -962,6 +968,8 @@ sys_umount:
 
 ; mntinfo(A = entry, r0 = buf[34]): drive (0 = REU), type, path[32]
 sys_mntinfo:
+        cmp #$ff            ; the root: drive, c64fs, "/"
+        beq @root
         cmp #NMNT
         bcs @no
         tax
@@ -995,6 +1003,20 @@ sys_mntinfo:
         rts
 @no:    lda #EINVAL
         sec
+        rts
+@root:  ldy #0
+        lda dev_drive
+        sta (r0),y
+        iny
+        lda #FS_C64
+        sta (r0),y
+        iny
+        lda #'/'
+        sta (r0),y
+        iny
+        lda #0
+        sta (r0),y
+        clc
         rts
 
 .segment "RODATA"
