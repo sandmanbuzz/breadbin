@@ -29,6 +29,25 @@ BREADBIN_VICE_ARGS="-kernal /path/JiffyDOS_6.01-Kernal.bin \
 
 This is how the bus driver was checked against the drives the Ultimate has. Stock ROMs hide timing assumptions; run bus changes under both.
 
+## VICE on macOS (the bundled app, from a sandboxed session)
+
+The VICE 3.10 app bundle ships the C64 and drive ROMs, so `tools/setup-vice-roms.sh` is not needed. Two things get in the way when VICE is started from a sandboxed shell, and neither needs a code change:
+
+- Use the real binary inside the bundle, `VICE.app/Contents/Resources/bin/x64sc`; the `bin/x64sc` launcher script loses `argv[0]` and exits.
+- VICE cannot write to the home directory there and cannot find its own install: give it a scratch `HOME` with `config/vice`, `state/vice` and `data` already created, and `-directory` pointing at the bundle's `share/vice`.
+
+```sh
+R=/Applications/vice-arm64-gtk3-3.10/VICE.app/Contents/Resources
+S=/path/to/scratch
+mkdir -p $S/vicehome/config/vice $S/vicehome/state/vice $S/vicehome/data
+export HOME=$S/vicehome XDG_STATE_HOME=$S/vicehome/state XDG_CONFIG_HOME=$S/vicehome/config \
+       XDG_DATA_HOME=$S/vicehome/data TMPDIR=$S
+export X64SC=$R/bin/x64sc BREADBIN_VICE_ARGS="-directory $R/share/vice -logfile $S/vice.log"
+python3 -m unittest tests.test_system.Boot.test_02_echo
+```
+
+This runs the monitor-driven tests (`Boot`, `test_console`) with no X server. `test_keyboard` needs `xdotool` and an X display, which macOS does not have. A VICE window appears on the desktop while a test runs. On 2026-10-31 this ran `test_07`, `test_10`, `test_13`, `test_14`, `test_24` and `test_console` (11 tests, about 7.5 minutes) green on the stage-2 kernel.
+
 ## Which tests for which change
 
 By test name; refine this as we learn what actually catches what.
