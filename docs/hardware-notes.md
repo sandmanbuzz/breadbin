@@ -184,3 +184,14 @@ Tools: `experiments/iec-stall/` (README there). Commits referred to: kernel expe
 - The "phantom ATN responders" mentioned in `docs/wip.md` do not exist: that was `OPEN n,dev,15` with no filename, which puts nothing on the bus.
 - Polling the screen during a disk transfer can itself corrupt the transfer (see the 2026-10-31 DMA entry); every stall above was reproduced with no DMA read for the first 20 s.
 
+### 2026-10-31, later: the stall is not in our receive loop (hardware session). Supersedes the "state of play" entry above where they differ
+
+Everything below: only the physical 1541 on the bus, kernel loaded by DMA with the root on device 8, 1581 removed, `experiments/iec-stall/` tools (the histogram and interrupts-off kernels are on the throwaway branches `iec-pulse-hist` and `iec-nocli`).
+
+- **Stage 1 stalls too.** With the stock KERNAL as the host (standard protocol), stage 1 (the ROM's own `ACPTR` running inside Breadbin) ended in the same frozen state as stage 2 (`$DD00 = $87`; `$90 = 0` because the ROM's receive has no timeout): 1 stall and 1 pass in two tries, the same intermittent behaviour as stage 2. **The fault is not in `bus_acptr`.** Every change to our receive loop (0.8 s bit waits, a shorter blind window, interrupts off while waiting) was therefore aimed at the wrong place, and none of them helped.
+- **The drive's pulses are fine.** A histogram of how long CLK stays high per bit (about 25 to 85 us, buckets 1 to 6 of 12 cycles) came out identical in the passing run and in five stalling runs, and matches VICE's stock 1541. Not "pulses too short".
+- **Where the stall falls inside a byte:** in nine valid dumps the receive bit counter was 2, 3, 5, 4, 5, 4, 6 and so on remaining; never 0, 1, 7 or 8. We were always somewhere in the middle of a byte when the drive went quiet.
+- **BASIC does not reproduce it.** On the stock KERNAL, 393 consecutive `U1` block reads of 256 bytes on a `#` channel (all on track 18, no head movement, command channel opened without a command) ran with no stall and no drive error; the same drive loads a 14 KB file five times byte-identical. So the drive, the cable, the media and the standard protocol are fine for that access pattern.
+- **What differs about Breadbin, to check next:** the access pattern (the mount reads blocks spread over many tracks, so the head seeks; it opens the command channel with `I0`); the C64's state (VIC, CIA1 timer, `$01 = $35`, interrupts enabled between bytes, the REU probed just before the mount); and the cadence of attention sequences. A scan with random tracks and `I0` first is running to test the first two.
+- **Corrections:** the "most likely cause" in the earlier state-of-play entry (a receive loop missing short CLK pulses) is not supported; neither are the VIC-badline and short-pulse stories. The blank-screen test was contaminated by its own DMA and proves nothing.
+
