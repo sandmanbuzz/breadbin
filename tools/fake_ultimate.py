@@ -39,10 +39,11 @@ def parse_multipart(ctype, body):
 
 
 class FakeUltimate:
-    def __init__(self, password=None, product="Fake Ultimate 64"):
+    def __init__(self, password=None, product="Fake Ultimate 64", key_injection=True):
         self.ram = bytearray(65536)
         self.password = password
         self.product = product
+        self.key_injection = key_injection   # False: answers 404 like the C64 Ultimate
         self.events = []        # every input event received, in order
         self.requests = []      # (method, path) of every request
         self.resets = 0
@@ -163,6 +164,8 @@ class FakeUltimate:
         if cmd == "menu_screen":
             return self._reply(h, 200, bytes(self.menu), "application/octet-stream")
         if cmd == "input":
+            if not self.key_injection:
+                return self._json(h, 404, ["no such command"])
             if len(body) > 4096:
                 return self._json(h, 400, ["JSON body is too large."])
             try:

@@ -23,9 +23,10 @@ tools/ultimate.py); the boot time. See docs/hardware-notes.md.
 import os
 import sys
 import time
+import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ultimate import Ultimate  # noqa: E402
+from ultimate import KeyInjectionUnavailable, Ultimate  # noqa: E402
 from vicetest import Target  # noqa: E402
 
 KEYD, KEYCNT, KEYMAX = 0x0277, 0x00C6, 0x0289
@@ -75,6 +76,8 @@ def petscii(ch):
 
 
 class UltimateTarget(Target):
+    sees_cpu_port = False
+
     def __init__(self, image=None, host=None, password=None, persist=False,
                  boot_timeout=180, settle=2, client=None):
         """Mount `image` in drive A and boot it. persist=False mounts it so that
@@ -129,7 +132,11 @@ class UltimateTarget(Target):
 
     # ---- real keystrokes
     def focus(self):
-        pass
+        """Nothing to focus; but real keystrokes must exist on this product."""
+        try:
+            self.u.release_all()
+        except KeyInjectionUnavailable as e:
+            raise unittest.SkipTest(str(e))
 
     def _keys(self, name):
         return XNAMES[name] if name in XNAMES else keys_for(name)

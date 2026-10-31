@@ -32,6 +32,11 @@ class UltimateError(Exception):
     pass
 
 
+class KeyInjectionUnavailable(UltimateError):
+    """This product has no keyboard input over REST (the C64 Ultimate, firmware
+    1.1.0, answers 404; the documentation lists it as Ultimate 64 only)."""
+
+
 def multipart(parts):
     """parts: [(field, filename, bytes)] -> (content_type, body)."""
     boundary = "----breadbin" + uuid.uuid4().hex
@@ -179,7 +184,13 @@ class Ultimate:
 
     def _send_events(self, batch):
         body = json.dumps({"events": batch}, separators=(",", ":")).encode()
-        return self.call("POST", "/v1/machine:input", None, body, "application/json")
+        try:
+            return self.call("POST", "/v1/machine:input", None, body, "application/json")
+        except UltimateError as e:
+            if "HTTP 404" in str(e) or "HTTP 501" in str(e):
+                raise KeyInjectionUnavailable(
+                    "this Ultimate has no key injection (machine:input): " + str(e)) from e
+            raise
 
     def keyboard(self, inputs, transition="tap"):
         """tap, press or release the named keys (1 to 8, e.g. ["left_shift", "a"])."""

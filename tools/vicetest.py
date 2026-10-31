@@ -59,6 +59,10 @@ class Target:
     provides mem(start, end) and type(text). Vice drives the VICE emulator;
     tools/ultimatetest.py drives a real Ultimate."""
 
+    # False where mem() reads the RAM under the CPU port at $0000/$0001 instead of
+    # the port itself (a DMA read on the Ultimate returns $00 for $0001)
+    sees_cpu_port = True
+
     def screen_lines(self):
         codes = self.mem(0x0400, 0x07e7)
         text = screen_to_text(codes)
@@ -134,7 +138,7 @@ class Target:
 
 
 class Vice(Target):
-    def __init__(self, image, reu=False, port=None, warp=True, extra=()):
+    def __init__(self, image, reu=False, port=None, warp=True, extra=(), boot_device=8):
         self.image = image
         self.port = port or (6510 + os.getpid() % 500)
         args = [X64, "-default", "+sound", "-minimized",
@@ -144,7 +148,10 @@ class Vice(Target):
         if reu:
             args += ["-reu", "-reusize", "512"]
         args += list(extra)
-        args += ["-autostart", image]
+        if boot_device == 8:
+            args += ["-autostart", image]
+        else:       # attach to that drive and LOAD from it ourselves once BASIC is up
+            args += [f"-drive{boot_device}type", "1541", f"-{boot_device}", image]
         self.log = tempfile.NamedTemporaryFile(prefix="vice", suffix=".log", delete=False)
         self.proc = subprocess.Popen(args, stdout=self.log, stderr=subprocess.STDOUT)
         self.sock = None
@@ -158,6 +165,11 @@ class Vice(Target):
         if not self.sock:
             raise RuntimeError("could not connect to VICE monitor")
         self._cmd("x")
+        if boot_device != 8:
+            self.wait_for("ready.", timeout=30)
+            self.type(f'load"*",{boot_device},1\n')
+            self.wait_for("ready.", timeout=120, after="load")
+            self.type("run\n")
 
     def __enter__(self):
         return self
@@ -227,7 +239,7 @@ class Vice(Target):
             if chunk == "\n":
                 esc = "\\x0d"
             else:
-                esc = chunk.replace("\\", "\\\\").replace("|", "\\xdd").replace(" ", "\\x20")
+                esc = chunk.replace("\\", "\\\\").replace("|", "\\xdd").replace(" ", "\\x20").replace('"', "\\x22")
             self._cmd("keybuf " + esc)
             self._cmd("x", wait=0.25)
 

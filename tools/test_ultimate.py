@@ -10,7 +10,7 @@ import unittest
 import fake_ultimate
 import ultimate
 import ultimatetest
-from ultimate import Ultimate, UltimateError
+from ultimate import KeyInjectionUnavailable, Ultimate, UltimateError
 from ultimatetest import UltimateTarget, keys_for, petscii
 
 
@@ -69,6 +69,17 @@ class Client(Base):
         self.u.release_all()
         self.assertEqual([e["kind"] for e in self.fake.events], ["keyboard", "keyboard", "release_all"])
         self.assertEqual(self.fake.events[0]["inputs"], ["left_shift", "1"])
+
+    def test_no_key_injection_is_a_clear_error(self):
+        with fake_ultimate.FakeUltimate(key_injection=False).start() as f:
+            u = Ultimate(f.host, port=f.port)
+            with self.assertRaisesRegex(KeyInjectionUnavailable, "no key injection"):
+                u.keyboard(["a"])
+            with self.assertRaises(unittest.SkipTest):          # keyboard tests skip, not error
+                UltimateTarget(client=u).focus()
+            f.ram[0x0289] = 10
+            UltimateTarget(client=u).type("ok")                  # the key buffer still works
+            self.assertEqual(f.ram[0xC6], 2)
 
     def test_input_is_split_to_64_events(self):
         self.u.input([{"kind": "keyboard", "inputs": ["a"], "transition": "tap"}] * 130)
