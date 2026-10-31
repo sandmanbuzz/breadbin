@@ -169,3 +169,17 @@ As in section 3.1. It stays POC-grade until the plan is committed to shipping; a
 
 1. LGPLv3 open-roms code: port with the files kept LGPL, or reimplement clean-room from the description?
 2. Is the demoscene survey approved at the half-day scoping level above?
+
+## 11. Research results so far (Haiku agents, 2026-10-31)
+
+Raw notes are in the session scratchpad (`research/*.md`), not in the repo. **Network limits:** the session allowlist blocked `csdb.dk`, `codebase64.net`, `plus4world.powweb.com`, `www.pagetable.com`, `svn.icomp.de`, `forum.6502.org`, `lemon64.com`, `mega65.github.io`, `c64-wiki.com` and others, so most findings are from search snippets and are marked unverified. `github.com` works. The user must add the hosts under Allowed domains before the reuse-evidence work (csdb comments) can be done.
+
+| Topic | Result | Status |
+|---|---|---|
+| Krill's Loader | No verified source URL or licence text. Snippets: distributed as source ("no strings attached"), C64 Wiki marks it open source; versions 146 (2013) to 194 (2022); 1541 and relatives supported; save not confirmed. | unverified; blocked |
+| Fast-save prior art | No readable public fast-save source found. `fastboot1541` reads only (track 18, sectors 0 to 3, via ROM `$D586`). Leads needing blocked hosts: 15 Second Copy (pagetable.com/?p=656), Chaco eload `drive_1541_write.s` (svn.icomp.de), 1541 Fast Format (Mike J. Henry). | unverified; blocked |
+| DolphinDOS | Needs the **parallel cable** (user port to the drive's VIA) and a drive ROM swap on a physical 1541; the Ultimate can emulate it with "parallel drive connection" enabled. Not a Classic-tier option. `donnchawp/DolphinDOS2` is Unlicense on its face, but ships ROM-derived `kernal.asm`/`1541.asm` and ROM images, so the provenance of the code is unclear: **do not adopt**. The open-roms protocol doc was written from VICE logs and says it may be incomplete. | partly verified |
+| Epyx FastLoad, WarpSpeed | Drive-code disassemblies exist (an archeobits mirror of zimmers.net); no licence found; treat as copyrighted. | unverified |
+| Spindle / Bitfire / Sparkle | agent still running | pending |
+
+Take-aways for the plan: nothing found changes the order. The clean-room JiffyDOS sketch (`jiffydos-cleanroom.md`) stays the known-good path; the fastboot1541 read path stays adoptable (permissive); a fast **write** has no adoptable prior art yet, so it is likely our own work built on the job queue, with the pitfalls listed above (write protect, BAM consistency, verify).
