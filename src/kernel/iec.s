@@ -56,6 +56,7 @@ ie_dev:  .res 1
 ie_sa:   .res 1
 ie_len:  .res 1
 ie_len2: .res 1
+io_hist: .res 12    ; MEASUREMENT ONLY
 
 .segment "CODE"
 ; ---------------------------------------------------------------------
@@ -394,7 +395,18 @@ bus_acptr:
         beq @tmo
 @nx:    asl                 ; DATA (bit 7) into carry: high is a 1, low a 0
         ror io_b
-        dec io_n
+        tya                 ; MEASUREMENT ONLY: how many 12-cycle loops CLK stayed high after
+        eor #$ff            ; we started watching it (the drive's pulse width, less ~13 cycles)
+        clc
+        adc #1
+        cmp #12
+        bcc @h
+        lda #11
+@h:     tax
+        inc io_hist,x       ; saturating byte counters, 12 buckets
+        bne @hn
+        dec io_hist,x
+@hn:    dec io_n
         bne @bit
         lda io_out
         ora #A_DAT          ; byte accepted
