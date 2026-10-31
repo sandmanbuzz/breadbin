@@ -99,3 +99,32 @@ Requests, when convenient (none block the cloud session):
 **If it fails**, the most useful thing is the exact screen text plus the status byte at `$0090` (`$80` device not present, `$42` EOI plus read timeout, `$01` write timeout), and whether it stops (a hang) or reports an error.
 
 **What I would still expect to be fragile on hardware.** A real drive's timing (the drives under VICE are cycle-exact but ideal); the bit timing is the middle of the published windows (set-up about 55 µs, valid about 65 µs) and assumes a 1 MHz CPU, so turbo must be off; physical-cable effects (rise time) that an emulator does not model.
+
+### 2026-10-31, the stage-2 IEC driver on hardware (hardware session), Breadbin 45f1a72
+
+Bus: emulated drive A as device 8 (the physical 1541 off the bus), the physical 1581 idle at 10, Software IEC at 11. "Stage 1" is 44af149 (ROM bus routines under our channel layer). Times are one machine, PAL, turbo off unless stated. "Bench" polls the screen every 0.2 to 0.5 s; "quiet" does no DMA while the boot loads and polls rarely (scratch script, not in the repo).
+
+| ROMs | build | boot to shell | `clear` | `echo ab` |
+|---|---|---|---|---|
+| JiffyDOS KERNAL + JiffyDOS drive (as found) | stage 1 | 46.5 s | 3.3 s | 3.5 s |
+| same | stage 2 | 75.5 s | 6.7 s | 6.9 to 7.2 s |
+| stock KERNAL + `1541.rom` | stage 1 | 122 s | 7.8 s | 7.8 s |
+| same | stage 2 | 122 s (two runs) | 7.8 s | 7.8 s |
+
+- **Stage 2 works on a real (emulated) 1541**, with the JiffyDOS ROMs and with the stock ROMs: it boots to the login prompt and loads programs. `test_system.Boot.test_24_editor`-style use was not repeated on stage 2; the disk tests you asked for (`test_02`, `test_13`, `test_07`, `test_10`) all failed in one run, for the reason in the next section, and only `test_02` was rerun (passes, twice).
+- **Speed:** with JiffyDOS ROMs stage 2 is about twice as slow as stage 1, because stage 1's ROM routines used the JiffyDOS fast protocol. On stock ROMs they are identical: the drive sets the pace on the standard protocol. This is the number the fast-boot work (M0-8) has to beat: 122 s to the shell on stock ROMs, of which about 52 s is the 14 KB boot program load.
+- **Turbo makes no difference to stage 2**, at 4, 16, 48 and 64 MHz (boot, `clear` and `echo` identical to turbo off, which is the control). Either the Ultimate holds I/O accesses to 1 MHz timing or the drive sets every pace; either way "turbo must be off around bus use" is not needed on this machine. CPU-bound BASIC does speed up under the same setting (257, 64, 15, 5 jiffies at 1, 4, 16, 48 MHz), so the setting is real. Not tried: `C64U Turbo Registers` and `TurboEnable Bit` modes. The disk tests do not get faster: a run takes the same ~67 s at every speed.
+
+**Intermittent failures were the harness polling, not (as far as can be told) the driver.** With the normal harness, stage 2 on JiffyDOS failed 2 of about 14 boots: once with `clear` never running and the keyboard buffer full (`$90 = $02`, the bus status byte, a read timeout), once with `kernel panic: cannot mount root filesystem` (`$90 = $40`; the bus lines were all released: `$DD00 = $C7`). Then:
+
+- A screen poll is a 1000-byte DMA read, which halts the CPU. Polling as fast as possible during repeated loads corrupted a load within 3 to 5 program loads on **both** stage 1 (`sh: clear: exec format error`) and stage 2 (a stuck shell, then `kernel panic: brk`). The status byte is `$40` (EOI) each time, which fits a halt landing in the listener-ready window so the drive sends the byte as the last.
+- The same polling rate with **1-byte** reads (the cursor row at `$D6`) ran 24 loads and about 9,400 reads without one failure on stage 2.
+- Splitting the screen read into 40-byte DMAs (25 requests per poll) did **not** fix it (failed in the fifth load), so I did not keep that change. The samples are small; the safe rule is: during a disk load, do not poll the screen with long DMA reads, and prefer fewer, smaller ones.
+- Quiet runs of stage 2: 7 boots (2 stock-ROM, 4 turbo, 1 control), all clean.
+- **Consequence for tests:** an intermittent failure on the Ultimate target that looks like a bus error (`$90` of `$02` or `$40`, `exec format error`, a panic during a load) is probably the harness. Rerun it before suspecting the driver. A sturdier harness (slower polls, small reads while a command runs) is worth building if this keeps costing runs; not done.
+- The 1581 and Software IEC drive were on the bus, idle, in every run, so every result above includes them. The stress comparison against stage 1 suggests they are not the cause (stage 1 failed the same way with them present), but a stage-2 stress run with the 1581 powered off would settle it.
+
+**Firmware quirk (Ultimate, C64 Ultimate 1.1.0):** changing `Kernal ROM` over the REST config API does not take effect on `machine:reset`; it needs `machine:reboot`. Setting the value to `""` selects the stock KERNAL. The drive's `ROM for 1541 mode` change did take effect after the reboot (the drive then answered `73,CBM DOS V2.6 1541`). All ROM and turbo settings were restored afterwards (`JiffyDOS-C64.bin`, `JiffyDOS_1541-II.bin`, turbo Off, 1 MHz).
+
+**Not done:** the physical 1541 as device 8 and the mixed case from the cloud session's list (needs the drive back on the bus; the user is in the room); `format` on any drive; `test_07` and `test_10` on a clean boot; H9 (video stream) and H10 (1581 from Breadbin).
+
