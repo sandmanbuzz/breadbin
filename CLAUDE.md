@@ -16,6 +16,15 @@ xvfb-run -a -s "-screen 0 1280x1024x24" make test-console
 
 The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 32 minutes) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive.
 
+## Test policy
+
+Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 40 minutes under VICE, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
+
+- **During a story:** `make test-host`, the targeted tests for what you changed (the table in `docs/testing.md`), and `make test-smoke` before committing. No full suite.
+- **At a milestone** (the end of an M group, or any change to the interrupt path, the bus, the memory map or the linker layout): the full suite with stock ROMs, the disk and bus tests again with the JiffyDOS ROMs (`BREADBIN_VICE_ARGS`, see `docs/testing.md`), and a hardware run of the list in `docs/hardware-notes.md`.
+- **Hardware** is used for what only hardware can answer, not as a per-story gate. Keep one hardware session alive with its context and give it experiments (`docs/wip.md`), not just test runs.
+- Say in every commit message what was run and what was not.
+
 ## Decisions (details in `docs/roadmap.md`)
 
 - **Platform tiers:** Classic (stock C64, 1541, no REU) must keep booting; Expanded adds an REU; Recommended is an Ultimate with UCI. The core never requires an REU or an Ultimate. Features are chosen by probing at run time.
@@ -27,7 +36,7 @@ The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/set
 
 ## Status
 
-M0 (taking over the KERNAL): M0-1 shadow KERNAL and own vectors, M0-2 keyboard (`kbd.s`), M0-3 screen (`con.s`) and M0-4 (own IEC bus and channels in `iec.s`, root from the boot drive) are done under VICE (stock ROMs and JiffyDOS 6.01 ROMs); M0-4 runs on the real Ultimate (boot 75.5 s against 46.5 s for the ROM-bus stage 1, since JiffyDOS fast load is no longer used; physical 1541 and the full test list still to report; see `docs/hardware-notes.md`). M0-5 is unblocked: the KERNAL ROM region is provably unused. **Kernel headroom is 33 bytes** below the syscall table at `$CF00`: the second code region at `$E000–$E3FF` or the space pass (M0-7) must come before any more kernel code. The full suite was last run after M0-1.
+M0 (taking over the KERNAL): M0-1 shadow KERNAL and own vectors, M0-2 keyboard (`kbd.s`), M0-3 screen (`con.s`) and M0-4 (own IEC bus and channels in `iec.s`, root from the boot drive) are done under VICE (stock ROMs and JiffyDOS 6.01 ROMs); M0-4 runs on the real Ultimate (boot 75.5 s against 46.5 s for the ROM-bus stage 1, since JiffyDOS fast load is no longer used; physical 1541 and the full test list still to report; see `docs/hardware-notes.md`). M0-5 is unblocked: the KERNAL ROM region is provably unused. M0-5 is done: the kernel's BSS now lives at `$E000–$F771` (the KERNAL ROM region is unused), so there are **6,079 bytes of room for code** below `$CF00` and 2,184 for BSS below `$FFFA` (`make size`). The user pool is still `$0800–$7FFF`; moving its upper edge is one constant (`KSTART` in `k.inc` and `KRAM` in `kernel.cfg`) and is decided last.
 
 ## Hardware and external references
 
