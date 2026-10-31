@@ -159,7 +159,13 @@ A pass over demoscene code is large, so this scopes it and does not do it. What 
 
 As in section 3.1. It stays POC-grade until the plan is committed to shipping; at that point the email to the author goes out.
 
-### 10.4 Decisions needed from the user
+### 10.4 Decisions made (2026-10-31)
+
+- Licence policy (now in `CLAUDE.md`): MIT upstream, our code informal/PD; **no LGPL/GPL** (so no port of open-roms or sd2iec code; clean-room only for JiffyDOS); demoscene code is adoptable on community norms (stated intent or evident reuse), with credit and greetings, and the evidence recorded.
+- Research is approved: four Haiku agents with empty context, each with a narrow question (Krill's Loader; Spindle/Bitfire/Sparkle; DolphinDOS and other documented protocols; fast-write prior art). Results land in the scratchpad and are summarised in section 11. `csdb.dk` (releases and comments, dated) is the best source for reuse evidence.
+- Clean-room JiffyDOS, and other well-studied protocols (DolphinDOS among them) are to be sketched in parallel with the research, so the plan survives either outcome.
+
+### 10.5 Superseded questions
 
 1. LGPLv3 open-roms code: port with the files kept LGPL, or reimplement clean-room from the description?
 2. Is the demoscene survey approved at the half-day scoping level above?
