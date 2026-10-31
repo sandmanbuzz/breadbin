@@ -57,7 +57,7 @@ kb_tabsel: .byte 0, 1, 2, 1, 3, 3, 3, 3
 
 .include "keytab.inc"
 
-.segment "CODE"
+.segment "INIT"
 kbd_init:
         ldx #7
         lda #0
@@ -87,6 +87,7 @@ kbd_init:
 
 ; key_get: take the oldest key from the buffer. A = key, or 0 if none.
 ; Carry clear. X and Y are preserved.
+.segment "CODE"
 key_get:
         lda KEYCNT
         beq @none

@@ -83,6 +83,7 @@ s_init: .byte "i0"
 cmagic: .byte "BBCH"
 
 .segment "CODE"
+.segment "INIT"
 blk_init:
         ldx #NBUF-1
         lda #0
@@ -112,6 +113,7 @@ blk_init:
         sta dev_present
         jmp reu_detect
 
+.segment "CODE"
 ; iec_open: X = dev. Open the drive's command channel (15) and a data channel
 ; (2) with a drive buffer. Carry set (A = ENODEV) if the drive is not there.
 iec_open:
@@ -593,6 +595,7 @@ reu_byte:
         sty REU_CMD
         rts
 
+.segment "INIT"
 reu_detect:
         lda #0
         sta reu_banks
@@ -652,6 +655,7 @@ reu_detect:
 @none:  rts
 pat:    .byte $5a, $a5, $3c, $c3
 
+.segment "CODE"
 ; ---- REU block cache ----
 ; cdma: A = command ($90 stash, $91 fetch); cd_regs and cd_ctl set
 cdma:   pha
@@ -840,6 +844,7 @@ cache_hdr_put:
         lda #$90
         jmp cdma
 
+.segment "INIT"
 ; cache_attach: before the root is mounted. Reads the superblock from the bus, and
 ; discards the REU cache unless it belongs to this disk (same build id).
 ca_r:   rts
@@ -918,6 +923,7 @@ cache_attach:
         sta cache_on
         jmp cache_wr            ; the superblock (bp) goes in
 
+.segment "CODE"
 ; cache_epoch: the first write to the boot drive in a boot. Gives the disk a new build id
 ; (and the cache header the same), so a copy of the disk that was not written by this
 ; boot, such as the pristine image mounted again, no longer matches the cache.

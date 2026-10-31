@@ -75,7 +75,7 @@ s_dotdot: .byte "..", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 s_tmp:  .byte "tmp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 s_tmpp: .byte "/tmp", 0
 
-.segment "CODE"
+.segment "INIT"
 ; ---------------------------------------------------------------------
 ; fs_mount: mount dev 0 (and the REU RAM disk at /tmp if present)
 fs_mount:
@@ -123,6 +123,7 @@ fs_mount:
 @r:     rts
 
 ; mnt_point: A = dev, X = ino -> X = mount entry, carry clear if mounted on
+.segment "CODE"
 mnt_point:
         sta tmp0
         stx tmp1
@@ -1213,6 +1214,7 @@ nameiparent:
 @ok:    clc
 @r:     rts
 
+.segment "INIT"
 ; ---------------------------------------------------------------------
 ; fs_mkfs_reu: format the REU as c64fs (superblock 0, bitmap 1, inodes 2-17)
 fs_mkfs_reu:
@@ -1350,3 +1352,5 @@ fs_mkfs_reu:
         lda #ROOT_INO
         jsr dir_add
 @r:     rts
+
+.segment "CODE"
