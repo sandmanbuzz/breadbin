@@ -69,6 +69,8 @@ c_hdr:   .res CH_LEN     ; magic, build id, disk label of the disk
 c_rd:    .res CH_LEN
 cd_regs: .res 7          ; C64 addr, REU addr (lo, hi, bank), length: the REU registers $df02-$df08
 cd_ctl:  .res 1
+ep_done: .res 1          ; this boot has given the disk a new build id (it is being written)
+ep_x:    .res 1
 
 .export bwrite, buf_idx_ptr, cache_attach, sys_cache
 
@@ -255,6 +257,19 @@ bget_buf:
 bwrite:
         stx b_idx
         lda b_dev,x
+        bne @go
+        lda cache_ok
+        beq @go
+        lda ep_done
+        bne @go
+        lda b_clock             ; keep this buffer from being the victim of the superblock read
+        sta b_age,x
+        stx ep_x
+        jsr cache_epoch
+        ldx ep_x
+        stx b_idx
+        bcs @r
+@go:    lda b_dev,x
         sta rq_dev
         lda b_lo,x
         sta rq_lo
@@ -265,6 +280,7 @@ bwrite:
         cmp #1
         beq @reu
         jsr cur_dev_set
+        jsr cache_inval     ; not valid while the disk is being changed (a reset in between)
         jsr iec_write
         bcs @we
         jsr cache_wr        ; write-through: the REU copy follows the disk
@@ -733,10 +749,9 @@ cache_get:
         jsr cache_page
         lda #$91
         jsr cdma
-        inc c_hit
-        bne @r
-        inc c_hit+1
-@r:     clc
+        ldx #0
+        jsr cinc
+        clc
         rts
 @no:    sec
         rts
@@ -745,10 +760,9 @@ cache_get:
 cache_put:
         jsr cache_chk
         bcs @r
-        inc c_miss
-        bne @w
-        inc c_miss+1
-@w:     jmp cache_wr
+        ldx #2
+        jsr cinc
+        jmp cache_wr
 @r:     rts
 
 ; cache_wr: bp holds the block's current contents; keep the REU copy in step
@@ -770,11 +784,21 @@ cache_inval:
         jmp cache_setvalid
 @r:     rts
 
+; cache_err: a bus error on the boot drive (the other drives are not the cache's business)
 cache_err:
-        inc c_err
-        bne @r
-        inc c_err+1
-@r:     rts
+        lda rq_dev
+        bne cinc_r
+        ldx #4
+        ; fall through
+; cinc: count one in the 16-bit counter at c_hit+X, saturating at $ffff
+cinc:   inc c_hit,x
+        bne cinc_r
+        inc c_hit+1,x
+        bne cinc_r
+        lda #$ff
+        sta c_hit,x
+        sta c_hit+1,x
+cinc_r: rts
 
 ; cache_clear: forget every block and write c_hdr as the header
 cache_clear:
@@ -797,10 +821,18 @@ cache_clear:
         jsr cdma
         lda #0
         sta cd_ctl
+        ; fall through
+; cache_hdr_put: write c_hdr to the REU header
+cache_hdr_put:
         lda #<c_hdr
         sta cd_regs
         lda #>c_hdr
         sta cd_regs+1
+        lda #0
+        sta cd_regs+2
+        sta cd_regs+3
+        lda #CACHE_BANK
+        sta cd_regs+4
         lda #CH_LEN
         sta cd_regs+5
         lda #0
@@ -816,6 +848,10 @@ cache_attach:
         sta cache_ok
         sta cache_on
         sta cd_ctl
+        sta ep_done
+.if CACHE_DEFAULT = 0
+        rts                     ; no cache at all: the bus is all there is
+.endif
         lda reu_banks
         cmp #CACHE_BANK+3
         bcc ca_r
@@ -879,11 +915,46 @@ cache_attach:
 @fmt:   jsr cache_clear
 @ok:    lda #1
         sta cache_ok
-.if CACHE_DEFAULT = 0
-        lda #0
-.endif
         sta cache_on
         jmp cache_wr            ; the superblock (bp) goes in
+
+; cache_epoch: the first write to the boot drive in a boot. Gives the disk a new build id
+; (and the cache header the same), so a copy of the disk that was not written by this
+; boot, such as the pristine image mounted again, no longer matches the cache.
+; Carry set if the superblock could not be changed (the write must then not go ahead).
+cache_epoch:
+        lda #1
+        sta ep_done
+        lda #0
+        ldx #<SB_BLOCK
+        ldy #>SB_BLOCK
+        jsr bread
+        bcs @r
+        ldy #SB_BUILD_ID
+        lda $dc04               ; free-running timers stand in for a random number
+        ora #1                  ; and the id always changes
+        eor (bp),y
+        sta (bp),y
+        sta c_hdr+4
+        iny
+        lda (bp),y
+        eor $dc05
+        sta (bp),y
+        sta c_hdr+5
+        iny
+        lda (bp),y
+        eor $dd04
+        sta (bp),y
+        sta c_hdr+6
+        iny
+        lda (bp),y
+        eor $dd05
+        sta (bp),y
+        sta c_hdr+7
+        jsr bwrite              ; the superblock; ep_done is set, so no recursion
+        bcs @r
+        jmp cache_hdr_put
+@r:     rts
 
 ; sys_cache(A = op, r0 = buf): 0 = status into buf: state (0 none, 1 off, 2 on), hits,
 ; bus reads, bus errors (16 bits each); 1 = off, 2 = on, 3 = flush
