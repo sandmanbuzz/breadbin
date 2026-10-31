@@ -1,49 +1,57 @@
 # Work in progress
 
-Written 2026-10-30 for whoever picks this up next, in particular the session running next to the Ultimate. Read `CLAUDE.md` first (build, tests, standing decisions), then this. `docs/roadmap.md` has the full story list.
+Rewritten 2026-10-31. For whoever picks this up next, in particular the session running next to the Ultimate. Read `CLAUDE.md` first (build, tests, test policy, standing decisions), then this. `docs/roadmap.md` has the full story list and the memory and disk-speed analyses.
 
 ## Two sessions, one repository
 
 | Session | Where | Does |
 |---|---|---|
-| **Cloud session** | a cloud container, branch `claude/brave-wright-km3nrm` | Kernel work, tested under VICE: the KERNAL takeover (M0), the space pass, the test harness. It cannot reach the Ultimate or the real 1541. |
-| **Hardware session** | next to the Ultimate 64 and the real 1541 | Everything that needs the real machine: confirming the REST client works, running the tests on hardware, validating drivers on a real 1541, and reporting what differs from VICE. |
+| **Cloud session** | a cloud container, branch `claude/brave-wright-km3nrm` | The kernel: the KERNAL takeover (M0), memory layout, the filesystem interface, the UCI kernel backend. Tests under VICE. Cannot reach the Ultimate or the drives. |
+| **Hardware session** | next to the C64 Ultimate and the real 1541 | Everything that needs the machine: verification, and the experiments below. It owns its own branch (`hw-bench`) and rebases it on the cloud branch. |
 
-You are not a remote hand for the cloud session. You can read the code, change anything under `tools/`, run anything, and tell the user what you think the kernel should do. Where the cloud session is wrong about hardware, say so in `docs/hardware-notes.md`: that file is how we stay in step without chat round trips.
+The hardware session is not a remote hand. It has the codebase and the machine, and it should use judgement: if an experiment shows the plan is wrong, say so in `docs/hardware-notes.md` and say what you would do instead.
 
 ## Snapshot
 
-- Last commit on the cloud branch is the one that added this file. Check `git log`.
-- **Done in M0** (taking over the KERNAL so more RAM and zero page can be used): M0-1 shadow KERNAL and own vectors, M0-2 own keyboard (`src/kernel/kbd.s`), M0-3 own screen driver (`src/kernel/con.s`). The kernel no longer calls the ROM for the keyboard, the screen or interrupt entry; it still uses the ROM's IEC and file-channel routines (`blk.s`, `cbm.s`).
-- **Kernel headroom:** 835 bytes below the syscall table (`make size`). That is the hard constraint on everything that follows.
-- **Tests:** everything passes under VICE: host tests (45), the keyboard tests (real keystrokes), the console tests, and the system tests it touches. The full suite (about 32 minutes) was last run after M0-1 and is due after M0-4.
-- **Nothing has run on hardware.** Every statement about the Ultimate comes from its documentation.
+- **Done:** M0-1 to M0-5. The kernel owns the interrupt entry, keyboard, screen, serial bus and channels; the KERNAL ROM is not used; the BSS moved into the old ROM region, leaving 6,079 bytes of room for code (`make size`). Stage 2 of the bus driver is verified under VICE with stock and JiffyDOS ROMs, **and on your hardware** (reported: boot 75.5 s against 46.5 s for the ROM bus, since the ROM's JiffyDOS fast protocol is no longer used).
+- **Next on the kernel side (cloud):** the test and size consolidation, then the filesystem interface (S6) and the UCI kernel backend (S10, S11). Disk speed is decided in `docs/roadmap.md` ("Disk speed"): the Ultimate file backend is the principal fast path; an REU block cache is the quick win; JiffyDOS and drive-side loaders are deferred.
+- **Not yet done on hardware:** the physical 1541 as the boot drive, `format`, and the full M0-5 build.
 
-## In flight
+## Rules of the road
 
-1. **The Ultimate test bench** (this commit): `tools/ultimate.py` (REST client), `tools/fake_ultimate.py` (a fake server, for tests without hardware), `tools/ultimatetest.py` (a backend with the same interface as `tools/vicetest.py`), `tools/test_ultimate.py` (24 tests against the fake). Selected with `BREADBIN_TARGET=ultimate` and `BREADBIN_ULTIMATE=host[:port]`. **It has never talked to a real Ultimate.** Verifying it is your first job.
-2. **M0-4, the IEC driver** (cloud session, next): replace the ROM's `OPEN`/`CLOSE`/`CHKIN`/`CHKOUT`/`CHRIN`/`CLRCHN`/`SETLFS`/`SETNAM` with our own bus code. It is the riskiest step and the one that most needs your real 1541: expect a request to run a specific test on it, and expect the first version to be wrong in ways VICE does not show. The kernel will also gain a second code region at `$E000–$E3FF` to make room.
-3. **M0-8, fast 1541 boot and reads** (after M0-4), based on `mist64/fastboot1541`. It runs with turbo off and interrupts disabled, so it interacts with the Ultimate's turbo setting.
+- Own branch `hw-bench`, rebased on `claude/brave-wright-km3nrm` before each work package. Push it to origin.
+- **You own:** `tools/ultimate*.py`, `tools/fake_ultimate.py` and its tests, any new command under `src/bin/` (the Makefile builds every `src/bin/*.s` automatically), anything under `experiments/`, and `docs/hardware-notes.md`.
+- **Do not edit** `src/kernel/`, `src/lib/`, `include/breadbin.inc`, `kernel.cfg` or `k.inc`: the cloud session is working there. If you need a kernel change or a library routine, describe it in `docs/hardware-notes.md` (what, why, the smallest version) and carry on with a workaround.
+- Test policy as in `CLAUDE.md`: targeted tests per package; the cloud session runs the full suite at milestones.
+- ROM images and firmware stay out of the repository. The JiffyDOS images on your machine are for experiments only.
+- Credit sources in the code: `fastboot1541` is by Michael Steil and asks for credit.
+- Report in `docs/hardware-notes.md`: date, what you ran (a command someone else can repeat), what happened, and the commit.
 
-## What to expect over the next turns
+## Work packages, in priority order
 
-- The kernel image changes often. Rebuild (`make`) before each hardware run, and note the commit in your notes.
-- Hardware tests are a gate for M0-4 and M0-8, not for the rest of M0. Until M0-4 lands, VICE results are the reference and your results tell us where the Ultimate differs.
-- Decisions in `CLAUDE.md` are standing. Raise a disagreement in `docs/hardware-notes.md` or with the user, not by working around it.
+**WP0. Verify the current build (short).** Pull the cloud branch, `make`, boot it, and run the targeted tests from the "hardware list" in `docs/hardware-notes.md` (boot, `test_02`, `test_13`, `test_07`, `test_10`, `test_console`). The change to verify is M0-5: the kernel's tables moved to `$E000`. Record boot time. If the physical 1541 is available as device 8, repeat on it.
 
-## Your first checklist
+**WP1. A UCI explorer, as a Breadbin command.** *The most valuable package.* Write `src/bin/uci.s`: a command that talks to the Ultimate Command Interface directly (registers `$DF1B–$DF1F`; programs may touch hardware, there is no memory protection). Start with `uci id` (read `$DF1D`, expect `$C9`; send the DOS target's identify command and print the reply), then `uci ls [path]`, `uci cat file`, `uci seek`, `uci time`, and whatever else the DOS target offers (`uci/ultimate_dos_target.rst` in the documentation repository). Measure real behavior against the documentation: queue and chunk sizes, status strings, error cases, how long open, read and seek take, and the sustained read throughput on a 32 KB file in 512-byte chunks. This is the prototype for the UCI file backend (S10, S11); what you learn here is what the kernel backend is designed from, so write down every surprise. Deliverable: the command, plus a "UCI as measured" section in `docs/hardware-notes.md`. Constraint: UCI requires the "Command Interface" menu option on (it is, per your notes) and interrupts do not matter to it (polled), but keep one transaction in flight at a time.
 
-Do these in order. Put the result of each in `docs/hardware-notes.md` (it has a slot for each).
+**WP2. Fast-read feasibility (groundwork for M0-8).** Under `experiments/fastread/`, build `mist64/fastboot1541` (read its README and `pagetable.com/?p=568`), run it from the Ultimate, and find out: does it work on the emulated 1541 with the JiffyDOS ROM; with a stock ROM (the Ultimate can load a drive ROM by API, `drives/a:load_rom`; `tools/setup-vice-roms.sh` fetches one); on the physical 1541? What throughput does it reach, and does it need the screen blanked or interrupts off? Then a small variant that reads an arbitrary list of sectors, to see whether the technique serves the kernel's block reads. Deliverable: a table of drive and ROM combinations that work, speeds, and constraints, in `docs/hardware-notes.md`. Do not touch the kernel.
 
-1. **Reach it.** Set `BREADBIN_ULTIMATE=<host>` (and `BREADBIN_ULTIMATE_PASSWORD` if a network password is set), then `python3 tools/ultimate.py`. It prints `/v1/info`. Record the product and firmware.
-2. **Check the offline tests first:** `make test-host` (about 12 seconds). They should pass anywhere.
-3. **Check the upload encoding.** The documentation does not say whether attachments are multipart or raw. Try `Ultimate(host).mount("a", image_bytes, mode="unlinked")`; if the Ultimate rejects it, try `Ultimate(host, attach="raw")`. Record which works, and fix the default in `tools/ultimate.py`.
-4. **Boot Breadbin:** `python3 tools/ultimatetest.py build/breadbin.d64` should mount it, reset, load, run, and print the shell screen. Record the boot time. If it fails, look at the screen with `python3 tools/ultimate.py screen`.
-5. **Run the targeted tests on hardware:** `BREADBIN_TARGET=ultimate python3 -m unittest tests.test_system.Boot.test_02_echo tests.test_system.Boot.test_13_ctrl_c_blocked_reader`, then `tests.test_keyboard` and `tests.test_console`. Record which pass, and for each failure what differed (timing, a read that returns something else, a key that did not register).
-6. **Answer the open questions** in `docs/hardware-notes.md` (the key tap duration, whether a DMA read of `$0001` is meaningful, and the others).
+**WP3. Pixel-exact frames.** Start the video stream (`streams/video:start`), receive it on the test host, and write `tools/ultimate_video.py` and `UltimateTarget.screenshot(path)` (PNG via the standard library only). Read the stream format from `data_streams.rst`. Answers H9. Useful for console tests that check colour and reverse video exactly. Deliverable: the tool, a test that skips without hardware, and the format notes.
 
-## Working rules
+**WP4. Turbo, measured.** Through the configuration API enable the Turbo Mode setting that exposes `$D031`, then write a small command `turbo` that reads and sets the speed index and report `$D031` presence. Measure: does CPU speed change as documented (time a fixed loop against the jiffy clock)? What happens to the IEC bus driver at higher speed (expect it to break; note where), and to REU DMA and bad lines? Deliverable: the command and the measurements. No kernel changes: the kernel will switch turbo off around bus use once these are known.
 
-- Work on your own branch (suggested: `hw-bench`), not on `claude/brave-wright-km3nrm`; the user merges, or the cloud session cherry-picks. Keep to `tools/ultimate*.py`, `tools/fake_ultimate.py`, the tests, and `docs/hardware-notes.md`. If you need a kernel change, describe it in the notes instead of making it, so the two sessions do not collide in `src/kernel/`.
-- When you fix a documented-versus-real difference in the client, update `tools/fake_ultimate.py` and `tools/test_ultimate.py` to match, so the offline tests keep describing the real behavior.
-- Keep ROMs and firmware images out of the repository.
+When a package is done, push, and say so in `docs/hardware-notes.md`. If two or more are done and nothing new has come in, rebase and start the next one. If you are blocked on a kernel change, write it down and move on.
+
+**WP5. Loader POC on the bench (queued, do not start until the physical-1541 stall is localised).** Only after you are confident about the bus behaviour (the physical-1541 root-mount stall, drive timing). Take Krill's Loader v194 release archive (BSD-style licence, credit "Loader by Krill"; a link is in `docs/design/fast-io.md`) and run its prebuilt `loadertest-c64.d64` unmodified from the Ultimate: (a) drive A with a stock 1541 ROM, (b) drive A with the JiffyDOS ROM, (c) on the physical 1541 with the JiffyDOS ROM, (d) with a second drive on the bus. Record: does it run; the kB/s lines it prints; whether the screen must be blank; any hang or error. The same experiment under VICE is already done (`docs/design/fast-io.md`, section 16): 6.0 to 6.4 kB/s raw on both ROM sets. A negative result on hardware is as useful as a positive one; write down *where* it fails. Do not touch the kernel for this.
+
+## Cloud session state (written before a context compaction, 2026-10-31)
+
+Where the cloud session stands, so a fresh context can resume:
+
+- **Done and pushed on `claude/brave-wright-km3nrm`:** M0-1 to M0-5; real-speed keyboard tests (7 of 7 pass); the fast-I/O paper design in `docs/design/fast-io.md` (sections 1 to 16) and `docs/design/jiffydos-cleanroom.md`; the licence policy in `CLAUDE.md` (no GPL/LGPL; BSD, MIT, zlib and demoscene-norm code adoptable with credit); the REU cache requirements in `docs/roadmap.md` (switchable, never required, counted bus errors, write-through, keyed by build id).
+- **Agreed order:** REU cache, then the UCI file backend, then the IEC fast paths. The hardware session keeps researching IEC with the cache off.
+- **Fast-IO shortlist:** (3) clean-room JiffyDOS-class per-byte protocol behind a per-device hook in `iec.s`; (4) Krill/Bitfire-style drive loader for normal sectors with an ELoad/dotscha-style raw write plus verify. Cut: Transwarp (GPLv3), Sparkle, Spindle, DolphinDOS, cartridge loaders, MafioDOS. POC 1 done in VICE: Krill's v194 `loadertest-c64.d64` runs unmodified on stock and JiffyDOS 6.01 drive ROMs, 6.0 to 6.4 kB/s raw, 95 and 77 loop runs without errors (see section 16). The scratch script was `krillpoc.py` in the session scratchpad; it uses `tools/vicetest.py` and `BREADBIN_VICE_ARGS="-dos1541 J -dos1541II J"` with `J` the JiffyDOS drive image.
+- **Not done:** the JiffyDOS-ROM disk and bus subset and the hardware run for the M0-5 milestone (the hardware session's WP0, pending the physical-1541 stall); the REU cache story; the UCI backend (design from WP1); M0-6, M0-7, M0-8.
+- **Hardware session facts (from its pushed `hw-bench`, up to 62cf07c):** stage 2 boots on the Ultimate with JiffyDOS and stock ROMs; the physical 1541 stalls at the root mount in 5 of 7 boots (not yet localised, a stock-KERNAL control is running); the earlier "phantom ATN" report was retracted; turbo makes no difference; intermittent failures were traced to the harness's DMA polling. It may make kernel fixes on its own branches (such as `iec-bit-waits`) and say so in `docs/hardware-notes.md`.
+- **Sources and tools (outside the repo, session scratchpad):** research reports in `research2/*.md`; clones of Bitfire (bboxy, dotscha, iszell), Sparkle2, SparkleCPP; Krill's v194 and Spindle archives extracted under `research2/x-*`; `cbmbus_doc` at `/home/user/mist64/cbmbus_doc`; open-roms (LGPL, read for understanding only, do not port) at `/home/user/mega65/open-roms`; JiffyDOS images in `jiffy/`.
+- **Network:** `curl` through the proxy reaches csdb.dk, codebase64.net, pagetable.com and linusakesson.net; WebFetch still fails on some of them, and sub-agents should use Bash curl.
+- **Subagent practice that worked:** Haiku agents with empty context and narrow questions plus a report template; verify their claims against sources before using them.

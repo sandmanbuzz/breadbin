@@ -263,10 +263,16 @@ class Vice(Target):
         self._x("windowfocus", wins[0])
         time.sleep(1)
 
-    def xkey(self, *keys, delay=0.15):
-        """Tap X key names, e.g. xkey('a', 'Return', 'space', 'exclam')."""
+    def xkey(self, *keys, delay=0.15, hold=0.06):
+        """Tap X key names, e.g. xkey('a', 'Return', 'space', 'exclam'). Each key
+        is held for `hold` seconds of wall time: `xdotool key` presses and
+        releases within a few milliseconds, and when VICE runs in warp mode both
+        events can reach the emulator in one batch, before the emulated machine
+        has had a chance to scan the keyboard, so the key is lost."""
         for k in keys:
-            self._x("key", k)
+            self._x("keydown", k)
+            time.sleep(hold)
+            self._x("keyup", k)
             time.sleep(delay)
 
     def xtype(self, text, delay=0.15):
