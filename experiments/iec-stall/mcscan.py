@@ -25,6 +25,9 @@ u.pause()
 u.writemem(0xC000, code)
 burn = int(os.environ.get("BURN", "0"))      # IRQ handler delay in ~1.3 ms units; 0 = the stock environment
 u.writemem(0xC7E0, bytes([burn]))
+cr = int(os.environ.get("CR", "1"))                    # 0 = commands end with EOI only, like the kernel
+u.writemem(0xC7E5, bytes([cr]))
+print("commands end with:", "CR + EOI" if cr else "EOI only", flush=True)
 u.writemem(0xC7F0, bytes(3))
 print("slow IRQ handler:", burn * 1.3 if burn else "off", "ms per tick", flush=True)
 u.resume()
