@@ -1,47 +1,55 @@
-; Breadbin syscall entry: fixed jump table at $CF00 and dispatcher
+; Breadbin syscall entry: the whole thing lives in the fixed page at $CF00
 ;
-; Programs `jsr SYS_x`; the table entry jumps to a stub that records the
-; syscall number, then `dispatch` marks the kernel busy and calls the
-; handler. Handlers return carry/A/X/r-registers; `sys_return` acts on
-; pending signals and deferred reschedules before going back to user code.
+; Programs `jsr SYS_x` (SYS_BASE + 3*n). Each table entry is a `jsr enter`; the return
+; address `enter` finds on the stack is that entry's last byte, $CF00 + 3*n + 2, so the
+; syscall number needs no per-call stub. `enter` marks the kernel busy and calls the
+; handler. Handlers return carry/A/X/r-registers; `sys_return` acts on pending signals
+; and deferred reschedules before going back to user code.
 .include "k.inc"
 .import sys_isatty, sys_conmode, sys_getuid, sys_setuid, sys_mount, sys_umount, sys_mntinfo, sys_diskio, sys_cache
 
-NSYS = 32
-STUBSZ = 8
+NSYS = 32               ; the page holds the table (3*NSYS), enter, sys_return and the two address tables
 
 .segment "JUMPTAB"
-.repeat NSYS, I
-        jmp stubs + I*STUBSZ
+.repeat NSYS
+        jsr enter
 .endrep
 
-.segment "CODE"
-stubs:
-.repeat NSYS, I
+; enter: A, X, carry as the caller left them. Interrupts stay off until in_kernel is set,
+; because k_a/k_x/k_p are shared.
+enter:
         sei
-        sta k_a
-        lda #I
-        jmp dispatch
-.endrep
-
-dispatch:
         cld                     ; the kernel's adc/sbc are binary whatever the caller left in D
-        sta k_n
+        sta k_a
+        stx k_x
+        php
+        pla
+        sta k_p
+        pla                     ; low byte of the return address: 3*n + 2
+        ldx #$ff
+        sec
+@n:     inx
+        sbc #3
+        bcs @n                  ; X = n
+        pla                     ; high byte
+        stx k_n
         lda #1
         sta in_kernel
-        stx k_x
         lda #>(sys_return-1)
         pha
         lda #<(sys_return-1)
         pha
-        ldx k_n
         lda sys_hi,x
         pha
         lda sys_lo,x
         pha
+        lda k_p                 ; the caller's flags back (carry in), then interrupts on, binary mode
+        pha
         ldx k_x
         lda k_a
+        plp
         cli
+        cld
         rts
 
 sys_return:
@@ -65,7 +73,6 @@ sys_return:
         plp
         rts
 
-.segment "RODATA"
 sys_lo: .lobytes sys_exit-1, sys_spawn-1, sys_wait-1, sys_kill-1, sys_getpid-1
         .lobytes sys_yield-1, sys_sleep-1, sys_open-1, sys_close-1, sys_read-1
         .lobytes sys_write-1, sys_pipe-1, sys_mkdir-1, sys_rmdir-1, sys_unlink-1

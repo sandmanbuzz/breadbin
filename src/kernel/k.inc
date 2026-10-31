@@ -1,7 +1,7 @@
 ; Breadbin kernel internal definitions
 .include "../../include/breadbin.inc"
 
-KSTART  = $8000     ; must match KRAM in kernel.cfg
+KSTART  = $A100     ; must match KRAM in kernel.cfg: the user pool is $0800-KSTART-1
 MAXPROC = 12
 NFD     = 8         ; fds per process
 NFILE   = 24        ; system open-file table
@@ -82,7 +82,7 @@ ST     = $90
 ; ---- shared symbols ----
 ; zero page globals (main.s)
 .globalzp cur, in_kernel, need_resched, slice, ticks, p1, p2, p3, p4
-.globalzp k_a, k_x, k_n, k_vec, tmp0, tmp1, tmp2, tmp3, stop_prev, intr_pending
+.globalzp k_a, k_x, k_n, k_p, tmp0, tmp1, tmp2, tmp3, stop_prev, intr_pending
 
 ; main.s
 .global kmain, panic, pool_first, pool_last, irq_exit

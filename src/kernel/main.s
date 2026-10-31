@@ -3,6 +3,7 @@
 
 .import __CODE_LOAD__, __CODE_RUN__, __CODE_SIZE__, __RODATA_SIZE__, __DATA_SIZE__
 .import __JUMPTAB_LOAD__, __JUMPTAB_RUN__, __BSS_RUN__, __BSS_SIZE__
+.import __CODEHI_LOAD__, __CODEHI_RUN__, __CODEHI_SIZE__
 
 .segment "ZEROPAGE"
 cur:          .res 1    ; current process slot, $FF = none
@@ -17,7 +18,7 @@ p4:           .res 2
 k_a:          .res 1
 k_x:          .res 1
 k_n:          .res 1
-k_vec:        .res 2
+k_p:          .res 1
 tmp0:         .res 1
 tmp1:         .res 1
 tmp2:         .res 1
@@ -58,6 +59,16 @@ stub:
         lda #>__JUMPTAB_RUN__
         sta $fe
         ldx #1
+        jsr stub_copy
+        lda #<__CODEHI_LOAD__
+        sta $fb
+        lda #>__CODEHI_LOAD__
+        sta $fc
+        lda #<__CODEHI_RUN__
+        sta $fd
+        lda #>__CODEHI_RUN__
+        sta $fe
+        ldx #>(__CODEHI_SIZE__ + 255)
         jsr stub_copy
         ; the hardware vectors live in RAM now: write them under the ROM first
         lda #<nmi_handler

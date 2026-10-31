@@ -279,3 +279,9 @@ The shortest route to *a compiler exists* is **S12, S13, S14**, and it does not 
 
 - **Containerize VICE and Xvfb** (podman): removes the single-VICE contention between sessions, allows parallel test runs, no focus-stealing window on a desktop, and pins the VICE version, ROM set and any tooling we overlay. Record the image recipe in `docs/testing.md`. Until then, `-console` (no window) is worth trying for macOS runs.
 - **Later still: a remote podman runner** (`podman system connection`), for long-lived containers shared across sessions and agents. Only once the local container recipe exists and feature work is deeper.
+
+## TPA policy and a future feature (2026-10-31)
+
+- **The goal is maximum TPA** (the user pool, `$0800` to `KSTART`-1), without cutting features. While sizes are still moving, the edge is a hand-set constant: `KSTART` in `src/kernel/k.inc` and `KRAM` in `src/kernel.cfg`. The policy: when a change frees kernel space, take the pages back if it makes sense (raise `KSTART`), and keep about a page of headroom so the next small change does not break the build. Growth costs TPA page for page: lower `KSTART`, or find the bytes elsewhere. `make size` prints the room left below the syscall table and the pool size.
+- **Where the space comes from today:** boot-only code in the `INIT` segment (runs from the load area, released to the pool), `cbm.s` running above the BSS (`CODEHI`), the whole syscall entry in the `$CF00` page, and a library split so programs link only what they call.
+- **NTH, later: a TPA-agnostic kernel.** Make the kernel position-independent enough (or have it tell the loader at boot) that "here is the edge of TPA, have fun in there" is something the system reports, not a build constant. That is also the natural home for loadable driver modules.
