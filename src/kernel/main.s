@@ -59,7 +59,16 @@ stub:
         sta $fe
         ldx #1
         jsr stub_copy
-        lda #$36            ; BASIC out, KERNAL + I/O in
+        ; the hardware vectors live in RAM now: write them under the ROM first
+        lda #<nmi_handler
+        sta $fffa
+        lda #>nmi_handler
+        sta $fffb
+        lda #<irq_entry
+        sta $fffe
+        lda #>irq_entry
+        sta $ffff
+        lda #$35            ; BASIC and KERNAL out, I/O in: RAM at $A000 and $E000
         sta $01
         jmp kmain
 stub_copy:                  ; copy X pages ($fb) -> ($fd)
@@ -127,31 +136,6 @@ kmain:
         sta cur
         lda #1
         sta in_kernel
-
-        ; Shadow the KERNAL: copy the ROM onto the RAM under it and run with
-        ; RAM at $E000-$FFFF. The kernel still calls into the copy for the
-        ; console, keyboard and IEC; the hardware vectors are ours.
-        lda #0
-        sta p1
-        lda #$e0
-        sta p1+1
-        tay
-@sh:    lda (p1),y
-        sta (p1),y
-        iny
-        bne @sh
-        inc p1+1
-        bne @sh
-        lda #$35            ; BASIC and KERNAL out, I/O in
-        sta $01
-        lda #<nmi_handler
-        sta $fffa
-        lda #>nmi_handler
-        sta $fffb
-        lda #<irq_entry
-        sta $fffe
-        lda #>irq_entry
-        sta $ffff
 
         jsr kbd_init
         jsr con_init

@@ -30,6 +30,16 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 | H9 | Video stream: does `streams/video:start` deliver frames to the test host? Format, port (default 11000), and a way to grab one frame. | A pixel-exact screenshot for the tests. | Not tried yet. |
 | H10 | With a physical 1541 on the bus, does `mount 9 /mnt` work from Breadbin (it uses the KERNAL IEC routines today)? | Baseline before M0-4 replaces them. | Not tried yet. Drive A is device 8; the physical 1581 is at 10 and Software IEC at 11. |
 
+## Hardware list (run at milestones, not per story)
+
+The standing checklist for a hardware run of a new build. Record the commit and each result in the Log.
+
+1. Boot to the login prompt: `python3 tools/ultimatetest.py build/breadbin.d64`. Note the time.
+2. `BREADBIN_TARGET=ultimate python3 -m unittest tests.test_system.Boot.test_02_echo tests.test_system.Boot.test_13_ctrl_c_blocked_reader tests.test_system.Boot.test_07_directories tests.test_system.Boot.test_10_mv_cp tests.test_console`
+3. Repeat step 1 and `test_02` with the physical 1541 as device 8 (the Ultimate's drive off or renumbered), and `mount 9 /mnt` of the other drive from the shell.
+4. `format` only on expendable media.
+5. Anything the changed story says needs checking (the commit message names it).
+
 ## Log
 
 (newest last)
@@ -99,3 +109,9 @@ Requests, when convenient (none block the cloud session):
 **If it fails**, the most useful thing is the exact screen text plus the status byte at `$0090` (`$80` device not present, `$42` EOI plus read timeout, `$01` write timeout), and whether it stops (a hang) or reports an error.
 
 **What I would still expect to be fragile on hardware.** A real drive's timing (the drives under VICE are cycle-exact but ideal); the bit timing is the middle of the published windows (set-up about 55 µs, valid about 65 µs) and assumes a 1 MHz CPU, so turbo must be off; physical-cable effects (rise time) that an emulator does not model.
+
+### 2026-10-31, a flaky test seen under VICE (cloud session), for whoever is chasing flakiness
+
+Observed twice in about 20 runs of `tests.test_keyboard`: keys typed through real X events go missing in a burst. The full-suite failure (M0-5 build): typed `echo abc 0123`, screen showed `ehobc 0123` (the first `c`, the space and the `a` lost); the other six keyboard tests in the same VICE session passed. An earlier, unlogged smoke-test error on a cold start may be the same thing.
+
+My working theory, for the VICE harness only: `xdotool key` presses and releases within a few milliseconds of wall time, and with VICE in warp mode both events can arrive in one batch before the emulated machine has scanned the keyboard, so the key never exists as far as the 60 Hz scan is concerned. The fix being tested is to `keydown`, wait about 60 ms, `keyup` (see `Vice.xkey`). If that holds over repeated runs it is a harness problem, not a keyboard-driver problem. If you are seeing flakiness on the hardware bench (where there is no key injection, so it cannot be this), that is a different cause: the usual suspects are screen-state races (waiting on text that is already on screen), the pause and resume of the machine in `keybuf`, and timing of the bus.

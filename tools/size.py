@@ -12,6 +12,7 @@ import re
 import sys
 
 KRAM_TOP = 0xCF00      # the syscall jump table
+HI_TOP = 0xFFFA        # the hardware vectors
 
 
 def main():
@@ -38,9 +39,16 @@ def main():
             tot[c] += v
         print(f"{name:10s}" + "".join(f"{v:8d}" for v in row) + f"{sum(row):8d}")
     print(f"{'total':10s}" + "".join(f"{tot[c]:8d}" for c in cols) + f"{sum(tot.values()):8d}")
-    bss = re.search(r"^BSS\s+([0-9A-F]+)\s+([0-9A-F]+)", text, re.M)
-    end = int(bss.group(2), 16)
-    print(f"\nkernel image ends at ${end:04X}; headroom below ${KRAM_TOP:04X}: {KRAM_TOP - end - 1} bytes")
+    def end(seg):
+        m = re.search(r"^%s\s+([0-9A-F]+)\s+([0-9A-F]+)" % seg, text, re.M)
+        return int(m.group(2), 16) if m else None
+    code_end = max(end(sg) or 0 for sg in ("CODE", "RODATA", "DATA"))
+    bss_end = end("BSS")
+    print(f"\ncode and data end at ${code_end:04X}; room below ${KRAM_TOP:04X}: {KRAM_TOP - code_end - 1} bytes")
+    if bss_end and bss_end >= 0xE000:
+        print(f"BSS ends at ${bss_end:04X}; room below ${HI_TOP:04X}: {HI_TOP - bss_end - 1} bytes")
+    elif bss_end:
+        print(f"BSS ends at ${bss_end:04X} (in the code region)")
     progs = "build/root/bin"
     if os.path.isdir(progs):
         sizes = sorted(((os.path.getsize(os.path.join(progs, f)), f) for f in os.listdir(progs)), reverse=True)
