@@ -1,7 +1,7 @@
 ; Breadbin kernel internal definitions
 .include "../../include/breadbin.inc"
 
-KSTART  = $9700     ; must match KRAM in kernel.cfg: the user pool is $0800-KSTART-1
+KSTART  = $9600     ; must match KRAM in kernel.cfg: the user pool is $0800-KSTART-1
 MAXPROC = 12
 NFD     = 8         ; fds per process
 NFILE   = 24        ; system open-file table
@@ -101,7 +101,7 @@ ST     = $90
 .global p_sig, p_exit, p_name, p_fd, p_cwd, p_cwdino, p_cwddev, p_save
 .global next_pid, proc_init, slot_save_ptr, check_signal
 ; mem.s
-.global page_alloc, page_free, mem_init, sys_meminfo, free_pages, total_pages
+.global page_alloc, page_alloc_hi, page_free, mem_init, sys_meminfo, free_pages, total_pages
 ; blk.s
 .global blk_init, bread, bdirty, bflush_all, buf_ptr, reu_banks, dev_present
 .global iec_open, iec_close, ts_block, iec_command, cur_dev_set, dev_drive, dev_type
