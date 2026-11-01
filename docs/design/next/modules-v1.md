@@ -52,3 +52,12 @@ CX v2 modules (trailer, delta relocs), per-class registration tables (C1/C2 in l
 ### uci.km (2026-11-01, feat/uci-km)
 
 The second real module, `/lib/km/uci` (`src/mod/uci.s`): loaded by `mount uci`, unloaded at its umount or when that mount fails (unlike `cbm.km`, which stays). Resident: sixteen `jmp` stubs whose operands the module patches (no vector table), `uci_load`/`uci_drop`; `init`/`fini` refuse unless the kernel is the caller (`uci_sl = $FF`). Details and numbers: `docs/design/next/uci-v1.md`, addendum "uci.km". `kapi.txt` grows by 24 names.
+
+## Security model (hostile review, 2026-11-01)
+
+There is no privilege boundary on this machine, and the module code must not pretend there is one:
+
+- The 6510 has no memory protection. Any program can write kernel RAM, the vectors or the zero page directly; `SYS_CACHE` ops 4 and 5 being "root only" (`su_check`) keeps ordinary mistakes out, it does not stop a program that wants kernel mode.
+- c64fs has no owner or mode on inodes, so any user can replace `/lib/km/<name>`; the kernel loads `cbm.km` and `uci.km` itself at mount time (no uid check). The API hash covers only the kernel's exported addresses, and anyone can copy it from a shipped module. This is a cooperative-system trust model: the disk is trusted.
+- What is enforced, because it prevents accidents: `init` is refused unless the kernel is loading the module (`mod_busy`; cbm.km and uci.km check it), so running a module file as a program, by spawn or exec, cannot repoint the resident vectors at memory that the exiting process frees; cbm.km refuses a second copy (`cbm_up`); the root check on load/unload; the hash check against a module built for another kernel.
+- A future ownership model (file modes, a protected module directory, memory protection by an MMU-less scheme such as a kernel-only page range) is a different project.
