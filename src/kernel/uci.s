@@ -21,7 +21,7 @@
 
 .importzp fb, pp
 .import build_path, pbuf, mnt_of_dev, mt_path, nm_dev, nm_ino, nm_parent, f_done
-.import of_flags, open_exists
+.import of_flags, open_exists, is_dot
 
 .export uci_namei, uci_iget, uci_read, uci_xread, uci_write, uci_open, uci_create
 .export uci_release, uci_hw, uci_attach, uci_umount, uci_fsinfo, uci_mkdir
@@ -1163,10 +1163,15 @@ uci_rename:
         bcs @r
         lda nm_dev
         cmp #DEV_UCI
-        beq @s
+        beq @d
         lda #EXDEV
         sec
 @r:     rts
+@d:     jsr is_dot          ; "new/." and "new/..": EINVAL, as on c64fs
+        bne @s
+        lda #EINVAL
+        sec
+        rts
 @s:     jsr u_nofiles
         bcs @r
         jsr uci_closeall

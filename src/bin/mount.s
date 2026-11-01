@@ -19,10 +19,12 @@ idx = $23
         jsr argn
         sta r0
         stx r0+1
-        ldy #0
-        lda (r0),y
-        cmp #'u'
+        ldy #3              ; exactly "uci"
+@u:     lda (r0),y
+        cmp s_ucia,y
         bne @num
+        dey
+        bpl @u
         lda #'U'            ; the kernel's name for the Ultimate's storage
         sta isu
         bne @dv
@@ -130,6 +132,7 @@ usage: .byte "usage: mount [drive|uci dir]", 10, 0
 s_root: .byte " on / (c64fs)", 10, 0
 s_reu: .byte "reu", 0
 s_uci: .byte "uci", 0
+s_ucia = s_uci
 s_ucit: .byte " (uci)", 0
 s_drv: .byte "drive ", 0
 s_on:  .byte " on ", 0
