@@ -458,12 +458,12 @@ class Modules(unittest.TestCase):
             v.wait_shell()
             self.assertEqual(v.run("mod ls"), "")
             out = v.run("mod load /lib/km/hello")
-            self.assertIn("hello from a module", out)
+            self.assertIn("hello from module", out)
             ls = v.run("mod ls")
-            self.assertRegex(ls, r"slot 0: page \d+, pages 1, class 1")
+            self.assertRegex(ls, r"slot 0: page \d+, pages 1, class 0")
             page = int(re.search(r"page (\d+)", ls).group(1))
             self.assertGreater(page, 100)                 # top of the pool, not the bottom
-            v.run("mod unload 0")
+            self.assertIn("bye from module", v.run("mod unload 0"))
             self.assertEqual(v.run("mod ls"), "")
 
     def test_bad_module_is_refused(self):

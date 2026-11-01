@@ -1,0 +1,12 @@
+# Kernel API exported to modules (docs/design/next/modules-v1.md). Adding a name is a decision.
+# Never list INIT symbols. One symbol per line.
+con_puts_ax
+con_putc
+page_alloc
+page_free
+tmp0
+tmp1
+p1
+p2
+p3
+p4
