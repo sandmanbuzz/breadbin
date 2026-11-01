@@ -259,3 +259,23 @@ All on the physical 1541 as device 8, nothing else on the bus (the 1581 removed,
 - **Hammering one block:** 512 consecutive stock-environment reads of track 16 sector 1 (the `/bin` directory block that three of five recorded stalls died on): no stall. The block is just one of the most-read in a boot.
 - **Illegal opcodes** (`experiments/illegal-ops` from the `reu-cache` branch, requested by the cache session): loaded with `runners:run_prg` on the C64 Ultimate, firmware 1.1.0, core 1.49, FPGA 122: `ILLEGAL OPS: PASS`, 0 failures of 21 checks (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA, ANC, ALR, ARR in binary mode, SBX, `$EB`, and the NOP forms). The kernel may use those on this machine. Not checked: the unstable ones (ANE, LXA, SHA, SHX, SHY, TAS, LAS), which the test leaves out on purpose, and any real 6510.
 
+### 2026-11-01, more negatives on the physical-1541 stall, and a recommendation to park it (hardware session)
+
+All on the physical 1541 as device 8, clean bus, stock KERNAL host, the original stage-2 kernel by DMA unless stated; baseline is about 1 pass in 4 (5 in 20 across series; individual series of 8 range from 1 to 3 passes).
+
+| Change | Passes |
+|---|---|
+| the 1581's short IEC cable, plugged into the 1541's other IEC socket | 1 of 8 |
+| upstream kernel with its IRQ vector pointed at the ROM's own handler (`$EA31`) | 2 of 8 |
+| `Command Interface` disabled in the Ultimate (UCI registers off) | 1 of 8 |
+| `RAM Expansion Unit` disabled (earlier entry) | 1 of 8 |
+
+- **Drive RAM** (`experiments/iec-stall/drvram.s`): 25 passes of 8 patterns over the drive's free buffer RAM `$0300-$06FF` through `M-W`/`M-R` (about 200 KB written and read back, about 6,400 write commands): 0 mismatches.
+- **State at a stall** (`envdump.py`): a stalled upstream kernel against a stock BASIC machine, every register that a read cannot disturb: the CPU port, the CIA data-direction and control registers, the VIC mode and enable registers and the SID are identical. What differs is cosmetic (character set, colours), the interrupt vectors, the KERNAL's IEC bookkeeping (consistent with "reading from device 8 in the bit loop") and the running timer counters. Upstream never touches the CIA1 timers.
+- The upstream interrupt handler is the ROM's plus Breadbin's own work (cursor, sleeper scan, Ctrl-C check, scheduler tick); replacing it with the ROM's gave the same rate, and a deliberately slow handler (5 ms per tick) in the stock environment did not stall either.
+- **Everything the stock environment can vary has now passed 1,600+ full block reads on this drive without a single stall:** BASIC and machine code, sequential, random and spread tracks, CR or EOI-only commands, a hostile IRQ handler, 512 reads of one block. Every Breadbin kernel, including the pre-fork upstream one, stalls at about 3 boots in 4.
+
+**Recommendation: park the root-cause hunt.** It is a rathole by the usual test: more than 130 boots across about 30 conditions, each eliminating a hypothesis and none localising the cause, the problem appears with code we did not write, and the cost is mostly wall time on a machine that other work needs. What it costs the product is limited: the Recommended tier (UCI) and the Expanded tier (the REU cache) do not depend on repeated bus reads; Classic on a real 1541 does, and is the exposure. Reopen if any of these happens: (1) a second physical 1541 or another C64 shows the stall or does not (the cheapest high-value datum there is); (2) Classic reliability on real drives becomes a ship criterion; (3) the fast-loader work (M0-8) needs the bus understood; (4) the stall appears on the emulated drive or in a UCI-era design.
+
+**One last piece of work worth doing before parking, because it turns the finding into product value whatever the cause:** in a stall the drive is waiting for us (CLK held low, in its talker loop, where per the 1541 DOS source only ATN ends the wait). Make the stage-2 driver time out at every bus wait, assert ATN (UNTALK) to release the drive, and retry the block. That converts a hang into a retry. It needs two things to be checked on hardware first: that ATN really releases a stalled drive, and that a stall never completes silently with wrong bytes (all recorded stalls ended in a timeout, and 1,600+ full-speed reads showed none; with the host DMA polling a corrupted transfer was seen on stage 1 and 2 alike, which is a different mechanism).
+
