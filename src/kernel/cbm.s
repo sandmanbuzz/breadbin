@@ -8,6 +8,7 @@
 ;
 ; Pseudo inodes: 1 = the root directory, k+2 = directory entry k.
 .include "k.inc"
+.include "uci.inc"
 
 .importzp bp, pp
 .import binval, cmdbuf, cmdlen, to_ascii, to_petscii, build_path, pbuf
@@ -17,6 +18,7 @@
 .export cbm_iget, cbm_lookup, cbm_read, cbm_readdir, cbm_open_write
 .export cbm_write, cbm_wclose, cbm_scratch, cbm_rename, cbm_fsinfo
 .export sys_mount, sys_umount, sys_mntinfo, sys_diskio
+.import uci_hw, uci_attach, uci_umount
 
 .segment "BSS"
 cb_t:    .res 1
@@ -673,9 +675,18 @@ cbm_fsinfo:
 @r:     rts
 
 ; ---------------------------------------------------------------------
-; mount(A = drive 9-11, r0 = directory)
+; mount(A = drive 9-11, or 'U' for the Ultimate's storage, r0 = directory)
 sys_mount:
-        sec
+        cmp #'U'
+        bne @drv
+        lda dev_present+DEV_UCI
+        bne @onboot         ; one UCI mount at a time
+        jsr uci_hw          ; probe the hardware first (only here, never at boot)
+        bcs @rr
+        lda #DEV_UCI
+        sta mo_dev
+        bne @np
+@drv:   sec
         sbc #7
         cmp #2
         bcc @inval
@@ -690,7 +701,7 @@ sys_mount:
         beq @np
 @onboot: lda #EBUSY
         sec
-        rts
+@rr:    rts
 @inval: lda #EINVAL
         sec
         rts
@@ -739,7 +750,12 @@ sys_mount:
 @ok:    jsr build_path
         bcs @r
         ldx mo_dev
-        jsr iec_open
+        cpx #DEV_UCI
+        bne @iec
+        jsr uci_attach
+        bcs @r
+        jmp @add
+@iec:   jsr iec_open
         bcs @r
         lda mo_dev
         jsr binval
@@ -953,7 +969,12 @@ sys_umount:
         ldx mo_dev
         sta dev_present,x
         sta dev_type,x
-        jsr iec_close
+        cpx #DEV_UCI
+        bne @iec
+        jsr uci_umount
+        clc
+        rts
+@iec:   jsr iec_close
         lda mo_dev
         jsr binval
         clc
