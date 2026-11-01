@@ -100,9 +100,11 @@ Where the cloud session stands, so a fresh context can resume:
 | Lane | Who | Claims (files/areas) | Doing / next |
 |---|---|---|---|
 | Kernel footprint round 2 | Agent 3 (Kernal) | `src/kernel/jtab.s`, `proc.s`, `main.s`, `mem.s`, `kernel.cfg`, `k.inc`, `src/lib/*` | test fanout on main (keyboard, full suite in the container); lean `sys_return`, sched fast path, undocumented-opcode peepholes where bytes are saved |
-| UCI v1 | breadbin-next (f7) | new `uci.s`, `cbm.s`, `fs.s`; `blk.s` only after Agent 2's `fix/iec-recover` merges (ask first) | start from `main`; room is tight (236 bytes below $CF00): pay with `KSTART`, a page at a time, and say so |
+| UCI v1 (MERGED to main 2026-11-01) | breadbin-next (f7) | new `uci.s`, `cbm.s`, `fs.s`; `blk.s` only after Agent 2's `fix/iec-recover` merges (ask first) | start from `main`; room is tight (236 bytes below $CF00): pay with `KSTART`, a page at a time, and say so |
 | Hardware: IEC recovery | Agent 2 (hardware) | `fix/iec-recover`: `iec.s` (bus_acptr ready wait bounded), `blk.s` (iec_read retries); +56 bytes (180 left below $CF00 after main) | **8 of 8 boots on the physical 1541** (was about 1 in 4), `docs/hardware-notes.md`; merged to local main; next: cache A/B, JiffyDOS-ROM subset, then DMA read bit and image write-back for UCI |
 | Hardware: stall bench | Agent 2 (hardware) | `hw-bench`, `experiments/iec-stall/`, `tools/ultimate*`, `docs/hardware-notes.md`, the `ultimate` lock | physical-1541 stall experiments; hardware list on main. breadbin-2b: idle, unclaimed (settled 2026-11-01) |
 | CI / containers | breadbin-next (f7) authored `tools/ci` (`next/ci`) | `tools/ci`, `docs/ci.md` | container runner works for `test-host` (checked 2026-10-31); keyboard run in progress by Agent 3 |
 
 **Open items nobody owns yet:** `test_keyboard` needs X (container); JiffyDOS-ROM disk and bus subset on main; drive-module modularisation (needs the S6 filesystem interface first); a TPA-agnostic kernel (NTH). Take one by writing your name here.
+
+**UCI v1 merged (2026-11-01):** it spent 10 pages of TPA (`KSTART` $9700, 143 pool pages; was 153 before it) and left 310 bytes below $CF00 and 58 bytes above BSS+CODEHI. `uci.s` is throwaway-labelled: its header lists the cut list for the next footprint pass, and in v2 it becomes a loadable module (the `bmi` dispatch sites in file.s/fs.s/exec.s/cbm.s are the seam). The author's runs: Pool, Drives, Persistence, smoke, 71 host tests (23 sim tests need py65), py65 sim 23. The full suite on the merged tree is the fanout item below.

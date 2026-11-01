@@ -5,6 +5,7 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 | Level | Command | Time (measured in a cloud container) |
 |---|---|---|
 | Host tests | `make test-host` | about 12 seconds; no emulator (includes the Ultimate client against a fake server) |
+| UCI simulator | `make test-host` with py65 installed (see below) | about 4 seconds more: the real kernel image in a 6502 emulator against a fake Command Interface |
 | Smoke | `make test-smoke` | about 2 to 3 minutes: boot, echo, a three-stage pipe, Ctrl-C |
 | Targeted | `make test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `xvfb-run -a make test-console` | about 3 minutes: screen RAM, colour RAM and VIC registers read back |
@@ -16,6 +17,21 @@ The keyboard tests inject real X key events with `xdotool` (`apt install xdotool
 ## On a real Ultimate
 
 The `Boot` class, `test_keyboard` and `test_console` pick their backend with `make_target`: the VICE emulator by default, a real Ultimate with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (and `BREADBIN_ULTIMATE_PASSWORD` if set). The backend mounts `build/breadbin.d64` in drive A, resets, loads and runs it. `type()` and `keybuf()` write the key buffer by DMA, as VICE's `keybuf` does; `xkey` and friends use real key events (Ultimate 64 only). Tests that need the emulator (`-reu`, extra drives, reboot persistence) stay on VICE. `make test-host` includes the client's 24 tests against a fake server. See `docs/hardware-notes.md` for what has and has not been verified.
+
+## The UCI simulator (py65)
+
+`tools/test_uci_sim.py` tests UCI v1 (`src/kernel/uci.s`, `docs/design/next/uci-v1.md`) without an Ultimate: it loads the **real kernel image** (`build/breadbin.prg`) into [py65](https://github.com/mnaberez/py65) (a 6502 emulator in Python, BSD licence), runs the boot stub and `kmain` up to the point where `/bin/init` would start, then calls syscalls through the jump table at `$CF00` as one process. `tools/uci_sim.py` has the harness and `FakeUCI`, a model of the Command Interface registers at `$DF1B-$DF1F` built from the measurements in `docs/hardware-notes.md` ("UCI as measured", on `hw-bench`) and the firmware's DOS target (`software/filemanager/dos.cc` in 1541ultimate), on a temporary host directory.
+
+py65 is a test dependency only, not vendored. Install it into a virtualenv of your own (not globally), then run `make test-host` or the file alone with that interpreter. Without py65, or before `make`, the 16 tests skip and `make test-host` stays green.
+
+```sh
+python3 -m venv /path/to/venv && /path/to/venv/bin/pip install py65
+make && /path/to/venv/bin/python -m unittest tools.test_uci_sim -v
+```
+
+Faked, so not covered: the IEC bus (`iec_open`/`iec_read`/`iec_write` are trapped and served from `build/breadbin.d64` in memory), the REU (reported absent), interrupts (none are raised: the scheduler, the keyboard and the clock never run, so a spawned program is loaded and checked byte for byte but not started), and the Ultimate itself (the fake shares the documentation's gaps: timing, FAT case-insensitivity, the exact status of untried error cases). Running the whole system in py65 (init, the shell) would need the CIA timer interrupt, the keyboard matrix and a 1541 on the IEC bus; not attempted. The hardware check list is in the spec, section 7.
+
+Covered: Classic untouched (no access to `$DF1B-$DF1F` at boot or in file operations; `mount uci` with no interface reads `$DF1D` once and says "no such device"; open bus showing `$C9` fails the IDENTIFY), mount and `mount` listing, `ls` (including names over 14 characters), `cat`, `stat`, write and read back, `O_TRUNC`, `O_APPEND`, a 100 KB write, relative paths and the working directory, `..` out of the mount, `unlink`/`mkdir`/`rmdir`/`rename` and their errors, three open files on two host handles (eviction, reopen, seek), `EMFILE`, `umount` (busy, the page given back, remount), running a program from `/u` (absolute and relative, `ENOEXEC`, `ENOENT`), c64fs unchanged while `/u` is mounted. Every test also checks that the kernel never opened a file on a DOS target that still had one open, and never wrote command bytes while the interface was busy.
 
 ## With other ROMs (JiffyDOS)
 
@@ -73,6 +89,7 @@ By test name; refine this as we learn what actually catches what.
 | Loader, `as`, `basic` (`exec.s`, `as.s`, `basic.s`) | `test_17`, `test_18`, `test_19` |
 | A single command in `src/bin/` | the test that uses it (`grep -n <name> tests/test_system.py`) |
 | Image tools, key tables (`tools/`) | `make test-host` |
+| UCI v1 (`uci.s`, the `bmi` sites in `file.s`, `fs.s`, `exec.s`, `cbm.s`) | `make test-host` with py65 (`tools/test_uci_sim.py`), plus `Drives`, `REU`, `Pool` and a smoke run in VICE |
 | Anything that adds or removes kernel code | `make size`, and quote the numbers in the commit message |
 
 Examples:

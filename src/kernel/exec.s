@@ -104,8 +104,9 @@ spawn_common:
         jsr namei
         bcs @r
         ldx nm_dev
-        lda dev_type,x      ; programs only run from c64fs
+        lda dev_type,x      ; programs run from c64fs and UCI, not CBM disks
         beq @c64
+        bmi @c64
         lda #ENOEXEC
         sec
         rts

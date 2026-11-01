@@ -1,5 +1,6 @@
 ; mount [drive dir]: list mounts, or mount drive 9-11 on a directory
 ;   mount 9 /mnt     a Breadbin disk (with directories) or a normal C64 disk
+;   mount uci /u     the Ultimate's file storage (Command Interface; UCI v1, dev only)
 .include "../../include/breadbin.inc"
 .import argn, parse_dec, perr, print, eprint, putc, newline, print_dec
 idx = $23
@@ -16,14 +17,27 @@ idx = $23
         jmp SYS_EXIT
 @mount: lda #1
         jsr argn
+        sta r0
+        stx r0+1
+        ldy #3              ; exactly "uci"
+@u:     lda (r0),y
+        cmp s_ucia,y
+        bne @num
+        dey
+        bpl @u
+        lda #'U'            ; the kernel's name for the Ultimate's storage
+        sta isu
+        bne @dv
+@num:   lda r0
         jsr parse_dec
         bcs @bad
-        sta drv
+@dv:    sta drv
         lda #2
         jsr argn
         sta r0
         stx r0+1
         lda drv
+        ldx isu             ; X = 'U' marks the Ultimate (A alone could be drive 85)
         jsr SYS_MOUNT
         bcc @ok
         pha
@@ -69,7 +83,13 @@ idx = $23
         lda idx
         jsr SYS_MNTINFO
         bcs @n
-        lda buf
+        lda buf+1
+        bpl @nu
+        lda #<s_uci
+        ldx #>s_uci
+        jsr print
+        jmp @on
+@nu:    lda buf
         bne @drv
         lda #<s_reu
         ldx #>s_reu
@@ -89,7 +109,12 @@ idx = $23
         jsr print
         lda buf+1
         beq @c64
-        lda #<s_cbm
+        bpl @cbm
+        lda #<s_ucit
+        ldx #>s_ucit
+        jsr print
+        jmp @nl
+@cbm:   lda #<s_cbm
         ldx #>s_cbm
         jsr print
         jmp @nl
@@ -103,13 +128,17 @@ idx = $23
         bne @l
         rts
 .segment "RODATA"
-usage: .byte "usage: mount [drive dir]", 10, 0
+usage: .byte "usage: mount [drive|uci dir]", 10, 0
 s_root: .byte " on / (c64fs)", 10, 0
 s_reu: .byte "reu", 0
+s_uci: .byte "uci", 0
+s_ucia = s_uci
+s_ucit: .byte " (uci)", 0
 s_drv: .byte "drive ", 0
 s_on:  .byte " on ", 0
 s_c64: .byte " (c64fs)", 0
 s_cbm: .byte " (cbm dos)", 0
 .segment "BSS"
 drv: .res 1
+isu: .res 1
 buf: .res 34

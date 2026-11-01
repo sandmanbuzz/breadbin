@@ -9,7 +9,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, "<repo>/tools")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
 from ultimate import Ultimate  # noqa: E402
 
 u = Ultimate(os.environ["BREADBIN_ULTIMATE"])
