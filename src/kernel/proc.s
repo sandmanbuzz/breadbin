@@ -38,7 +38,7 @@ wk_ch:    .res 1
 .segment "RODATA"
 s_init: .byte "init exited", 0
 
-.segment "CODE"
+.segment "INIT"
 proc_init:
         ldx #MAXPROC-1
         lda #PS_FREE
@@ -50,6 +50,7 @@ proc_init:
         rts
 
 ; slot_save_ptr: X = slot -> p3 = &p_save[slot*192]. Preserves X.
+.segment "CODE"
 slot_save_ptr:
         txa
         lsr a

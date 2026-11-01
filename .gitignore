@@ -3,3 +3,7 @@ build/
 *.pyc
 __pycache__/
 .remember/
+build0/
+experiments/illegal-ops/*.o
+experiments/illegal-ops/*.lst
+experiments/illegal-ops/*.prg
