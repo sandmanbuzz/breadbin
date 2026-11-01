@@ -1,0 +1,12 @@
+Report template (fill every field; write VERIFIED (you read it in a source, give URL) or UNVERIFIED; quote licence text verbatim):
+- name / author / version / date
+- source URL(s) (code, docs)
+- licence or usage statement (verbatim) + URL; any reuse evidence (others reusing/forking it, author's comments)
+- host (C64) side: resident size in bytes; zero page/memory used; needs IRQs off? screen blanked? works with interrupts and screen on? sprites?
+- drive side: size in bytes; where it runs ($0300..?), uploaded how (M-W/M-E), which ROM routines it calls (addresses)
+- disk format: normal 1541 DOS disk/arbitrary track+sector, or custom? file-level or sector-level API?
+- save/write support (yes/no/limited; how)
+- transfer scheme: bits per step, lines used (CLK/DATA/ATN), handshake or timing based, sync with raster?
+- speed: bytes/second (give number and where from)
+- drive compatibility: stock 1541 ROM, JiffyDOS drive ROM, 1541-II, 1571, 1581, Ultimate emulated 1541, multiple drives on the bus
+- known problems

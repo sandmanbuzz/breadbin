@@ -8,18 +8,26 @@ LIBSRC  := $(wildcard src/lib/*.s)
 LIBOBJ  := $(BUILD)/lib/breadbin.lib
 ROOTSRC := $(shell find rootfs -type f)
 
-.PHONY: all clean test test-host run run-reu
+.PHONY: FORCE all clean test test-host test-smoke test-only test-keyboard test-console size run run-reu
 .SECONDARY:
 all: $(BUILD)/breadbin.d64
 
+# make CACHE=0 builds a kernel whose REU block cache stays off until `cache on` (bench images)
+CACHE   ?= 1
+$(BUILD)/cache.stamp: FORCE
+	@mkdir -p $(BUILD)
+	@echo "$(CACHE)" | cmp -s - $@ || echo "$(CACHE)" > $@
+FORCE:
+$(BUILD)/k/blk.o: $(BUILD)/cache.stamp
+
 $(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
-	ca65 -g -I src/kernel $< -o $@
+	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) $< -o $@
 
 $(BUILD)/breadbin.prg: $(KOBJ) src/kernel.cfg
 	ld65 -C src/kernel.cfg -m $(BUILD)/kernel.map -Ln $(BUILD)/kernel.lbl -o $@ $(KOBJ)
 
-$(BUILD)/lib/%.o: src/lib/%.s include/breadbin.inc
+$(BUILD)/lib/%.o: src/lib/%.s src/lib/lib.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
 	ca65 -g $< -o $@
 
@@ -46,6 +54,26 @@ $(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(ROOTSRC) tools/mkimage.py
 test-host:
 	python3 -m unittest discover -s tools -p 'test_*.py'
 
+# A few minutes: the boot, scheduler, pipe and Ctrl-C paths. Run after any kernel change.
+SMOKE := tests.test_system.Boot.test_00_kernal_is_shadowed \
+         tests.test_system.Boot.test_02_echo \
+         tests.test_system.Boot.test_05_pipe_three_stages \
+         tests.test_system.Boot.test_13_ctrl_c_blocked_reader
+test-smoke: all test-host
+	python3 -m unittest $(SMOKE) -v
+
+# Real keystrokes through VICE's keyboard matrix (needs xdotool and a display):
+#   xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard
+test-keyboard: all
+	python3 -m unittest tests.test_keyboard -v
+
+test-console: all
+	python3 -m unittest tests.test_console -v
+
+# Targeted: make test-only T="tests.test_system.Boot.test_24_editor tests.test_system.REU"
+test-only: all
+	python3 -m unittest $(T) -v
+
 test: all test-host
 	python3 -m unittest discover -s tests -p 'test_*.py' -v
 
@@ -57,3 +85,7 @@ run-reu: all
 
 clean:
 	rm -rf $(BUILD)
+
+# byte budget per kernel module and the headroom left
+size: all
+	python3 tools/size.py
