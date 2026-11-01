@@ -4,7 +4,9 @@ section 7). Used by tools/test_uci_sim.py.
 
 What is real: the whole kernel image (build/breadbin.prg), its boot stub, kmain up to the point
 where it would start /bin/init (BSS clear, memory, process and file tables, the root mount from
-build/breadbin.d64), and every syscall, called through the jump table at $CF00.
+build/breadbin.d64), and every syscall, called through the jump table at $CF00. The UCI code is
+the kernel module /lib/km/uci (src/mod/uci.s): `mount uci` loads it from the disk image through
+the kernel's own mod_load (the same path as on a C64), and umount unloads it.
 What is faked: the IEC bus (iec_open/iec_read/iec_write are trapped and served from the disk
 image in memory), the REU (reported absent), interrupts (none are raised: the scheduler never
 runs, so a test is one process calling syscalls), and the Ultimate (FakeUCI below).
@@ -513,6 +515,20 @@ class Sim:
         if path2 is None:
             return self.sys(name, r0=self.cstr(path))
         return self.sys(name, r0=self.cstr(path), r1=self.cstr(path2, 0x8080))
+
+    def free(self):
+        return self.mem.b[self.lbl["free_pages"]]
+
+    def modules(self):
+        """[(base page, pages)] of the loaded kernel modules (exec.s mod_base/mod_np)."""
+        m, L = self.mem.b, self.lbl
+        return [(m[L["mod_base"] + i], m[L["mod_np"] + i]) for i in range(4) if m[L["mod_base"] + i]]
+
+    def stub(self, i):
+        """Target of the i-th resident UCI stub (src/kernel/uci.s: `jmp` at ucv + 3i)."""
+        a = self.lbl["ucv"] + 3 * i
+        assert self.mem.b[a] == 0x4C
+        return self.mem.b[a + 1] | self.mem.b[a + 2] << 8
 
     def mount_uci(self, path):
         return self.sys("MOUNT", a=ord("U"), x=ord("U"), r0=self.cstr(path))
