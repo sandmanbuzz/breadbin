@@ -32,6 +32,10 @@ def rdtight(target, chunk, total, blind=False):
     return bytes([6 if blind else 5, target]) + struct.pack("<HH", chunk, total)
 
 
+def wrtight(target, total):
+    return bytes([7, target]) + struct.pack("<HH", 512, total) + bytes([0])
+
+
 def ctrl(v):
     return bytes([3, v])
 
@@ -66,6 +70,10 @@ GROUPS = {
     "tight": ([x for c, blind in ((512, False), (4096, False), (32768, False), (512, True), (4096, True), (32768, True))
                for x in (("open", open_read()), (f"tight {'blind' if blind else 'checked'} read 32 KB in {c}-byte requests",
                           rdtight(1, c, 32768, blind)), ("close", close()))]),
+    "wtight": ([("create", cmd(1, 0x02, 0x0A, *b"/Temp/uci-w.bin")), ("write 32 KB, tight loop, 512-byte requests", wrtight(1, 32768)),
+                ("close", close()), ("create", cmd(1, 0x02, 0x0A, *b"/Temp/uci-w.bin")),
+                ("write 128 KB, tight loop", wrtight(1, 65024)), ("write another 64,000 bytes", wrtight(1, 64000 // 512 * 512)),
+                ("close", close()), ("file info check", open_read(1, b"/Temp/uci-w.bin")), ("file info", cmd(1, 0x07)), ("close", close())]),
     "paths": ([("change dir /Temp", cmd(1, 0x11, *b"/Temp")), ("get path", cmd(1, 0x12)),
                ("file stat, relative name", cmd(1, 0x08, *b"uci32k.bin")),
                ("file stat, absolute name", cmd(1, 0x08, *FILE)), ("change dir /", cmd(1, 0x11, *b"/")),
