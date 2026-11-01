@@ -288,3 +288,18 @@ What the code does where it differs from sections 2-7, and why. Tested against t
   - The fake runs on the host's file system: case-sensitive or not depending on the machine (macOS: not), while FAT is case-insensitive. `cp A a` truncating its source is not tested.
 
 **Next footprint pass, in order** (also in the header of `uci.s`): move all of `uci.s` into a loadable module (v2, section 6); until then: the IDENTIFY check (keep the `$C9` test), the readdir `~` mark, `O_APPEND`, the rmdir mapping, the probe-handle adoption, the text error map (-> EIO).
+
+## Bench results for the fake's assumptions (2026-11-01, firmware 1.1.0, from `docs/hardware-notes.md`)
+
+Measured by the hardware session on the real DOS target with its own tool, not through the kernel:
+
+| Assumption | Result |
+|---|---|
+| (b) DIR attribute at offset 11 of FILE INFO | CONFIRMED: extension is bytes 8-10, attribute byte 11 (`$20` file, `$10` directory), name from 12 |
+| (c) DELETE / RENAME / CREATE DIR take absolute names after CD | CONFIRMED: after `CD /Temp/gapsub` all answer 00,OK, 57-70 ms each (DELETE of a directory too) |
+| (d) OPEN `$02` does not truncate | CONFIRMED: a 1 KB file stays 1 KB |
+| (a) DATA_ACC changes state at once | NO packet skipped by count (32 KB read in 256/512/4096/32768-byte requests: always 32,768 bytes); content was not compared, so a byte-compare is still owed |
+| (e) 512+4-byte WRITE fits the command buffer | exercised by the 512-byte tight-loop writes (125-127 requests, size exact); counts as confirmed |
+| (f) `\..` resolved by the host, directory commands leaving an open file alone, rmdir ACCESS DENIED = not empty | not measured |
+
+New fact: **FILE STAT (`$08`) by name answers 82,FILE NOT FOUND for a file just written and closed** (4 of 4 tries, absolute and relative paths, cwd `/Temp`, `/` and a subdirectory), while the same file opens fine and FILE INFO of the open file is correct; FILE STAT worked for directories and for the same file after a rename. Cause unknown. UCI v1 is not affected: it never uses FILE STAT (`uci.s` stats through OPEN + FILE INFO, `$07`; `$08` appears only as the create-always open attribute). Do not add a STAT-by-name probe. Timings: create 56 ms, mkdir 57-60, delete 59-61, rename 70, cd 11-15, get path 1.2-1.7.
