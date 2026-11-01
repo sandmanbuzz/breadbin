@@ -9,6 +9,8 @@
 ;                                     is stored into a sink the way a driver would (timing includes consuming it)
 ;   3 CTRL  value                     write the control register; log $DF1C and $DF1D read straight after
 ;   4 WRFILL target chunk(2) total(2) pattern   WRITE DATA ($05) total bytes in chunks; pattern byte, or $FF = index
+;   5 RDTIGHT / 6 RDBLIND: like RDLOOP, but the byte loop is a tight loop straight to a page ($4000 window, 8 KB wrapped);
+;     5 still tests DATA_AV on every byte, 6 reads 512 bytes per chunk blind (use a total that is a multiple of 512)
 ; Log entry (64 bytes): +0 op number, +1 last $DF1C, +2..5 elapsed us (32 bits), +6..7 response bytes, +8 status bytes,
 ; +9 result (0 ok, 1 timeout), +10 last $DF1D, +11 commands issued, +12..35 first 24 response bytes, +36..63 first 28 status.
 UCI_CTL  = $DF1C
@@ -92,8 +94,14 @@ start:  lda #$FF            ; the 32-bit microsecond clock: CIA2 timer A (phi2) 
         jsr op_ctrl
         jmp @next
 @n4:    cmp #4
-        bne @end
+        bne @n5
         jsr op_wrfill
+        jmp @next
+@n5:    cmp #5
+        beq @rl
+        cmp #6
+        bne @end
+@rl:    jsr op_rdloop
 @next:  jsr log_end
         inc nops
         lda lp              ; next log entry (64 bytes)
@@ -248,11 +256,54 @@ finish: jsr settimeout
 @got:   sta lastst
         lda UCI_CMD
         sta idsnap
+        lda mode
+        cmp #2
+        bcc @rd
+        cmp #3
+        beq @blind
+        lda #>sink          ; mode 2: a tight loop that still checks DATA_AV on every byte
+        sta @tst+2
+        ldy #0
+@tl:    lda UCI_CTL
+        bpl @tdone
+        lda UCI_RESP
+@tst:   sta sink,y
+        iny
+        bne @tl
+        inc rlen+1
+        inc @tst+2
+        lda @tst+2
+        cmp #>sink+$20
+        bcc @tl
+        lda #>sink
+        sta @tst+2
+        jmp @tl
+@tdone: tya
+        clc
+        adc rlen
+        sta rlen
+        bcc @st2
+        inc rlen+1
+        jmp @st2
+@blind: lda #>sink          ; mode 3: no status check at all, 512 bytes (two pages) per chunk
+        sta @bst+2
+        ldx #2
+        ldy #0
+@bl:    lda UCI_RESP
+@bst:   sta sink,y
+        iny
+        bne @bl
+        inc @bst+2
+        inc rlen+1
+        dex
+        bne @bl
+        jmp @st2
 @rd:    lda UCI_CTL
         bpl @st
         lda UCI_RESP
         jsr rstore
         jmp @rd
+@st2:
 @st:    lda UCI_CTL
         and #$40
         beq @acc
@@ -364,8 +415,14 @@ op_rdloop: ldy #1
         iny
         lda (sp),y
         sta tot+1
+        lda opn             ; op 2: mode 1 (sink with checks), op 5: mode 2 (tight, checked), op 6: mode 3 (tight, blind)
+        cmp #2
+        bne @m
         lda #1
-        sta mode
+        jmp @sm
+@m:     sec
+        sbc #3
+@sm:    sta mode
         jsr wait_idle
         jsr stamp_s
 @lp:    lda tot             ; remaining = tot - rlen
