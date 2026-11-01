@@ -304,3 +304,19 @@ C64 Ultimate, firmware 1.1.0, Command Interface enabled. Tool: `experiments/iec-
 6. **Mounted image write-back: not measured yet** (needs the drive to write and then a look at the file on the Ultimate's side).
 7. **Effect of the UCI registers on the 1541 path:** none seen. The physical-1541 stall rate is the same with the Command Interface disabled (1 of 8) as enabled (about 1 in 4).
 
+### 2026-11-01, UCI as measured: CORRECTION to the throughput above, and more (hardware session)
+
+**The 16 KB/s read figure in the entry above was my measuring loop, not the interface** (a `JSR` to a store routine with a wrap check per byte, about 60 cycles; the breadbin-next session spotted this). With a tight loop (`experiments/iec-stall/uci.s` ops 5 and 6) reading a 32 KB file:
+
+| Read loop | Throughput |
+|---|---|
+| tight loop, `DATA_AV` tested on every byte (`LDA $DF1C / BPL / LDA $DF1E / STA page,Y / INY / BNE`, about 20 cycles) | **44.0 to 44.8 KB/s** (0.73 s), the same for 512-byte, 4,096-byte and 32,768-byte requests |
+| tight loop, no status test, 512 bytes per chunk (about 14 cycles) | **61.6 to 63.3 KB/s** (0.52 s); the per-chunk handshake costs about 0.2 ms |
+
+So the interface keeps up with the CPU and the figure to design with is about **44 KB/s with a safe loop, 62 KB/s blind**. The 21 KB/s write figure was measured with the same kind of loop (the command is built byte by byte through a routine) and is probably also loop-bound; not re-measured.
+
+- **`LOAD REU`** (the file must be open for read): 32 KB 6.2 ms; **128 KB 13.7 ms (9.6 MB/s); 512 KB 44.4 ms (11.8 MB/s)**: a few ms of fixed cost plus about 12 to 13 MB/s. Reply text: `$080000 BYTES LOADED TO ...`.
+- **Create (open for write, create always, flag `$0A`):** 54.8 to 55.7 ms for a new file, the same for an overwrite; close 1.1 ms. Flag `$0E` (write + create new + create always) answers `FILE EXISTS` for an existing file: use `$0A` to overwrite.
+- **Paths:** `CHANGE DIR /Temp` works (7.8 ms); `GET PATH` returns `/Temp/`; `OPEN` accepts an absolute path. **`FILE STAT` (`$08`) answered `82,FILE NOT FOUND` for every name I gave it, absolute or relative, while `OPEN` and `FILE INFO` of the same file work**; use `OPEN` + `FILE INFO` (4.9 ms, 22 bytes: size, date, time, extension, attributes, name) to get a size.
+- Not tried: the DMA bit (`$DF1C` bit 7), SAVE REU, writes at higher rates.
+
