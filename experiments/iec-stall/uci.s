@@ -103,8 +103,12 @@ start:  lda #$FF            ; the 32-bit microsecond clock: CIA2 timer A (phi2) 
         cmp #6
         beq @rl
         cmp #7
-        bne @end
+        bne @n8
         jsr op_wrtight
+        jmp @next
+@n8:    cmp #8
+        bne @end
+        jsr op_setpush
         jmp @next
 @rl:    jsr op_rdloop
 @next:  jsr log_end
@@ -382,7 +386,7 @@ op_cmd: jsr wait_idle
         iny
         dex
         bne @s
-        lda #$01
+        lda pushval
         sta UCI_CTL
         inc ncmd
         jsr finish
@@ -391,6 +395,15 @@ op_cmd: jsr wait_idle
         clc
         adc #2
         jmp adv
+
+; SETPUSH v: the control byte the next CMD ops push with (default 1; $81 = PUSH_CMD with the DMA bit)
+op_setpush: ldy #1
+        lda (sp),y
+        sta pushval
+        lda #2
+        jmp adv
+
+pushval: .byte 1
 
 op_ctrl: ldy #1
         lda (sp),y
