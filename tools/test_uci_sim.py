@@ -428,6 +428,19 @@ class Module(unittest.TestCase):
         self.assertTrue(self.stubs_idle(s))
         self.assertEqual(s.mem.b[s.lbl["uci_sl"]], 0)
 
+    def test_classic_mount_does_not_need_the_module(self):
+        """Review 3: with no UCI, `mount uci` answers ENODEV from the first $DF1D read, before it
+        looks for /lib/km/uci (no bus load, no ENOENT/ENOMEM for a machine without the interface)."""
+        s = Sim(None)
+        s.mem.b[0xDF1D] = 0xFF
+        s.check(s.path_call("UNLINK", "/lib/km/uci"), "unlink the module")
+        self.assertEqual(s.errno(s.mount_uci("/mnt")), "ENODEV")
+        self.assertEqual(s.mem.touch, [("r", 0xDF1D)])
+        u = Sim(FakeUCI(self.dir))                  # a UCI is there: now the module is needed
+        u.check(u.path_call("MKDIR", "/u"), "mkdir")
+        u.check(u.path_call("UNLINK", "/lib/km/uci"), "unlink the module")
+        self.assertEqual(u.errno(u.mount_uci("/u")), "ENOENT")
+
     def test_mount_twice_umount_remount(self):
         u = FakeUCI(self.dir)
         s = Sim(u)
@@ -488,7 +501,7 @@ class Module(unittest.TestCase):
         self.assertEqual(s.errno(s.mount_uci("/u")), "ENOEXEC")
         self.assertEqual(s.modules(), [])
         self.assertEqual(s.free(), free)
-        self.assertEqual(s.mem.touch, [])                       # the probe never ran
+        self.assertEqual(s.mem.touch, [("r", 0xDF1D)])          # only the precheck read; the module probe never ran
         self.assertTrue(self.stubs_idle(s))
         self.assertEqual(s.mem.b[s.lbl["uci_sl"]], 0)
         s.mem.b[s.lbl["kapi_hash"]] ^= 0x01
