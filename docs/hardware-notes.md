@@ -1,0 +1,266 @@
+# Hardware notes
+
+Findings from running Breadbin on real hardware. Append; do not rewrite history. Each entry: date, what was run (a command someone else can repeat), what happened, and the commit it ran against. Unknowns the cloud session is relying on are listed below with an empty result; fill them in.
+
+## Setup
+
+| Item | Value |
+|---|---|
+| Ultimate model and firmware (`GET /v1/info`) | C64 Ultimate, firmware 1.1.0, FPGA 122, core 1.49 |
+| REST password set? Reachable from where? | No password. Reachable over the LAN from the test host. |
+| Drive A: type and ROM | 1541, `JiffyDOS_1541-II.bin`, bus ID 9 (`GET /v1/drives`). Drive B disabled. "Resets when C64 resets": Yes. |
+| Physical drives on the IEC bus, and their device numbers | 2026-10-30: a physical 1541 (fresh media) at device 8; the Ultimate's emulated 1541 at device 9. The two collide with the harness and kernel, which assume device 8 (see log). Also a 1581 at 10 and the Ultimate's Software IEC ("IEC Drive", partition `/USB0/`) at 11. |
+| REU: configured size | |
+| "Command Interface" enabled in the Ultimate's menu? | |
+| "Turbo Mode" setting (Off, Manual, U64 Turbo Registers, Turbo Enable Bit)? | |
+| Where the tests run from (machine, OS, Python version) | |
+
+## Open questions
+
+| # | Question | Why it matters | Result |
+|---|---|---|---|
+| H1 | Are POST attachments multipart or raw? Which `mount` and `run_prg` forms work? | `tools/ultimate.py` guesses multipart. | `mount` with multipart works (default is right). `run_prg` not yet tried. |
+| H2 | **Not answerable on this firmware: `POST /v1/machine:input` answers 404 (see log).** How long must a key tap last for our 60 Hz scan to see it? What is the smallest `delay` in `xkey`/`xtype` that never drops a key? | `xtype` defaults to 0.15 s per key. | |
+| H3 | Does a held key (`xdown`) repeat as in VICE? | `test_keyboard.test_repeat` | Not answerable: no key injection (see H2). |
+| H4 | What does a DMA read of `$0001` return once Breadbin runs: `$35` (the port) or the RAM under it? | `test_00_kernal_is_shadowed` asserts `$35`. | **`$00`.** A DMA read returns the RAM under the CPU port, not the port. The assertion cannot hold on hardware. |
+| H5 | Time from mount and reset to the shell prompt. | Sizes the value of the fast boot (M0-8). | About 46 s from mount to the login prompt with the `login` typed in (JiffyDOS boot, `load"*",8,1`, `run`, Breadbin init). One measurement. |
+| H6 | Does `machine:pause` leave the key buffer update in `keybuf()` atomic? Any visible glitch? | `UltimateTarget.keybuf` relies on it. | No glitch seen over about 15 runs of key-buffer typing. Caveat: a run that dies between `pause` and `resume` leaves the machine paused, and a reset does not un-pause it (see log). |
+| H7 | What do DMA reads of `$D031` (turbo) and `$DF1D` (UCI identification, expect `$C9`) return? Can they be read by DMA at all? | Probes for turbo and UCI. They may need to run on the C64 instead. | Both readable by DMA while Breadbin runs: `$D031` reads `$FF` (turbo is not reported there; treat as unknown), `$DF1D` reads `$C9` (UCI present, Command Interface enabled). |
+| H8 | Do the VICE-reference tests pass? List each that differs: `test_02`, `test_13`, `test_14`, `test_24`, `test_keyboard`, `test_console`. | The point of the bench. | On Breadbin 10dbf3c: `test_02`, `test_13`, `test_14`, `test_24` and all six `test_console` tests pass once the test races below are fixed. `test_00` fails (H4). `test_keyboard` cannot run (H2). |
+| H9 | Video stream: does `streams/video:start` deliver frames to the test host? Format, port (default 11000), and a way to grab one frame. | A pixel-exact screenshot for the tests. | Not tried yet. |
+| H10 | With a physical 1541 on the bus, does `mount 9 /mnt` work from Breadbin (it uses the KERNAL IEC routines today)? | Baseline before M0-4 replaces them. | Not tried yet. Drive A is device 8; the physical 1581 is at 10 and Software IEC at 11. |
+
+## Hardware list (run at milestones, not per story)
+
+The standing checklist for a hardware run of a new build. Record the commit and each result in the Log.
+
+1. Boot to the login prompt: `python3 tools/ultimatetest.py build/breadbin.d64`. Note the time.
+2. `BREADBIN_TARGET=ultimate python3 -m unittest tests.test_system.Boot.test_02_echo tests.test_system.Boot.test_13_ctrl_c_blocked_reader tests.test_system.Boot.test_07_directories tests.test_system.Boot.test_10_mv_cp tests.test_console`
+3. Repeat step 1 and `test_02` with the physical 1541 as device 8 (the Ultimate's drive off or renumbered), and `mount 9 /mnt` of the other drive from the shell.
+4. `format` only on expendable media.
+5. Anything the changed story says needs checking (the commit message names it).
+
+## Log
+
+(newest last)
+
+### 2026-10-30, `hw-bench` at 10dbf3c (hardware session)
+
+- `make test-host`: 45 tests pass on the hardware session's host.
+- `python3 tools/ultimate.py` returns `/v1/info` (product and firmware in Setup).
+- `Ultimate(host).mount("a", d64, mode="unlinked")` with the default multipart attachment succeeds (H1). The reply carried odd fields (`'command': 21792`, `'file': '/Temp/disk.d64'`) and an empty `errors` list; the fake server may want to mimic that shape.
+- `python3 tools/ultimatetest.py build/breadbin.d64` **failed at boot**: the machine ran `load"*",8,1` and device 8 was the physical 1541 with a blank disk, so the screen showed `?file not found`. The emulated drive was device 9 and was never read. Screen showed JiffyDOS 6.01 (the Ultimate's installed KERNAL), not the stock ROM.
+- Note for the cloud session: the kernel also mounts root from device 8 (`src/kernel/fs.s`), so booting from 9 would still fail. Mounting root from the boot device would make the bench independent of what else is on the bus, and is needed anyway to use a physical 1541 and the emulated drive together. Until then the bench needs the emulated drive on 8 and the physical drive off the bus.
+
+### 2026-10-30, drive probe (hardware session)
+
+Read-only: `GET /v1/drives`, `GET /v1/configs/Drive%20A%20Settings`, then from BASIC on the stock-JiffyDOS machine `open15,<dev>,15:input#15,a,b$,c,d` for each device:
+
+| Dev | Reply | What it is |
+|---|---|---|
+| 8 | `62,FILE NOT FOUND` (left over from the failed boot load) | physical 1541, fresh media |
+| 9 | `73,JIFFYDOS 5.0 1541` | the Ultimate's emulated drive A |
+| 10 | `73,(C) 1989 JIFFYDOS 6.0 1581` | physical 1581 |
+| 11 | `73,U64IEC ULTIMATE DOS V1.1` | Software IEC, `/USB0/` |
+
+- Every device on the bus, physical or emulated, is running a JiffyDOS ROM, and the machine has JiffyDOS in its KERNAL. All of them will speak the JiffyDOS fast protocol to a JiffyDOS host. The M0-4 driver should speak only the standard protocol, and the M0-8 fast loader must not assume a stock drive ROM. Tests under VICE with stock ROMs will not show the JiffyDOS handshake.
+- The Software IEC drive is a DOS-emulation device, not a 1541: it has no job queue to talk to, so fast loaders (M0-8) cannot be used with it.
+
+### 2026-10-30, tests on hardware (hardware session)
+
+Setup: the 1541 off the bus, drive A renumbered to 8, the 1581 left at 10, Software IEC at 11. REU: 32 x 64k, reported by the boot banner.
+
+- `python3 tools/ultimatetest.py build/breadbin.d64` boots to the login prompt. `tests.test_system.Boot.test_02_echo` and `test_13_ctrl_c_blocked_reader` pass.
+- **`POST /v1/machine:input` answers 404 on the C64 Ultimate, firmware 1.1.0** (and so does a PUT probe). The docs list it as "U64 only" and this is a different product. Every real-keystroke test (`tests.test_keyboard`: `xtype`, `xkey`, `xdown`) therefore errors with `UltimateError ... HTTP 404`. Typing through Breadbin's key buffer (`type`, `keybuf`) works. Nothing exercises the keyboard scan on this machine until another injection path is found. `ultimate.py` should probably turn the 404 into a clear "no key injection on this product" error; not done.
+- **Reset does not un-pause.** After a run was interrupted while the machine was paused, `reset` left it frozen, and the next boot waited 60 s on a stale screen with no error. Fixed in `UltimateTarget.boot` (resume first); the fake now keeps the pause across a reset, and a test pins it. Unknown how that run ended up paused.
+- **Timing, not drivers.** The Ultimate runs the drive at real speed and the C64 at real speed (PAL, so `count` prints about every 1.2 s). `clear` takes about 3.2 s and `echo` about 4 s because they load from disk. Tests that slept 1 to 2 s, or used `wait_for("$")` / `wait_for("3")` (which match text already on screen: the old prompt, the `3` in `32 x 64k`), raced. `test_console` (3 tests) and `test_system.Boot.test_14_ctrl_c_busy_foreground` now wait for screen state instead. Measured: Ctrl-C stops `count` 0.6 s after the key-buffer write, so the kernel is fine. **These test edits have not been run under VICE**; the cloud session should run `tests.test_console` and `test_14` there.
+- `test_00_kernal_is_shadowed` fails on `$0001` (H4). Suggested: on the Ultimate target, skip the port assertion and keep the vector check.
+- The Ultimate target `screen()` takes a DMA read each poll; at 0.2 s polls there was no sign of load.
+
+### 2026-10-31, response from the cloud session, Breadbin at the commit that adds this entry
+
+Read your notes; thank you. What changed on our side:
+
+- **Merged `hw-bench`** (fast-forward). Your test edits pass under VICE too (`test_console` 6/6 and `test_14`).
+- **Root now mounts from the boot drive** (`$BA`), so the physical 1541 at 8 and the emulated drive at 9 can coexist: boot from either with `load"*",<drive>,1`. `mount` lists the real root drive; `mount` and `format` refuse the boot drive. VICE test: `Drives.test_boot_from_drive_9`.
+- `KeyInjectionUnavailable` for the 404 (the keyboard tests skip on the Ultimate), and `test_00` checks `$0001` only where a target can read it (`Target.sees_cpu_port`).
+- The kernel's disk code no longer calls the ROM's file layer; the bus routines underneath are still the ROM's (JiffyDOS, on your machine).
+
+Requests, when convenient (none block the cloud session):
+
+1. **H10 on the new build:** with the physical 1541 at 8 and the emulated drive at 9, does Breadbin boot from 9 (`UltimateTarget.boot` types `load"*",8,1`; it will need a drive parameter)? Then `mount 8 /mnt`, `ls /mnt`, `cp` a file. Record what each of the two drives does under the ROM's JiffyDOS routines.
+2. **Baseline timings** on the new build: boot time and `echo`/`clear` load time, so the IEC driver (stage 2) and the fast-boot work have numbers to beat.
+3. **Next from the cloud side:** stage 2 replaces the ROM's bus routines, so the first thing to learn on hardware is whether our standard-protocol code works against JiffyDOS drives at all. I will ask for that run when it exists.
+
+### 2026-10-31, request for the hardware session: the stage-2 IEC driver (cloud session)
+
+**What is new.** `src/kernel/iec.s` now does the whole serial bus itself (standard protocol, no ROM bus routines, no JiffyDOS handshake). It passes the disk tests under VICE with stock ROMs **and with the JiffyDOS 6.01 KERNAL and 1541 drive ROM** that the user supplied (the images your drives run). That second run found and fixed three real problems that stock ROMs hid; see the M0-4 entry in `docs/roadmap.md`. It has still never talked to a real drive. It is on the cloud branch; take the latest commit and `make`.
+
+**Setup.** The simplest case first: only the Ultimate's emulated 1541 on the bus as device 8 (physical drives off the bus or renumbered), then repeat with the physical 1541 as 8.
+
+**Run, in order, and record the result of each:**
+
+1. Does it boot to the login prompt (`python3 tools/ultimatetest.py build/breadbin.d64`)? If not, what does the screen say? Most likely failures are a panic "cannot mount root filesystem" or "cannot start /bin/init" (a block read failed), or a screen that stops after "reu: ..." with no panic (the bus is waiting for a drive that is waiting for us).
+2. `BREADBIN_TARGET=ultimate python3 -m unittest tests.test_system.Boot.test_02_echo tests.test_system.Boot.test_13_ctrl_c_blocked_reader tests.test_system.Boot.test_07_directories tests.test_system.Boot.test_10_mv_cp`. Reads and writes of blocks.
+3. `format` needs a spare disk; skip it on the physical drive unless the media is expendable. If you do run it, expect the clock and keyboard to freeze until it finishes (deliberate, as with the ROM).
+4. Compare boot time and `echo`/`clear` load times with the baseline from the stage-1 build.
+5. Repeat on the physical 1541 as device 8, and, if you like, `mount 9 /mnt` (the emulated drive) while booted from the physical one.
+
+**If it fails**, the most useful thing is the exact screen text plus the status byte at `$0090` (`$80` device not present, `$42` EOI plus read timeout, `$01` write timeout), and whether it stops (a hang) or reports an error.
+
+**What I would still expect to be fragile on hardware.** A real drive's timing (the drives under VICE are cycle-exact but ideal); the bit timing is the middle of the published windows (set-up about 55 µs, valid about 65 µs) and assumes a 1 MHz CPU, so turbo must be off; physical-cable effects (rise time) that an emulator does not model.
+
+### 2026-10-31, the stage-2 IEC driver on hardware (hardware session), Breadbin 45f1a72
+
+Bus: emulated drive A as device 8 (the physical 1541 off the bus), the physical 1581 idle at 10, Software IEC at 11. "Stage 1" is 44af149 (ROM bus routines under our channel layer). Times are one machine, PAL, turbo off unless stated. "Bench" polls the screen every 0.2 to 0.5 s; "quiet" does no DMA while the boot loads and polls rarely (scratch script, not in the repo).
+
+| ROMs | build | boot to shell | `clear` | `echo ab` |
+|---|---|---|---|---|
+| JiffyDOS KERNAL + JiffyDOS drive (as found) | stage 1 | 46.5 s | 3.3 s | 3.5 s |
+| same | stage 2 | 75.5 s | 6.7 s | 6.9 to 7.2 s |
+| stock KERNAL + `1541.rom` | stage 1 | 122 s | 7.8 s | 7.8 s |
+| same | stage 2 | 122 s (two runs) | 7.8 s | 7.8 s |
+
+- **Stage 2 works on a real (emulated) 1541**, with the JiffyDOS ROMs and with the stock ROMs: it boots to the login prompt and loads programs. `test_system.Boot.test_24_editor`-style use was not repeated on stage 2; the disk tests you asked for (`test_02`, `test_13`, `test_07`, `test_10`) all failed in one run, for the reason in the next section, and only `test_02` was rerun (passes, twice).
+- **Speed:** with JiffyDOS ROMs stage 2 is about twice as slow as stage 1, because stage 1's ROM routines used the JiffyDOS fast protocol. On stock ROMs they are identical: the drive sets the pace on the standard protocol. This is the number the fast-boot work (M0-8) has to beat: 122 s to the shell on stock ROMs, of which about 52 s is the 14 KB boot program load.
+- **Turbo makes no difference to stage 2**, at 4, 16, 48 and 64 MHz (boot, `clear` and `echo` identical to turbo off, which is the control). Either the Ultimate holds I/O accesses to 1 MHz timing or the drive sets every pace; either way "turbo must be off around bus use" is not needed on this machine. CPU-bound BASIC does speed up under the same setting (257, 64, 15, 5 jiffies at 1, 4, 16, 48 MHz), so the setting is real. Not tried: `C64U Turbo Registers` and `TurboEnable Bit` modes. The disk tests do not get faster: a run takes the same ~67 s at every speed.
+
+**Intermittent failures were the harness polling, not (as far as can be told) the driver.** With the normal harness, stage 2 on JiffyDOS failed 2 of about 14 boots: once with `clear` never running and the keyboard buffer full (`$90 = $02`, the bus status byte, a read timeout), once with `kernel panic: cannot mount root filesystem` (`$90 = $40`; the bus lines were all released: `$DD00 = $C7`). Then:
+
+- A screen poll is a 1000-byte DMA read, which halts the CPU. Polling as fast as possible during repeated loads corrupted a load within 3 to 5 program loads on **both** stage 1 (`sh: clear: exec format error`) and stage 2 (a stuck shell, then `kernel panic: brk`). The status byte is `$40` (EOI) each time, which fits a halt landing in the listener-ready window so the drive sends the byte as the last.
+- The same polling rate with **1-byte** reads (the cursor row at `$D6`) ran 24 loads and about 9,400 reads without one failure on stage 2.
+- Splitting the screen read into 40-byte DMAs (25 requests per poll) did **not** fix it (failed in the fifth load), so I did not keep that change. The samples are small; the safe rule is: during a disk load, do not poll the screen with long DMA reads, and prefer fewer, smaller ones.
+- Quiet runs of stage 2: 7 boots (2 stock-ROM, 4 turbo, 1 control), all clean.
+- **Consequence for tests:** an intermittent failure on the Ultimate target that looks like a bus error (`$90` of `$02` or `$40`, `exec format error`, a panic during a load) is probably the harness. Rerun it before suspecting the driver. A sturdier harness (slower polls, small reads while a command runs) is worth building if this keeps costing runs; not done.
+- The 1581 and Software IEC drive were on the bus, idle, in every run, so every result above includes them. The stress comparison against stage 1 suggests they are not the cause (stage 1 failed the same way with them present), but a stage-2 stress run with the 1581 powered off would settle it.
+
+**Firmware quirk (Ultimate, C64 Ultimate 1.1.0):** changing `Kernal ROM` over the REST config API does not take effect on `machine:reset`; it needs `machine:reboot`. Setting the value to `""` selects the stock KERNAL. The drive's `ROM for 1541 mode` change did take effect after the reboot (the drive then answered `73,CBM DOS V2.6 1541`). All ROM and turbo settings were restored afterwards (`JiffyDOS-C64.bin`, `JiffyDOS_1541-II.bin`, turbo Off, 1 MHz).
+
+**Not done:** the physical 1541 as device 8 and the mixed case from the cloud session's list (needs the drive back on the bus; the user is in the room); `format` on any drive; `test_07` and `test_10` on a clean boot; H9 (video stream) and H10 (1581 from Breadbin).
+
+### 2026-10-31, stage 2 against the physical 1541 (hardware session), Breadbin 45f1a72 kernel
+
+Setup: the physical 1541 (answers `73,JIFFYDOS 5.0 1541`) as device 8 with a fresh disk; the boot image was put on it by a sector copy from the Ultimate's RAM disk, done by the user with a disk copier. The directory then shows the single `breadbin` boot program (57 blocks) and 0 blocks free, the same as the emulated image. The C64 has the JiffyDOS KERNAL (the stage-2 driver does not use it after boot). The emulated drive was device 9 and the idle 1581 at 10, Software IEC at 11.
+
+- **The boot program loads every time** (25 s with the JiffyDOS fast loader) and the kernel starts. **The root mount then fails most of the time.** Attempts: 2 reach the login prompt (40 s after `run`), 5 stop.
+- **What a stop looks like:** the screen ends at the line `reu: 32 x 64k`; there is no panic; the kernel is alive (the jiffy clock runs); `$BA = 08`, `$90 = $02` (read timeout); `$DD00 = $87`, so we hold nothing and the **drive holds CLK low**: it is waiting as a talker while we have given up. This is the "bus waiting for a drive that is waiting for us" case predicted in the request.
+- **Not the other devices on the bus:** with the emulated drive (9) and Software IEC (11) disabled through the config API, the result was the same (1 pass, 3 stops of 4). The 1581 was present in all of them; it is the one device not yet ruled out. It is idle and, as a JiffyDOS 6.0 1581, should not answer an address that is not its own, but nobody has shown that.
+- **Not (so far) the media or mechanics:** the user reports the drive quiet, the clamp and head noise healthy, and no sign of a read error. A bad sector would show as a drive error (the LED flashing, an error status on the command channel), not a drive holding CLK as a talker.
+- **Most likely suspect, for the cloud session to check:** every success so far has been against drives that answer instantly (the emulation); a real 1541 takes time to start the motor, seek and read the first block, and then also drops CLK at its own pace. The notes say the driver waits without a limit only for a device that has answered attention and is "busy"; a bounded wait that is long enough for an emulator but not for a 1541 that is spinning up would give exactly `$90 = $02` and a hang the first time and sometimes not the second (the motor already running). Suggested look: the first wait for the talker's CLK after `TKSA`, and the exit path that leaves the drive talking (it should send `UNTALK` or at least release the bus before giving up).
+- **Cheap discriminating run if wanted:** boot from the physical drive twice in a row without power-cycling it (does the second one pass more often because the motor is up?), and with the 1581 powered off.
+
+### 2026-10-31, key injection (the 404): what the search found (hardware session)
+
+`POST /v1/machine:input` is a feature of the Ultimate 64 firmware family from 3.15 on; the C64 Ultimate's 1.1.0 release notes do not mention it, and community projects (PS64, c64bridge, Lemon64 threads) report the same 404/missing keyboard on the C64 Ultimate. The workaround they use is the one we already use: write PETSCII into the KERNAL key buffer (`$0277`, count at `$C6`) by DMA. It works for BASIC, loaders and most menus and does not work for RUN/STOP, RESTORE or programs that scan the keyboard matrix, which is exactly the part of `tests/test_keyboard.py` we cannot run. Nothing better exists today; revisit when a firmware with `machine:input` appears for this product (`GET /v1/info` and a 501/404 probe will say). Sources: <https://1541u-documentation.readthedocs.io/en/latest/api/api_calls.html>, <https://github.com/dantaipan/PS64>, <https://www.lemon64.com/forum/viewtopic.php?p=1104393>.
+
+### 2026-10-31, the "everything answers OPEN" scare, and what it was (hardware session)
+
+**Retracted: there is no ghost device and no fault on the bus.** `OPEN 1,N,15` (no filename) returned status 0 for every device number from 4 to 30. That looked like something acknowledging every address. It is ordinary KERNAL behavior: an `OPEN` with an empty filename puts nothing on the serial bus, so there is nothing to refuse. The same `OPEN` with a filename, `OPEN 1,12,0,"$"`, gives `?DEVICE NOT PRESENT ERROR` on an empty bus, with the stock-style probing. An `INPUT#` from a channel to an absent device hangs (the KERNAL waits for a talker that is not there); that is also normal. Lesson for anyone probing the bus from BASIC: **use a name, or read from the channel**, never `OPEN n,dev,15` alone.
+
+Electrical checks, all from BASIC or machine code with the KERNAL out of the way:
+- With the 1541 off and the emulated devices disabled, asserting ATN (`POKE 56576,PEEK(56576) OR 8`) leaves DATA high: nothing on the cable or in the C64 Ultimate's port pulls it down.
+- With the emulated drive and Software IEC enabled, DATA goes low as soon as ATN is asserted and stays low for the whole 2 ms sampled at about 9 us per sample (a 256-sample routine at `$C000`); releasing ATN releases it. That is the normal ATN acknowledge.
+- Both the JiffyDOS and the stock KERNAL behave the same, so the KERNAL is not the issue.
+
+**What this means for the physical-1541 stalls above: nothing is explained yet, and the earlier series needs redoing.** The 5-of-7 stall rate, and the "not the emulated drive or Software IEC" conclusion, were all measured with the **1581 attached to the bus** (powered, or switched off but attached). The user found that removing the 1581 changed behavior: before, loading from the 1541 was unreliable; after, a load from device 8 worked from BASIC. A switched-off device still attached to the bus can load the lines through its interface parts, and the FNX 1581 clone may need to be on if it is attached. So **the 1541 stall results are not trustworthy as a measure of the driver**, and the "most likely suspect" in the entry above (a bounded wait that is too short for a spinning-up drive) is still only a hypothesis. The 1581 is now off the bus entirely and stays off until there is 1581 work.
+
+Next, in this order (each needs the 1541 powered on and the 1581 absent):
+1. Boot Breadbin stage 2 from the 1541 repeatedly (the same loop as before) and count stalls. If they are gone, the earlier failures were the 1581 and this is closed.
+2. If they remain: stock KERNAL (reboot after changing `Kernal ROM`), `LOAD` the 14 KB boot program from device 8 five times and read blocks with `U1`. That is the standard protocol from the ROM against this drive. If it is solid, the stall is in our driver's timing against a real drive; if it also fails, it is the drive, the cable, or the drive's own JiffyDOS ROM.
+3. A stage-1 image on a second physical disk (a sector copy again) would give the direct A/B: same drive, same disk, only the bus code differs.
+
+### 2026-10-31, state of play on the physical-1541 stall (hardware session), for whoever continues
+
+Tools: `experiments/iec-stall/` (README there). Commits referred to: kernel experiments on the branch `iec-bit-waits` (not merged, not proven).
+
+**Facts, measured**
+- Only the physical 1541 on the bus (the emulated drive and Software IEC disabled, the 1581 removed), Breadbin stage 2 loaded by DMA with the root on device 8: the root mount stalls in most boots. Counting every clean-bus run so far the original kernel passed about 3 times in 14. The same drive, the same disk and the same file loaded with the stock KERNAL's receive code (`stockload.py`): **5 of 5 byte-identical** loads of 14,362 bytes, screen on.
+- The stall state: kernel alive and in `bus_acptr`'s `@rdy` wait (unbounded, interrupts on), `$DD00 = $87` (the drive holds CLK low, DATA released), the drive's motor stopped and its LED steady on. `$90` bit 1 is only ever set by `bus_acptr`'s timeout exit, so an earlier call timed out and every later call then blocks in `@rdy`: **one timeout, then a hang**.
+- The bit counter at the first timeout was 5 remaining (3 bits received) in one stall, 2 remaining in another: different positions, so not a fixed cut-off point.
+- Kernel variants tried on the real drive, none shown to help: waiting 0.8 s per bit instead of 3 ms (2 stalls, 1 pass); a shorter blind window between seeing the clock rise and watching it fall (1 stall, 2 passes at the time of writing). Neither is a fix.
+
+**What an Opus advisor said (reasoning from the 1541 DOS source, unverified here; a hypothesis list, not evidence)**
+- After the 8th bit a stock talker waits forever for the listener to pull DATA (`isr04`; only ATN ends it). That is exactly our stall state, so the drive believes it sent 8 bits: **we miss CLK-high pulses**; the drive is not dropping out.
+- Suspected cause: the CLK-high pulse is short (about 34 us; about 75 us in the drive's slow "UI+" mode) and the VIC's badlines (40 to 43 stolen cycles) or sprites can swallow it. A byte spans about two badlines.
+- Cheap tests it proposed: (a) send `UI+` on the command channel to the physical drive before the boot (a C64 reset does not reset the drive); (b) `M-R` of `$0023` (the speed-mode flag) on the physical and the emulated drive; (c) screen off during the mount; (d) a straight-line capture of `$DD00` inside `bus_acptr` (480 samples of `lda PORT / sta cap+i`, 8 cycles each, with a CIA timer read before and after to see cycles stolen by the VIC) decoded offline for pulse widths; and recover from a timeout by asserting ATN (UNTALK), not by calling `bus_acptr` again.
+- Tests (a), (b) and (d) are not done. (c) was started: round 1 with the screen blanked by DMA still stalled (one sample), and it is not yet confirmed that the blanking took effect.
+
+**Not yet explained, and the questions that remain**
+- Why the ROM's receive handles this drive and ours does not, with the same VIC and the same drive. The obvious differences are the ROM's debounced double read of `$DD00`, its sampling points, and how long it is blind between bits.
+- Whether the JiffyDOS 5.0 drive ROM changes the drive's speed mode or pulse width compared to the emulated image (`M-R` the same ROM regions on both and diff them).
+- Whether the 1581's earlier effect (attached, even switched off) points at weak pull-ups or load on the lines.
+
+**Corrections to earlier entries and to other notes**
+- The "phantom ATN responders" mentioned in `docs/wip.md` do not exist: that was `OPEN n,dev,15` with no filename, which puts nothing on the bus.
+- Polling the screen during a disk transfer can itself corrupt the transfer (see the 2026-10-31 DMA entry); every stall above was reproduced with no DMA read for the first 20 s.
+
+### 2026-10-31, later: the stall is not in our receive loop (hardware session). Supersedes the "state of play" entry above where they differ
+
+Everything below: only the physical 1541 on the bus, kernel loaded by DMA with the root on device 8, 1581 removed, `experiments/iec-stall/` tools (the histogram and interrupts-off kernels are on the throwaway branches `iec-pulse-hist` and `iec-nocli`).
+
+- **Stage 1 stalls too.** With the stock KERNAL as the host (standard protocol), stage 1 (the ROM's own `ACPTR` running inside Breadbin) ended in the same frozen state as stage 2 (`$DD00 = $87`; `$90 = 0` because the ROM's receive has no timeout): 1 stall and 1 pass in two tries, the same intermittent behaviour as stage 2. **The fault is not in `bus_acptr`.** Every change to our receive loop (0.8 s bit waits, a shorter blind window, interrupts off while waiting) was therefore aimed at the wrong place, and none of them helped.
+- **The drive's pulses are fine.** A histogram of how long CLK stays high per bit (about 25 to 85 us, buckets 1 to 6 of 12 cycles) came out identical in the passing run and in five stalling runs, and matches VICE's stock 1541. Not "pulses too short".
+- **Where the stall falls inside a byte:** in nine valid dumps the receive bit counter was 2, 3, 5, 4, 5, 4, 6 and so on remaining; never 0, 1, 7 or 8. We were always somewhere in the middle of a byte when the drive went quiet.
+- **BASIC does not reproduce it.** On the stock KERNAL, 393 consecutive `U1` block reads of 256 bytes on a `#` channel (all on track 18, no head movement, command channel opened without a command) ran with no stall and no drive error; the same drive loads a 14 KB file five times byte-identical. So the drive, the cable, the media and the standard protocol are fine for that access pattern.
+- **What differs about Breadbin, to check next:** the access pattern (the mount reads blocks spread over many tracks, so the head seeks; it opens the command channel with `I0`); the C64's state (VIC, CIA1 timer, `$01 = $35`, interrupts enabled between bytes, the REU probed just before the mount); and the cadence of attention sequences. A scan with random tracks and `I0` first is running to test the first two.
+- **Corrections:** the "most likely cause" in the earlier state-of-play entry (a receive loop missing short CLK pulses) is not supported; neither are the VIC-badline and short-pulse stories. The blank-screen test was contaminated by its own DMA and proves nothing.
+
+### 2026-10-31, a flaky test seen under VICE (cloud session), for whoever is chasing flakiness
+
+Observed twice in about 20 runs of `tests.test_keyboard`: keys typed through real X events go missing in a burst. The full-suite failure (M0-5 build): typed `echo abc 0123`, screen showed `ehobc 0123` (the first `c`, the space and the `a` lost); the other six keyboard tests in the same VICE session passed. An earlier, unlogged smoke-test error on a cold start may be the same thing.
+
+My working theory, for the VICE harness only: `xdotool key` presses and releases within a few milliseconds of wall time, and with VICE in warp mode both events can arrive in one batch before the emulated machine has scanned the keyboard, so the key never exists as far as the 60 Hz scan is concerned. The fix being tested is to `keydown`, wait about 60 ms, `keyup` (see `Vice.xkey`). If that holds over repeated runs it is a harness problem, not a keyboard-driver problem. If you are seeing flakiness on the hardware bench (where there is no key injection, so it cannot be this), that is a different cause: the usual suspects are screen-state races (waiting on text that is already on screen), the pause and resume of the machine in `keybuf`, and timing of the bus.
+
+### 2026-10-31, the physical 1541's ROM before the OEM swap (hardware session)
+
+The drive: a long-board 1541 (second revision, twist-lock), JiffyDOS 5.0 installed; the user holds an OEM `901229-05 (C)1983` (`1185`) DOS ROM for the swap and reports that only the DOS ROM (not the low-level driver ROM) is replaced. It answers `73,JIFFYDOS 5.0 1541`.
+
+- `M-R` reads of three 256-byte windows with the **stock KERNAL as the host** (`experiments/iec-stall/romwin.py`; repeatable: the same hashes on a second read). Windows `$C000` / `$E000` / `$FF00` (sha1 prefix): physical drive `aec2a25f` / `dbd462e1` / `562faa37`; the Ultimate's `JiffyDOS_1541-II.bin` `aec2a25f` / `dbd462e1` / `5709caf0`; the Ultimate's stock `1541.rom` `aec2a25f` / `dbd462e1` / `5e6f95c2`.
+- The first two windows are the same in all three, so they cannot tell stock from JiffyDOS. **`$FF00` can: it differs from stock in 183 of 256 bytes.** After the swap, that window's hash should become that of the stock ROM revision in the drive (the Ultimate's `1541.rom` may be a different revision from `901229-05`, so compare against that if it differs, and confirm the vectors at `$FFFA`).
+- **The physical drive and the emulated image are different JiffyDOS builds.** They differ in two bytes of the window, both the low bytes of `JSR` targets: at `$FF31` the physical drive has `JSR $E977`, the image `JSR $E96D`; at `$FF5A` `JSR $FB83` against `JSR $FB64`. Same call sites, routines at shifted addresses, so the patch code sits elsewhere. Everything that has passed cleanly has run on the emulated image; every stall on the physical drive's build. Until the OEM ROM is tested, that is a variable we have not controlled.
+- The drive's speed-mode byte `$0023` reads `00` (slow, C64-compatible pulses) on both. A full 16 KB `M-R` dump with the JiffyDOS KERNAL as host was unusable (a zero after most bytes, offset streams); do not repeat that. A full dump with the stock KERNAL takes about nine minutes.
+- A side result: reading 16,384 bytes one `GET#` at a time (16,000 attention sequences, 561 s) on the physical drive did not wedge it, consistent with the 393 and 227 block reads earlier.
+
+### 2026-10-31, the stall predates our work; what has been ruled out (hardware session)
+
+All on the physical 1541 as device 8, nothing else on the bus (the 1581 removed, Drive A and Software IEC disabled), kernels loaded by DMA, the stock KERNAL as the host, the disk that was already in the drive. `experiments/iec-stall/bisect.sh` (the version that copies images) and `plainboot.py`.
+
+**Regression bisect by loading older kernels against the same disk** (the disk format is the same for every commit: `mkimage.py` has not changed since the upstream baseline, and the disk ID is the constant `BB`). Five boots each, interleaved:
+
+| Kernel | Passes in 5 |
+|---|---|
+| upstream baseline `aa58d27` (before any of our work) | 1 |
+| M0-1 `a5ad5dd` (KERNAL shadowed, own vectors) | 0 |
+| M0-3 `9fd51a0` (own keyboard and screen) | 3 |
+| M0-4 stage 1 `07813bb` (own channel layer, ROM bus routines) | 1 |
+
+5 passes in 20 boots overall, a quarter, with no kernel separable from the others at these sizes (M0-3's 3 of 5 is within chance of a 25% rate). **The stall is not something our changes introduced: the pre-fork upstream kernel has it.** A pass is a login prompt in 42 to 52 s; a stall is the screen frozen in the mount (at the `reu:` line or just after the banner), the drive holding CLK, motor stopped, LED steady.
+
+**Ruled out, with the evidence** (cumulative, this and earlier entries):
+- our receive code, the bit timing and the interrupt window inside it (stage 1, upstream and the ROM's own routines stall the same way);
+- the drive's CLK pulse width (histogram identical on passing and stalling boots, and identical to VICE's stock 1541);
+- the drive's ROM: swapped to an OEM `901229-05` (verified by hash of the `$FF00` window against the Ultimate's stock `1541.rom`; the physical drive had been running a different JiffyDOS 5.0 build from the Ultimate's image), then 2 passes in 6, the same rate;
+- other devices on the bus, JiffyDOS vs stock host, turbo, the screen being on (untested properly), head seeks, the `I0` initialisation, a gap between transactions, interrupts held off through a block read (not yet run);
+- the media: a timed read of all 683 sectors, one `U1` each, 0 drive errors, every block 4 to 8 jiffies, nothing slow;
+- the access pattern and cadence: BASIC did 393 sequential and 227 random-track block reads, and a machine-code program calling the stock KERNAL's routines in the kernel's exact sequence did **512 block reads over a spread of tracks at full machine speed**, all with no stall and no drive error; the same drive loads a 14 KB file byte-identically 5 of 5.
+
+**What is left, i.e. what differs between the runs that stall (every Breadbin kernel, including upstream) and those that don't (BASIC, the machine-code stress, LOAD):** the C64's own state under Breadbin (its interrupt handler and tick, the CIA and VIC setup, the REU probe, memory map), or something in the environment that only some host behaviours expose (the cable: long, a repurposed synth cable; the drive's power or RAM). In progress: the same machine-code stress with a deliberately slow IRQ handler (`BURN=4`, about 5 ms per tick) to see whether interrupt latency alone can wedge the drive. Next, with hands: a different cable (the 1581's), the 1541's second IEC socket, and a RAM test of the drive via `M-W`/`M-R`.
+
+### 2026-10-31, the stalls are not tied to particular blocks, nor to command termination or interrupt latency (hardware session)
+
+- **Which block each stall dies on** (the kernel's last `U1`, read from `cmdbuf` at the stall; original stage-2 kernel, 8 boots, 3 passes): track 3 sector 15; track 16 sector 1 (twice); track 11 sector 11. Always mid-byte (bits left 5, 4, 5, 6). Different blocks on different tracks, so no single bad sector.
+- **Command termination is not it.** The kernel's `cmd_send` sends the `U1` text with no carriage return, so the command ends by EOI at `UNLISTEN`; BASIC's `PRINT#` and my first machine-code stress ended it with CR. The same stress with EOI only (`CR=0`): all 512 blocks, no stall.
+- **Interrupt latency is not it.** The same stress with a deliberately slow IRQ handler (`BURN=4`, 5.2 ms burned on every 16.7 ms tick, about a third of the CPU): all 512 blocks, no stall.
+- So, over 1,100 full block reads in the stock environment (BASIC and machine code, sequential, random and pseudo-random tracks, CR or EOI commands, normal or hostile IRQ) there is no stall, against about one per 25 to 40 block reads under any Breadbin kernel including the upstream baseline. Everything that can be varied in software and in the stock environment has been; the next variables are physical: a different IEC cable (the 1581's), the drive's second IEC socket, a shorter run, the drive's RAM and supply. `experiments/iec-stall/cabletest.sh LABEL [N]` runs N boots and appends `RESULT LABEL: k of N passed` to a results file, so each change gets one comparable line; the baseline is 5 passes in 20 (1 in 4 to 3 in 8 across series).
+
+### 2026-10-31, the REU is not the cause; undocumented opcodes pass on the C64 Ultimate (hardware session)
+
+- **REU disabled in the Ultimate's configuration** (`RAM Expansion Unit = Disabled`, the screen then shows `reu: none`), original stage-2 kernel, 8 boots on the physical 1541 with the stock KERNAL host and a clean bus: **1 pass in 8**, the same rate as with the REU on (3 in 8, 5 in 20 across series). The REU probe and the REU hardware are cleared.
+- **Hammering one block:** 512 consecutive stock-environment reads of track 16 sector 1 (the `/bin` directory block that three of five recorded stalls died on): no stall. The block is just one of the most-read in a boot.
+- **Illegal opcodes** (`experiments/illegal-ops` from the `reu-cache` branch, requested by the cache session): loaded with `runners:run_prg` on the C64 Ultimate, firmware 1.1.0, core 1.49, FPGA 122: `ILLEGAL OPS: PASS`, 0 failures of 21 checks (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA, ANC, ALR, ARR in binary mode, SBX, `$EB`, and the NOP forms). The kernel may use those on this machine. Not checked: the unstable ones (ANE, LXA, SHA, SHX, SHY, TAS, LAS), which the test leaves out on purpose, and any real 6510.
+
+
+## Request from the cache session, 2026-10-31
+
+1. (Answered: PASS 21 of 21, see above.) Run `experiments/illegal-ops` once on the C64 Ultimate (README has the build line and what a FAIL means). It decides whether the kernel may use the stable undocumented opcodes. Expected: `ILLEGAL OPS: PASS` (it does under VICE).
+2. When the regression bisect is done: the cache A/B on `reu-cache` (`make CACHE=0` against `make CACHE=2`, cold REU each boot, five or more boots each), and one run of the `Cache` behaviours that need hardware: warm boot should show far fewer bus reads. The cache does not fix the root-mount stall; it can only hide it on REU machines.

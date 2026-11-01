@@ -8,6 +8,8 @@
 """
 import os
 import re
+import shlex
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -47,85 +49,20 @@ def screen_to_text(codes):
     return "".join(out)
 
 
-class Vice:
-    def __init__(self, image, reu=False, port=None, warp=True, extra=()):
-        self.image = image
-        self.port = port or (6510 + os.getpid() % 500)
-        args = [X64, "-default", "+sound", "-minimized",
-                "-remotemonitor", "-remotemonitoraddress", f"ip4://127.0.0.1:{self.port}"]
-        if warp:
-            args.append("-warp")
-        if reu:
-            args += ["-reu", "-reusize", "512"]
-        args += list(extra)
-        args += ["-autostart", image]
-        self.log = tempfile.NamedTemporaryFile(prefix="vice", suffix=".log", delete=False)
-        self.proc = subprocess.Popen(args, stdout=self.log, stderr=subprocess.STDOUT)
-        self.sock = None
-        deadline = time.time() + 20
-        while time.time() < deadline:
-            try:
-                self.sock = socket.create_connection(("127.0.0.1", self.port), timeout=2)
-                break
-            except OSError:
-                time.sleep(0.3)
-        if not self.sock:
-            raise RuntimeError("could not connect to VICE monitor")
-        self._cmd("x")
+def real_keys_available():
+    """True if keystrokes can go through the emulated keyboard matrix: needs
+    xdotool and an X display (xvfb-run provides one)."""
+    return bool(shutil.which("xdotool") and os.environ.get("DISPLAY"))
 
-    def __enter__(self):
-        return self
 
-    def __exit__(self, *a):
-        self.close()
+class Target:
+    """What the tests use: screen reading and waiting, over a backend that
+    provides mem(start, end) and type(text). Vice drives the VICE emulator;
+    tools/ultimatetest.py drives a real Ultimate."""
 
-    def close(self):
-        try:
-            self.sock.sendall(b"quit\n")
-            time.sleep(0.3)
-            self.sock.close()
-        except OSError:
-            pass
-        try:
-            self.proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-
-    def _cmd(self, c, wait=0.15):
-        self.sock.sendall((c + "\n").encode())
-        time.sleep(wait)
-        self.sock.settimeout(0.4)
-        out = b""
-        try:
-            while True:
-                d = self.sock.recv(65536)
-                if not d:
-                    break
-                out += d
-        except socket.timeout:
-            pass
-        return out.decode(errors="replace")
-
-    def mem(self, start, end):
-        """Read memory through the monitor's save command (retries while
-        VICE is still starting up)."""
-        for attempt in range(5):
-            fd, path = tempfile.mkstemp(suffix=".bin")
-            os.close(fd)
-            os.unlink(path)
-            self._cmd(f'save "{path}" 0 {start:04x} {end:04x}', wait=0.2)
-            self._cmd("x")
-            for _ in range(50):
-                if os.path.exists(path) and os.path.getsize(path) >= end - start + 3:
-                    break
-                time.sleep(0.05)
-            if os.path.exists(path):
-                with open(path, "rb") as f:
-                    data = f.read()[2:]
-                os.unlink(path)
-                return list(data[:end - start + 1])
-            time.sleep(1)
-        raise RuntimeError("VICE monitor did not save memory")
+    # False where mem() reads the RAM under the CPU port at $0000/$0001 instead of
+    # the port itself (a DMA read on the Ultimate returns $00 for $0001)
+    sees_cpu_port = True
 
     def screen_lines(self):
         codes = self.mem(0x0400, 0x07e7)
@@ -134,17 +71,6 @@ class Vice:
 
     def screen(self):
         return "\n".join(self.screen_lines())
-
-    def type(self, text):
-        """Type text; '\\n' is RETURN, '|' is sent as SHIFT+'-' (PETSCII $dd).
-        Fed in small pieces so the 10-key KERNAL buffer never overflows."""
-        for chunk in re.findall(r"[^\n]{1,8}|\n", text):
-            if chunk == "\n":
-                esc = "\\x0d"
-            else:
-                esc = chunk.replace("\\", "\\\\").replace("|", "\\xdd").replace(" ", "\\x20")
-            self._cmd("keybuf " + esc)
-            self._cmd("x", wait=0.25)
 
     def wait_shell(self, user="root", timeout=90):
         """Boot to a shell prompt, logging in as `user` if asked."""
@@ -210,6 +136,171 @@ class Vice:
                 return
             time.sleep(0.4)
         raise TimeoutError(f"timeout waiting for {what}:\n{self.screen()}")
+
+
+class Vice(Target):
+    def __init__(self, image, reu=False, port=None, warp=True, extra=(), boot_device=8, reu_image=None):
+        self.image = image
+        self.port = port or (6510 + os.getpid() % 500)
+        args = [X64, "-default", "+sound", "-minimized",
+                "-remotemonitor", "-remotemonitoraddress", f"ip4://127.0.0.1:{self.port}"]
+        if warp:
+            args.append("-warp")
+        if reu:
+            args += ["-reu", "-reusize", str(512 if reu is True else reu)]
+            if reu_image:       # keep the REU contents across runs (the emulator saves it on exit)
+                args += ["-reuimage", reu_image, "-reuimagerw"]
+        args += list(extra)
+        # extra emulator options for a whole run, e.g. other ROM images kept outside
+        # the repo: BREADBIN_VICE_ARGS="-kernal /path/kernal.bin -dos1541II /path/drive.bin"
+        args += shlex.split(os.environ.get("BREADBIN_VICE_ARGS", ""))
+        if boot_device == 8:
+            args += ["-autostart", image]
+        else:       # attach to that drive and LOAD from it ourselves once BASIC is up
+            args += [f"-drive{boot_device}type", "1541", f"-{boot_device}", image]
+        self.log = tempfile.NamedTemporaryFile(prefix="vice", suffix=".log", delete=False)
+        self.proc = subprocess.Popen(args, stdout=self.log, stderr=subprocess.STDOUT)
+        self.sock = None
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                self.sock = socket.create_connection(("127.0.0.1", self.port), timeout=2)
+                break
+            except OSError:
+                time.sleep(0.3)
+        if not self.sock:
+            raise RuntimeError("could not connect to VICE monitor")
+        self._cmd("x")
+        if boot_device != 8:
+            self.wait_for("ready.", timeout=30)
+            self.type(f'load"*",{boot_device},1\n')
+            self.wait_for("ready.", timeout=120, after="load")
+            self.type("run\n")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.close()
+
+    def close(self):
+        try:
+            self.sock.sendall(b"quit\n")
+            time.sleep(0.3)
+            self.sock.close()
+        except OSError:
+            pass
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+
+    def _cmd(self, c, wait=0.15):
+        self.sock.sendall((c + "\n").encode())
+        time.sleep(wait)
+        self.sock.settimeout(0.4)
+        out = b""
+        try:
+            while True:
+                d = self.sock.recv(65536)
+                if not d:
+                    break
+                out += d
+        except socket.timeout:
+            pass
+        return out.decode(errors="replace")
+
+    def keybuf(self, data):
+        """Put raw key codes (bytes) in the keyboard buffer, as `type` does."""
+        self._cmd("keybuf " + "".join(f"\\x{b:02x}" for b in data))
+        self._cmd("x")
+
+    def mem(self, start, end):
+        """Read memory through the monitor's save command (retries while
+        VICE is still starting up)."""
+        for attempt in range(5):
+            fd, path = tempfile.mkstemp(suffix=".bin")
+            os.close(fd)
+            os.unlink(path)
+            self._cmd(f'save "{path}" 0 {start:04x} {end:04x}', wait=0.2)
+            self._cmd("x")
+            for _ in range(50):
+                if os.path.exists(path) and os.path.getsize(path) >= end - start + 3:
+                    break
+                time.sleep(0.05)
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    data = f.read()[2:]
+                os.unlink(path)
+                return list(data[:end - start + 1])
+            time.sleep(1)
+        raise RuntimeError("VICE monitor did not save memory")
+
+
+
+    def type(self, text):
+        """Type text; '\\n' is RETURN, '|' is sent as SHIFT+'-' (PETSCII $dd).
+        Fed in small pieces so the 10-key KERNAL buffer never overflows."""
+        for chunk in re.findall(r"[^\n]{1,8}|\n", text):
+            if chunk == "\n":
+                esc = "\\x0d"
+            else:
+                esc = chunk.replace("\\", "\\\\").replace("|", "\\xdd").replace(" ", "\\x20").replace('"', "\\x22")
+            self._cmd("keybuf " + esc)
+            self._cmd("x", wait=0.25)
+
+    # ---- real keystrokes: X events -> VICE's emulated keyboard matrix. Unlike
+    # type(), which writes into the KERNAL-style key buffer, these exercise
+    # the matrix scan, the decode tables, modifiers and key repeat.
+    def _x(self, *args):
+        return subprocess.run(["xdotool", *args], capture_output=True, text=True).stdout
+
+    def focus(self):
+        wins = [w for w in self._x("search", "--class", "x64sc").split()
+                if "VICE" in self._x("getwindowname", w)]
+        if not wins:
+            raise RuntimeError("VICE window not found")
+        self._x("windowmove", wins[0], "0", "0")
+        self._x("mousemove", "300", "300")
+        self._x("windowfocus", wins[0])
+        time.sleep(1)
+
+    def xkey(self, *keys, delay=0.15, hold=0.06):
+        """Tap X key names, e.g. xkey('a', 'Return', 'space', 'exclam'). Each key
+        is held for `hold` seconds of wall time: `xdotool key` presses and
+        releases within a few milliseconds, and when VICE runs in warp mode both
+        events can reach the emulator in one batch, before the emulated machine
+        has had a chance to scan the keyboard, so the key is lost."""
+        for k in keys:
+            self._x("keydown", k)
+            time.sleep(hold)
+            self._x("keyup", k)
+            time.sleep(delay)
+
+    def xtype(self, text, delay=0.15):
+        names = {" ": "space", "\n": "Return"}
+        self.xkey(*[names.get(c, c) for c in text], delay=delay)
+
+    def xdown(self, key):
+        self._x("keydown", key)
+
+    def xup(self, key):
+        self._x("keyup", key)
+
+
+
+
+
+
+
+def make_target(image, **kw):
+    """The emulator by default; BREADBIN_TARGET=ultimate runs the same tests on
+    a real Ultimate (BREADBIN_ULTIMATE=host[:port], see tools/ultimatetest.py).
+    VICE-only options (reu=, extra=, warp=) are for tests that need the emulator."""
+    if os.environ.get("BREADBIN_TARGET", "vice") == "ultimate":
+        from ultimatetest import UltimateTarget
+        return UltimateTarget(image)
+    return Vice(image, **kw)
 
 
 if __name__ == "__main__":

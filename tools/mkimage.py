@@ -12,6 +12,7 @@ Usage:
   mkimage.py cat IMG PATH
 """
 import argparse
+import hashlib
 import os
 import sys
 
@@ -67,6 +68,18 @@ DIRENT_SIZE = 16
 NAME_MAX = 14
 
 T_FREE, T_FILE, T_DIR, T_CHR = 0, 1, 2, 3
+SB_BUILD_ID = 15                     # 4 bytes; 0 = none (the REU block cache stays off)
+
+
+def stamp_build_id(img):
+    """Key for the REU block cache: a hash of the whole image with the field zeroed,
+    so any change to the image gives a new id and the same image the same one."""
+    sb = bytearray(img.block(SUPER_BLOCK))
+    sb[SB_BUILD_ID:SB_BUILD_ID + 4] = bytes(4)
+    img.put_block(SUPER_BLOCK, sb)
+    bid = hashlib.sha256(img.data).digest()[:4]
+    sb[SB_BUILD_ID:SB_BUILD_ID + 4] = bid if any(bid) else b"\x01\0\0\0"
+    img.put_block(SUPER_BLOCK, sb)
 
 
 class Image:
@@ -366,6 +379,7 @@ def build(out, boot, root, devs):
         for spec in devs:
             name, major = spec.split(":")
             fs.create(dev, name.encode(), b"", T_CHR, int(major))
+    stamp_build_id(img)
     with open(out, "wb") as f:
         f.write(img.data)
     return img

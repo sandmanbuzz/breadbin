@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cc65
+        run: sudo apt-get update && sudo apt-get install -y cc65
+      - name: Build
+        run: make
+      - name: Host tests
+        run: make test-host
+      - name: Upload disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: breadbin-d64
+          path: |
+            build/breadbin.d64
+            build/breadbin.prg

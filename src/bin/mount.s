@@ -45,8 +45,20 @@ idx = $23
         lda #1
         jmp SYS_EXIT
 @ok:    rts
-@list:  lda #<root
-        ldx #>root
+@list:  lda #<buf           ; the root first: its drive is where we booted from
+        sta r0
+        lda #>buf
+        sta r0+1
+        lda #$ff
+        jsr SYS_MNTINFO
+        lda #<s_drv
+        ldx #>s_drv
+        jsr print
+        lda buf
+        ldx #0
+        jsr print_dec
+        lda #<s_root
+        ldx #>s_root
         jsr print
         lda #0
         sta idx
@@ -92,7 +104,7 @@ idx = $23
         rts
 .segment "RODATA"
 usage: .byte "usage: mount [drive dir]", 10, 0
-root:  .byte "drive 8 on / (c64fs)", 10, 0
+s_root: .byte " on / (c64fs)", 10, 0
 s_reu: .byte "reu", 0
 s_drv: .byte "drive ", 0
 s_on:  .byte " on ", 0

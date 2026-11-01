@@ -1,12 +1,15 @@
 """End-to-end tests: boot Breadbin in VICE and drive the shell."""
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from vicetest import Vice  # noqa: E402
+from vicetest import Vice, make_target  # noqa: E402
 
 IMAGE = os.path.join(ROOT, "build", "breadbin.d64")
 
@@ -19,7 +22,7 @@ class Boot(unittest.TestCase):
         cls.img = os.path.join(ROOT, "build", "test.d64")
         with open(IMAGE, "rb") as f, open(cls.img, "wb") as g:
             g.write(f.read())
-        cls.v = Vice(cls.img)
+        cls.v = make_target(cls.img)
         cls.v.wait_shell()
 
     @classmethod
@@ -28,6 +31,15 @@ class Boot(unittest.TestCase):
 
     def run_(self, cmd):
         return self.v.run(cmd)
+
+    def test_00_kernal_is_shadowed(self):
+        """The KERNAL ROM is out: RAM at $E000-$FFFF, vectors are ours."""
+        if self.v.sees_cpu_port:      # a DMA read of $0001 returns the RAM under the port
+            self.assertEqual(self.v.mem(0x0001, 0x0001), [0x35])
+        vec = self.v.mem(0xfffa, 0xffff)
+        nmi, irq = vec[0] | vec[1] << 8, vec[4] | vec[5] << 8
+        for target in (nmi, irq):
+            self.assertTrue(0x8000 <= target < 0xcf00, hex(target))
 
     def test_01_banner(self):
         s = self.v.screen()
@@ -110,20 +122,28 @@ class Boot(unittest.TestCase):
         self.v.wait_for("$ cat")
         import time
         time.sleep(3)
-        self.v._cmd("keybuf \\x03")
-        self.v._cmd("x")
+        self.v.keybuf(b"\x03")
         self.v._wait(lambda ls: any(l.endswith(" $") for l in ls[1:]), 60)
         self.assertNotIn("cat", self.run_("ps").split()[5:])
 
     def test_14_ctrl_c_busy_foreground(self):
-        self.v.type("clear\n")
-        self.v.wait_for("$")
-        self.v.type("count\n")
-        self.v.wait_for("3")
-        self.v._cmd("keybuf \\x03")
-        self.v._cmd("x")
         import time
-        time.sleep(3)
+
+        def wait_lines(done, timeout=60):
+            # wait for the screen to show something, not for text already on it
+            end = time.time() + timeout
+            while True:
+                lines = [l for l in self.v.screen_lines() if l]
+                if done(lines) or time.time() > end:
+                    return lines
+                time.sleep(0.2)
+
+        self.v.type("clear\n")
+        wait_lines(lambda l: l == ["/ $"])
+        self.v.type("count\n")
+        wait_lines(lambda l: "3" in l)                  # the line "3", not a 3 in the banner
+        self.v.keybuf(b"\x03")
+        self.assertEqual(wait_lines(lambda l: l[-1] == "/ $")[-1], "/ $")
         self.assertNotIn("count", self.run_("ps"))
 
     def test_15_too_many_processes(self):
@@ -206,14 +226,11 @@ class Boot(unittest.TestCase):
         self.v.wait_for("edit:", timeout=60)
         self.v.type("hello\nworld")
         time.sleep(2)
-        self.v._cmd("keybuf \\x91\\x1d\\x1dX")   # up, right, right, X
-        self.v._cmd("x")
+        self.v.keybuf(b"\x91\x1d\x1dX")   # up, right, right, X
         time.sleep(2)
-        self.v._cmd("keybuf \\x0f")                  # ^O save
-        self.v._cmd("x")
+        self.v.keybuf(b"\x0f")                  # ^O save
         self.v.wait_for(" saved")
-        self.v._cmd("keybuf \\x18")                  # ^X quit
-        self.v._cmd("x")
+        self.v.keybuf(b"\x18")                  # ^X quit
         time.sleep(3)
         self.assertEqual(self.run_("cat /home/e.txt | wc"), "     1      2     12")
 
@@ -281,6 +298,148 @@ def c1541_dir(img):
     return out
 
 
+class Cache(unittest.TestCase):
+    """The REU block cache: a second boot on the same REU reads from it, a different
+    disk discards it, writes stay in step."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.img = os.path.join(self.tmp.name, "disk.d64")
+        self.reu = os.path.join(self.tmp.name, "reu.img")
+        shutil.copy(IMAGE, self.img)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def boot(self, *cmds):
+        """Boot once with the shared REU image (2 MB); run cmds, then `cache`: its counters."""
+        with Vice(self.img, reu=2048, reu_image=self.reu) as v:
+            v.wait_shell()
+            outs = [v.run(c) for c in cmds]
+            return outs, self.stat(v.run("cache"))
+
+    @staticmethod
+    def stat(text):
+        m = re.search(r"reu cache: (\w+)(?:\s+hits (\d+)\s+bus reads (\d+)\s+bus errors (\d+))?", text)
+        assert m, text
+        return m.group(1), *(int(x) for x in m.groups()[1:] if x is not None)
+
+    def test_warm_boot_hits(self):
+        state, hits, misses, errs = self.boot()[1]
+        self.assertEqual(state, "on")
+        self.assertGreater(misses, 20)      # cold: everything came from the bus
+        self.assertEqual(errs, 0)
+        state, hits2, misses2, errs = self.boot()[1]
+        self.assertGreater(hits2, 20)
+        self.assertLess(misses2, 5)
+        self.assertEqual(errs, 0)
+
+    def test_new_disk_discards(self):
+        self.boot()
+        with open(self.img, "r+b") as f:    # another build: a different id
+            f.seek(376 * 256 + 15)
+            f.write(b"\xde\xad\xbe\xef")
+        _, hits, misses, _ = self.boot()[1]
+        self.assertGreater(misses, 20)
+        self.assertLess(hits, misses)
+
+    def test_new_label_discards(self):
+        self.boot()
+        with open(self.img, "r+b") as f:    # same build id, another disk label
+            f.seek(357 * 256 + 0x90)
+            f.write(b"OTHERDISK")
+        _, hits, misses, _ = self.boot()[1]
+        self.assertGreater(misses, 20)
+        self.assertLess(hits, misses)
+
+    def test_pristine_disk_after_writes(self):
+        """The hardware flow: a session writes, then the pristine image is mounted again
+        on the same (warm) REU. Nothing the earlier session wrote may show up."""
+        self.boot("echo x > /home/f")
+        shutil.copy(IMAGE, self.img)
+        outs, (_, hits, misses, errs) = self.boot("ls /home")
+        self.assertNotIn("f", outs[0].split())
+        self.assertGreater(misses, 20)
+        self.assertEqual(errs, 0)
+        outs, _ = self.boot("echo y > /home/g", "ls /home")
+        self.assertIn("g", outs[1].split())
+        self.assertNotIn("f", outs[1].split())
+
+    def test_write_through(self):
+        self.boot("echo one > /home/f")
+        outs, _ = self.boot("cat /home/f", "echo two > /home/f")
+        self.assertEqual(outs[0], "one")
+        outs, (_, hits, misses, _) = self.boot("cat /home/f")
+        self.assertEqual(outs[0], "two")
+        self.assertGreater(hits, misses)
+
+    def test_off_and_flush(self):
+        self.boot()
+        with Vice(self.img, reu=2048, reu_image=self.reu) as v:
+            v.wait_shell()
+            v.run("cache off")
+            st = self.stat(v.run("cache"))
+            self.assertEqual(st[0], "off")
+            h = st[1]               # taken once it is off: loading `cache off` itself hit
+            v.run("ls /bin")
+            self.assertEqual(self.stat(v.run("cache"))[1], h)    # no hits while off
+            v.run("cache on")
+            self.assertEqual(self.stat(v.run("cache"))[0], "on")
+            v.run("cache flush")
+            m = self.stat(v.run("cache"))[2]
+            v.run("ls /bin")
+            self.assertGreater(self.stat(v.run("cache"))[2], m)   # flushed: back to the bus
+
+    def test_no_reu(self):
+        with Vice(self.img) as v:
+            v.wait_shell()
+            self.assertEqual(self.stat(v.run("cache"))[0], "none")
+            self.assertIn("usage", v.run("cache bogus"))
+
+    def test_small_reu(self):
+        with Vice(self.img, reu=256) as v:      # 4 banks: /tmp works, no room for the cache
+            v.wait_shell()
+            self.assertEqual(self.stat(v.run("cache"))[0], "none")
+            v.run("echo hi > /tmp/x")
+            self.assertEqual(v.run("cat /tmp/x"), "hi")
+
+    def test_cache0_kernel_has_no_cache(self):
+        img = os.path.join(ROOT, "build0", "breadbin.d64")
+        subprocess.run(["make", "BUILD=build0", "CACHE=0"], cwd=ROOT, check=True,
+                       capture_output=True)
+        with Vice(img, reu=2048) as v:
+            v.wait_shell()
+            self.assertEqual(self.stat(v.run("cache"))[0], "none")
+
+
+class Pool(unittest.TestCase):
+    """The user pool is $0800-$A0FF: pages above the old $8000 edge are usable."""
+
+    @staticmethod
+    def label(name):
+        with open(os.path.join(ROOT, "build", "kernel.lbl")) as f:
+            for line in f:
+                m = re.match(r"al ([0-9A-F]+) \.%s$" % name, line.strip())
+                if m:
+                    return int(m.group(1), 16)
+        raise KeyError(name)
+
+    def test_processes_run_above_the_old_edge(self):
+        pg_used = self.label("pg_used")        # index = page - 8
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            self.assertIn("38", v.run("free"))                 # 153 pages = 38 K
+            # pretend pages $08-$7F are taken: the next process must live at $80 or above
+            v._cmd("fill %04x %04x 01" % (pg_used, pg_used + 0x77))
+            v._cmd("x")
+            self.assertEqual(v.run("echo above the old edge"), "above the old edge")
+            v.run("sleep 300 &")
+            top = v.mem(pg_used + 0x78, pg_used + 0x98)        # pages $80-$A0
+            self.assertTrue(any(top), "no page at or above $80 was allocated")
+            self.assertIn("sleep", v.run("ps"))
+            self.assertEqual(v.run("echo still fine | cat"), "still fine")
+
+
 class Drives(unittest.TestCase):
     """mount: normal C64 disks and Breadbin disks on drive 9."""
 
@@ -334,6 +493,15 @@ class Drives(unittest.TestCase):
         out = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "mkimage.py"),
                               "cat", img9, "/x/f"], capture_output=True, text=True)
         self.assertEqual(out.stdout, "hi\n")
+
+    def test_boot_from_drive_9(self):
+        """The root disk is on the drive we booted from, not always drive 8."""
+        with Vice(IMAGE, boot_device=9) as v:
+            v.wait_shell()
+            self.assertEqual(v.run("mount").splitlines()[0], "drive 9 on / (c64fs)")
+            self.assertIn("busy", v.run("mount 9 /mnt"))        # the running system's drive
+            v.run("echo hi > /home/x")
+            self.assertEqual(v.run("cat /home/x"), "hi")
 
     def test_format(self):
         blank = os.path.join(ROOT, "build", "t_blank9.d64")

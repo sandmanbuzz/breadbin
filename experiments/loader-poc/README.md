@@ -1,0 +1,3 @@
+# Loader POC scripts (cloud session, 2026-10-31)
+
+`krillpoc.py IMAGE SECONDS` autostarts a disk in VICE (true drive) through `tools/vicetest.py` and prints the screen every 10 s. Used with Krill's Loader v194 `build/loadertest-c64.d64` (from the release archive, csdb.dk release 226124; not in this repo). Run it with `BREADBIN_VICE_ARGS` set to `-dos1541 J -dos1541II J` for the JiffyDOS drive ROM (`J` = your JiffyDOS 1541 image; not in the repo). `romchk.py` reads drive memory (`m 8:ADDR`) to prove which ROM is active: `$F7CE` holds `2E 85 54 C8` on the stock ROM and `F6 A4 36 B1` on JiffyDOS 6.01. Results: `docs/design/fast-io.md`, section 16.

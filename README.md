@@ -123,7 +123,10 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 | `tools/cx.py` | makes relocatable executables |
 | `tools/vicetest.py` | drives VICE for the automated tests |
 | `docs/filesystem.md` | disks, mounting, `format`, and the on-disk layout |
-| `docs/superpowers/` | design spec and implementation plan |
+| `docs/testing.md` | which tests to run for which change |
+| `docs/roadmap.md` | where this fork is heading: limits, milestones, and the first stories |
+| `docs/superpowers/` | original design spec and implementation plan |
+| `tools/setup-vice-roms.sh` | fetches the ROMs VICE needs for `make test` |
 
 ## How it works
 

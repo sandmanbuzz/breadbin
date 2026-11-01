@@ -1,7 +1,11 @@
 ; Breadbin console: screen output and cooked keyboard input
 ;
-; Internally everything is ASCII. Output is translated to PETSCII for the
-; KERNAL screen editor (lowercase charset); keys are translated back.
+; Internally everything is ASCII. Output goes straight to screen RAM in the
+; lowercase character set; keys arrive as PETSCII from kbd.s and are
+; translated back. The screen is 40 x 25 with one text colour for the whole
+; screen (colour RAM is written only by ESC C), so output and scrolling touch
+; screen RAM alone. Stock locations kept in step: $D1/$D2 start of the cursor's
+; row, $D3 column, $D6 row, $C7 reverse flag ($12 = on), $0286 text colour.
 .include "k.inc"
 
 LBMAX = 79
@@ -24,16 +28,15 @@ raw_pid: .res 1
 .export con_raw, raw_pid, to_ascii, to_petscii
 dec_buf: .res 6
 
-.segment "CODE"
+.segment "INIT"
 con_init:
         lda #13             ; light green text
         sta $0286
-        lda #$0e            ; lowercase charset
-        jsr CHROUT
-        lda #$08            ; lock charset (no shift+C=)
-        jsr CHROUT
-        lda #$93            ; clear screen
-        jsr CHROUT
+        jsr scr_color
+        lda $d018           ; lowercase character set
+        ora #$02
+        sta $d018
+        jsr scr_clear
         lda #0
         sta lb_len
         sta lb_rpos
@@ -45,6 +48,7 @@ con_init:
         rts
 
 ; ---- cursor ----
+.segment "CODE"
 cursor_hide:
         lda cur_vis
         beq @r
@@ -113,9 +117,24 @@ con_putc:
         lda #1
         sta esc_st
         bne @skip
-@norm:  jsr to_petscii
-        beq @skip
-        jsr CHROUT
+@norm:  cmp #$0a
+        bne @n1
+        jsr scr_nl
+        jmp @skip
+@n1:    cmp #$0c
+        bne @n2
+        jsr scr_clear
+        jmp @skip
+@n2:    cmp #$08
+        bne @n3
+        jsr scr_bs
+        jmp @skip
+@n3:    cmp #$09
+        bne @n4
+        lda #$20
+@n4:    jsr to_screen
+        bcs @skip
+        jsr scr_put
         jmp @skip
 @esc:   jsr con_escape
 @skip:  dec con_busy
@@ -130,6 +149,7 @@ con_putc:
 ;   ESC = row+32 col+32   move the cursor
 ;   ESC R / ESC r          reverse video on / off
 ;   ESC K                  clear to the end of the line
+;   ESC C fg+32 bg+32 border+32   colours (fg recolours the whole screen)
 con_escape:
         cpx #2
         bne @s3
@@ -156,11 +176,13 @@ con_escape:
 @n1:    cmp #'R'
         bne @n2
         lda #$12
-        jmp CHROUT
+        sta $c7
+        rts
 @n2:    cmp #'r'
         bne @n3
-        lda #$92
-        jmp CHROUT
+        lda #0
+        sta $c7
+        rts
 @n3:    cmp #'C'
         bne @n4
         lda #4              ; ESC C fg+32 bg+32 border+32
@@ -169,17 +191,10 @@ con_escape:
 @n4:    cmp #'K'
         bne @r
         ldy $d3
-        ldx #40
-        cpy #40
-        bcc @k
-        ldx #80
-@k:     stx tmp0
-@kl:    cpy tmp0
-        bcs @r
         lda #$20
+@kl:    cpy #40
+        bcs @r
         sta ($d1),y
-        lda $0286
-        sta ($f3),y
         iny
         bne @kl
 @r:     rts
@@ -193,14 +208,7 @@ con_escape:
         sbc #32
         and #15
         sta $0286
-        ; recolour the whole screen
-        ldy #0
-@rc:    sta $d800,y
-        sta $d900,y
-        sta $da00,y
-        sta $db00,y
-        iny
-        bne @rc
+        jsr scr_color
         lda #5
         sta esc_st
         rts
@@ -221,15 +229,165 @@ con_escape:
         cmp #40
         bcc @cok
         lda #39
-@cok:   tay
+@cok:   sta $d3
         lda #0
         sta esc_st
-        ldx esc_row
-        cpx #25
+        lda esc_row
+        cmp #25
         bcc @rok
-        ldx #24
-@rok:   clc
-        jmp $fff0           ; PLOT
+        lda #24
+@rok:   jmp scr_setrow
+
+; ---- screen driver (replaces the KERNAL screen editor) ----
+SCREEN = $0400
+COLRAM = $d800
+
+; scr_color: A = colour for every cell
+scr_color:
+        ldy #0
+@l:     sta COLRAM,y
+        sta COLRAM+$100,y
+        sta COLRAM+$200,y
+        sta COLRAM+$300,y
+        iny
+        bne @l
+        rts
+
+; scr_clear: blank the screen, cursor home, reverse off
+scr_clear:
+        lda #$20
+        ldy #0
+@l:     sta SCREEN,y
+        sta SCREEN+$100,y
+        sta SCREEN+$200,y
+        sta SCREEN+$2e8,y
+        iny
+        bne @l
+        sty $c7
+        sty $d3
+        tya
+        ; fall through: row 0
+
+; scr_setrow: A = row (0-24) -> $D6 and the row pointer $D1/$D2
+scr_setrow:
+        sta $d6
+        tax
+        lda rowlo,x
+        sta $d1
+        lda rowhi,x
+        sta $d2
+        rts
+
+; scr_scroll: move rows 1-24 up one row and blank row 24
+scr_scroll:
+        ldx #0
+@a:     lda SCREEN+40,x
+        sta SCREEN,x
+        lda SCREEN+$128,x
+        sta SCREEN+$100,x
+        lda SCREEN+$228,x
+        sta SCREEN+$200,x
+        inx
+        bne @a
+@b:     lda SCREEN+$328,x
+        sta SCREEN+$300,x
+        inx
+        cpx #192
+        bne @b
+        lda #$20
+        ldx #39
+@c:     sta SCREEN+960,x
+        dex
+        bpl @c
+        rts
+
+; scr_lf: start of the next row, scrolling at the bottom
+scr_lf: lda #0
+        sta $d3
+        lda $d6
+        cmp #24
+        bcs scr_scroll
+        adc #1
+        jmp scr_setrow
+
+; scr_nl: newline (also ends reverse video, as the ROM did)
+scr_nl: lda #0
+        sta $c7
+        beq scr_lf
+
+; scr_put: A = screen code; store at the cursor and advance
+scr_put:
+        ldx $c7
+        beq @n
+        ora #$80
+@n:     ldy $d3
+        sta ($d1),y
+        iny
+        cpy #40
+        bcs scr_lf
+        sty $d3
+        rts
+
+; scr_bs: cursor left one column (up a row from column 0) and blank it
+scr_bs: ldy $d3
+        bne @s
+        lda $d6
+        beq @r
+        sec
+        sbc #1
+        jsr scr_setrow
+        ldy #40
+@s:     dey
+        sty $d3
+        lda #$20
+        sta ($d1),y
+@r:     rts
+
+; to_screen: ASCII (A) -> screen code in the lowercase set. Carry set if it
+; prints nothing.
+to_screen:
+        cmp #$20
+        bcc @none
+        cmp #$40
+        bcc @same
+        beq @at
+        cmp #$5b
+        bcc @same           ; A-Z
+        cmp #$5f
+        bcc @m1f            ; [ \ ] ^
+        beq @under
+        cmp #$61
+        bcc @none           ; `
+        cmp #$7b
+        bcc @m1f            ; a-z
+        cmp #$7c
+        beq @bar
+        lda #$3f            ; { } ~ and above -> ?
+@same:  clc
+        rts
+@at:    lda #0
+        clc
+        rts
+@m1f:   and #$1f
+        clc
+        rts
+@under: lda #$64
+        clc
+        rts
+@bar:   lda #$5d
+        clc
+        rts
+@none:  sec
+        rts
+
+.segment "RODATA"
+rowlo:  .repeat 25, I
+        .byte <(SCREEN + I*40)
+        .endrep
+rowhi:  .repeat 25, I
+        .byte >(SCREEN + I*40)
+        .endrep
+.segment "CODE"
 
 ; con_setmode: A = 0 cooked, 1 raw (conmode syscall)
 .export sys_conmode, con_release
@@ -437,12 +595,12 @@ con_read:
         jmp raw_read
 @wait:  lda lb_ready
         bne @copy
-        jsr GETIN
+        jsr key_get
         cmp #0
         bne @key
         lda #1
         sta cur_on
-        lda #CH_TICK
+        lda #CH_KEY
         jsr block_on
         jmp @wait
 @key:   pha
@@ -519,12 +677,12 @@ con_read:
 ;   up ^P($10) down ^N($0e) left ^B($02) right ^F($06) home ^A($01)
 ;   clr ^L($0c) del ^H($08) return $0a; F1-F8 as $85-$8c; ctrl-letters $01-$1a
 raw_read:
-@w:     jsr GETIN
+@w:     jsr key_get
         cmp #0
         bne @k
         lda #1
         sta cur_on
-        lda #CH_TICK
+        lda #CH_KEY
         jsr block_on
         jmp @w
 @k:     pha
