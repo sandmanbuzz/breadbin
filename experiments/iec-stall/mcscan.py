@@ -27,6 +27,10 @@ burn = int(os.environ.get("BURN", "0"))      # IRQ handler delay in ~1.3 ms unit
 u.writemem(0xC7E0, bytes([burn]))
 cr = int(os.environ.get("CR", "1"))                    # 0 = commands end with EOI only, like the kernel
 u.writemem(0xC7E5, bytes([cr]))
+fix = os.environ.get("FIX", "")                        # "16,1": read that one block every time
+ft, fs = (int(x) for x in fix.split(",")) if fix else (0, 0)
+u.writemem(0xC7E6, bytes([ft, fs]))
+print("block:", f"track {ft} sector {fs} every time" if ft else "a spread over the disk", flush=True)
 print("commands end with:", "CR + EOI" if cr else "EOI only", flush=True)
 u.writemem(0xC7F0, bytes(3))
 print("slow IRQ handler:", burn * 1.3 if burn else "off", "ms per tick", flush=True)
