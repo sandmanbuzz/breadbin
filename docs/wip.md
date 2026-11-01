@@ -100,8 +100,9 @@ Where the cloud session stands, so a fresh context can resume:
 | Lane | Who | Claims (files/areas) | Doing / next |
 |---|---|---|---|
 | Kernel footprint round 2 | Agent 3 (Kernal) | `src/kernel/jtab.s`, `proc.s`, `main.s`, `mem.s`, `kernel.cfg`, `k.inc`, `src/lib/*` | test fanout on main (keyboard, full suite in the container); lean `sys_return`, sched fast path, undocumented-opcode peepholes where bytes are saved |
-| UCI v1 | breadbin-next (f7) | new `uci.s`, a new device in `blk.s`/`cbm.s` as needed | start from `main`; room is tight (236 bytes below $CF00): pay with `KSTART`, a page at a time, and say so |
-| Hardware | Agent 2 | `hw-bench`, `experiments/`, `tools/ultimate*`, `docs/hardware-notes.md` | physical-1541 stall; cache A/B (`CACHE=0` vs `CACHE=2`); JiffyDOS-ROM subset; the hardware list on main |
-| CI / containers | breadbin-2b? | `tools/ci`, `docs/ci.md` | (claim or correct this line) |
+| UCI v1 | breadbin-next (f7) | new `uci.s`, `cbm.s`, `fs.s`; `blk.s` only after Agent 2's `fix/iec-recover` merges (ask first) | start from `main`; room is tight (236 bytes below $CF00): pay with `KSTART`, a page at a time, and say so |
+| Hardware: IEC recovery | Agent 2 (hardware) | `fix/iec-recover`: `iec.s` (bus_acptr ready wait bounded), `blk.s` (iec_read retries); +56 bytes | 8-boot series on the physical 1541; then rebase on main and report the byte cost here; then the cache A/B and the JiffyDOS-ROM subset |
+| Hardware: stall bench | breadbin-2b (`hw-bench`) | `hw-bench`, `experiments/iec-stall/`, `tools/ultimate*`, `docs/hardware-notes.md` | physical-1541 stall experiments; hardware list on main |
+| CI / containers | breadbin-next (f7) authored `tools/ci` (`next/ci`) | `tools/ci`, `docs/ci.md` | container runner works for `test-host` (checked 2026-10-31); keyboard run in progress by Agent 3 |
 
 **Open items nobody owns yet:** `test_keyboard` needs X (container); JiffyDOS-ROM disk and bus subset on main; drive-module modularisation (needs the S6 filesystem interface first); a TPA-agnostic kernel (NTH). Take one by writing your name here.
