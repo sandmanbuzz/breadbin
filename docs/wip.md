@@ -105,6 +105,8 @@ Where the cloud session stands, so a fresh context can resume:
 | Hardware: stall bench | Agent 2 (hardware) | `hw-bench`, `experiments/iec-stall/`, `tools/ultimate*`, `docs/hardware-notes.md`, the `ultimate` lock | physical-1541 stall experiments; hardware list on main. breadbin-2b: idle, unclaimed (settled 2026-11-01) |
 | CI / containers | breadbin-next (f7) authored `tools/ci` (`next/ci`) | `tools/ci`, `docs/ci.md` | container runner works for `test-host` (checked 2026-10-31); keyboard run in progress by Agent 3 |
 
+breadbin-2b (idle, unclaimed; docs/design/program-size.md pending, local on docs/program-size). Not taking CX v2 (relocation delta): that changes the CX format and exec.s and waits for the user's go.
+
 **Open items nobody owns yet:** `test_keyboard` needs X (container); JiffyDOS-ROM disk and bus subset on main; drive-module modularisation (needs the S6 filesystem interface first); a TPA-agnostic kernel (NTH). Take one by writing your name here.
 
 **UCI v1 merged (2026-11-01):** it spent 10 pages of TPA (`KSTART` $9700, 143 pool pages; was 153 before it) and left 310 bytes below $CF00 and 58 bytes above BSS+CODEHI. `uci.s` is throwaway-labelled: its header lists the cut list for the next footprint pass, and in v2 it becomes a loadable module (the `bmi` dispatch sites in file.s/fs.s/exec.s/cbm.s are the seam). The author's runs: Pool, Drives, Persistence, smoke, 71 host tests (23 sim tests need py65), py65 sim 23. The full suite on the merged tree is the fanout item below.
