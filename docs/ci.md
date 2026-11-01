@@ -39,4 +39,5 @@ Broker state is in memory. A restart drops all leases and queues; the running co
 
 - The broker is advisory: nothing stops someone running VICE without a lease. No authentication; bind it to localhost only.
 - `tools/with-lock` and the broker do not know about each other; use one or the other for a given resource.
-- Not done: keyboard/console tests were not run in the container; JiffyDOS runs; the full suite; wiring into the Makefile or `docs/process.md`; hardware (Ultimate) access from containers; a persistent results/log store; CI triggers on push.
+- Done 2026-10-31 (Agent 3, on `main` ca89021, VICE 3.9 in the container, `timeout 1500 tools/with-lock -- tools/ci/run.sh test-host|test-keyboard`): `test-host` 48 pass; `test-keyboard` 7 of 7 pass in about 4 minutes (the first run of the real-keystroke tests since they need X). `tools/ci/run.sh test-keyboard` is the way to run them from a Mac.
+- Not done: console tests were not run in the container; JiffyDOS runs; the full suite; wiring into the Makefile or `docs/process.md`; hardware (Ultimate) access from containers; a persistent results/log store; CI triggers on push.
