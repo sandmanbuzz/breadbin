@@ -6,7 +6,7 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 
 | Item | Value |
 |---|---|
-| Ultimate model and firmware (`GET /v1/info`) | C64 Ultimate, firmware 1.1.0, FPGA 122, core 1.49 |
+| Ultimate model and firmware (`GET /v1/info`) | C64 Ultimate, firmware 1.1.0 |
 | REST password set? Reachable from where? | No password. Reachable over the LAN from the test host. |
 | Drive A: type and ROM | 1541, `JiffyDOS_1541-II.bin`, bus ID 9 (`GET /v1/drives`). Drive B disabled. "Resets when C64 resets": Yes. |
 | Physical drives on the IEC bus, and their device numbers | 2026-10-30: a physical 1541 (fresh media) at device 8; the Ultimate's emulated 1541 at device 9. The two collide with the harness and kernel, which assume device 8 (see log). Also a 1581 at 10 and the Ultimate's Software IEC ("IEC Drive", partition `/USB0/`) at 11. |
@@ -257,7 +257,7 @@ All on the physical 1541 as device 8, nothing else on the bus (the 1581 removed,
 
 - **REU disabled in the Ultimate's configuration** (`RAM Expansion Unit = Disabled`, the screen then shows `reu: none`), original stage-2 kernel, 8 boots on the physical 1541 with the stock KERNAL host and a clean bus: **1 pass in 8**, the same rate as with the REU on (3 in 8, 5 in 20 across series). The REU probe and the REU hardware are cleared.
 - **Hammering one block:** 512 consecutive stock-environment reads of track 16 sector 1 (the `/bin` directory block that three of five recorded stalls died on): no stall. The block is just one of the most-read in a boot.
-- **Illegal opcodes** (`experiments/illegal-ops` from the `reu-cache` branch, requested by the cache session): loaded with `runners:run_prg` on the C64 Ultimate, firmware 1.1.0, core 1.49, FPGA 122: `ILLEGAL OPS: PASS`, 0 failures of 21 checks (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA, ANC, ALR, ARR in binary mode, SBX, `$EB`, and the NOP forms). The kernel may use those on this machine. Not checked: the unstable ones (ANE, LXA, SHA, SHX, SHY, TAS, LAS), which the test leaves out on purpose, and any real 6510.
+- **Illegal opcodes** (`experiments/illegal-ops` from the `reu-cache` branch, requested by the cache session): loaded with `runners:run_prg` on the C64 Ultimate, firmware 1.1.0: `ILLEGAL OPS: PASS`, 0 failures of 21 checks (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA, ANC, ALR, ARR in binary mode, SBX, `$EB`, and the NOP forms). The kernel may use those on this machine. Not checked: the unstable ones (ANE, LXA, SHA, SHX, SHY, TAS, LAS), which the test leaves out on purpose, and any real 6510.
 
 ### 2026-11-01, more negatives on the physical-1541 stall, and a recommendation to park it (hardware session)
 
