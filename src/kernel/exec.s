@@ -8,6 +8,7 @@
 .import f_done, p_pslot, new_slot, proc_entry, name_off, con_file
 .import cwd_ptr, nm_dev, nm_ino, p_uid
 .export mod_load, mod_unload, mod_list
+.import kapi_hash
 NMOD = 4
 
 MAXARGS = 16
@@ -663,35 +664,17 @@ copy_cwd:
 ; Module image: offset 0 `jmp init`, 3 `jmp fini`, 6 the kernel hash (2 bytes), 8 a class byte.
 ; init returns carry clear if it is happy; fini returns carry set to refuse unloading.
 
-; kapi_sum: tmp0/tmp1 = 16-bit sum of the exported kernel addresses
-kapi_sum:
-        lda #0
-        sta tmp0
-        sta tmp1
-        ldx #0
-@l:     lda kapi_tab,x
-        clc
-        adc tmp0
-        sta tmp0
-        lda kapi_tab+1,x
-        adc tmp1
-        sta tmp1
-        inx
-        inx
-        cpx #KAPI_N*2
-        bne @l
-        rts
-
 ; mod_load(r0 = path) -> A = slot, carry set on error. Root only.
 mod_load:
         ldx cur
         lda p_uid,x
         bne @perm
-        ldx #NMOD-1
+        ldx #0              ; the lowest free slot
 @f:     lda mod_base,x
         beq @slot
-        dex
-        bpl @f
+        inx
+        cpx #NMOD
+        bne @f
         lda #ENOMEM
         sec
         rts
@@ -707,18 +690,17 @@ mod_load:
         jsr cx_load
         bcs @r
         jsr zero_bss
-        jsr kapi_sum
         lda #0
         sta p1
         lda base
         sta p1+1
         ldy #6
         lda (p1),y
-        cmp tmp0
+        cmp kapi_hash
         bne @bad
         iny
         lda (p1),y
-        cmp tmp1
+        cmp kapi_hash+1
         bne @bad
         ldx md_slot
         lda base
@@ -815,5 +797,3 @@ mod_list:
         clc
         rts
 
-.segment "RODATA"
-.include "kapi.inc"
