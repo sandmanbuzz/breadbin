@@ -18,8 +18,8 @@
 .export cbm_iget, cbm_lookup, cbm_read, cbm_readdir, cbm_open_write
 .export cbm_write, cbm_wclose, cbm_scratch, cbm_rename, cbm_fsinfo
 .export sys_mount, sys_umount, sys_mntinfo, sys_diskio
-.import uci_hw, uci_attach, uci_umount, mod_load
-.export cbmv, w_busy
+.import uci_hw, uci_attach, uci_umount, mod_load, uci_load, uci_drop
+.export cbmv, w_busy, cbm_none
 
 .segment "BSS"
 cbm_up:  .res 1         ; the cbm module is loaded
@@ -76,7 +76,22 @@ s_km:   .byte "/lib/km/cbm", 0
 .segment "CODEHI"
 ; ---------------------------------------------------------------------
 ; mount(A = drive 9-11, or 'U' for the Ultimate's storage, r0 = directory)
+; mount uci: load uci.km first (its probe is module code), unload it again if the mount fails
 sys_mount:
+        cmp #'U'
+        bne mount_any
+        cpx #'U'
+        bne mount_any
+        jsr uci_load
+        bcs @r
+        lda #'U'
+        tax
+        jsr mount_any
+        bcc @r
+        jmp uci_drop        ; (keeps A and carry)
+@r:     rts
+
+mount_any:
         cmp #'U'            ; with X = 'U' too: mount 85 stays a bad drive number
         bne @drv
         cpx #'U'
@@ -388,6 +403,7 @@ sys_umount:
         cpx #DEV_UCI
         bne @iec
         jsr uci_umount
+        jsr uci_drop        ; the last (only) UCI mount: unload uci.km
         clc
         rts
 @iec:   jsr iec_close
