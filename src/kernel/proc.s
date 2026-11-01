@@ -304,10 +304,27 @@ irq:
         lda #1
         sta need_resched
         jmp irq_exit
-@die:   lda #1
+; A process with a pending signal dies here, in user mode. Do not close its files
+; with interrupts off (a slow close, say a UCI file, would freeze the machine): make the
+; interrupt return into die_stub instead, with I still set in the stacked flags, and
+; let die_stub finish the job with interrupts on, as a syscall would.
+@die:   tsx
+        lda #<die_stub
+        sta $0105,x
+        lda #>die_stub
+        sta $0106,x
+        lda $0104,x
+        ora #$04
+        sta $0104,x
+        jmp irq_exit
+
+die_stub:                   ; runs as the dying process, interrupts off until in_kernel is set
+        ldx cur
+        lda #1
         sta in_kernel
         lda p_sig,x
         ora #$80
+        cli
         jmp proc_exit
 
 sigint_fg:
