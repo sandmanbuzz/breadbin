@@ -862,7 +862,17 @@ u_ret0: rts
 uci_write:
         ldx sb6
         jsr e_getpos
-        jsr uci_ensure
+        lda u_pos           ; positions are 24 bits: stop at 16 MB rather than wrap
+        clc
+        adc r1
+        lda u_pos+1
+        adc r1+1
+        lda u_pos+2
+        adc #0
+        bcc @fit
+        lda #EFBIG
+        rts
+@fit:   jsr uci_ensure
         bcs u_ret0
         lda r0
         sta p4
