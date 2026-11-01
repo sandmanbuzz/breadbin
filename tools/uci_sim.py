@@ -31,7 +31,7 @@ CTL, CMD, DAT, STS = 0xDF1C, 0xDF1D, 0xDF1E, 0xDF1F
 
 ERRNO = {1: "EPERM", 2: "ENOENT", 5: "EIO", 8: "ENOEXEC", 9: "EBADF", 16: "EBUSY", 17: "EEXIST",
          18: "EXDEV", 19: "ENODEV", 20: "ENOTDIR", 21: "EISDIR", 22: "EINVAL", 24: "EMFILE",
-         36: "ENAMETOOLONG", 39: "ENOTEMPTY"}
+         28: "ENOSPC", 36: "ENAMETOOLONG", 39: "ENOTEMPTY"}
 
 OK = b"00,OK"
 
@@ -62,6 +62,7 @@ class FakeUCI:
         self.log = []           # (target, command, argument bytes)
         self.leaks = 0          # OPEN on a target that still had a file open (leaks a handle)
         self.writes_while_busy = 0
+        self.force = {}         # command byte -> status text answered instead (error cases)
 
     # ---- registers
     def read(self, a):
@@ -151,6 +152,9 @@ class FakeUCI:
             yield b"", b"99,FUNCTION NOT IMPLEMENTED", True
             return
         t = self.targets[tn]
+        if op in self.force:
+            yield b"", self.force.pop(op), True
+            return
         name = arg.decode("latin1")
         if op == 0x01:                                  # IDENTIFY
             yield b"ULTIMATE-II DOS V1.2", OK, True

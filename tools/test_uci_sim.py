@@ -121,6 +121,20 @@ class Mounted(unittest.TestCase):
         self.assertEqual(s.errno(s.path_call("UNLINK", "/u/Temp\\..\\Temp\\hello.txt")), "EINVAL")
         self.assertTrue(os.path.exists(self.h("Temp", "hello.txt")))
 
+    def test_more_error_texts(self):
+        """The file system's texts for busy, not empty and full (review 5)."""
+        s, u = self.s, self.u
+        u.force[0x09] = b"FILE IS IN USE"
+        self.assertEqual(s.errno(s.path_call("UNLINK", "/u/Temp/hello.txt")), "EBUSY")
+        u.force[0x16] = b"DISK IS FULL"
+        self.assertEqual(s.errno(s.path_call("MKDIR", "/u/Temp/d")), "ENOSPC")
+        u.force[0x09] = b"DIRECTORY NOT EMPTY"
+        self.assertEqual(s.errno(s.path_call("RMDIR", "/u/Temp/sub")), "ENOTEMPTY")
+        u.force[0x16] = b"DISK ERROR"
+        self.assertEqual(s.errno(s.path_call("MKDIR", "/u/Temp/d")), "EIO")
+        u.force[0x16] = b"FILE EXISTS"
+        self.assertEqual(s.errno(s.path_call("MKDIR", "/u/Temp/d")), "EEXIST")
+
     def test_no_delete_or_rename_under_an_open_file(self):
         s = self.s
         fd = s.check(s.open("/u/Temp/pattern.bin"), "open")

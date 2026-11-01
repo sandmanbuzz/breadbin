@@ -86,6 +86,13 @@ stbuf:   .res 7         ; the head of the last status text
 ps_off:  .byte 0, 48, 96, 144, 192
 omode:   .byte 1, 2, 3, 3
 s_ident: .byte "ULTIMATE"
+; ut_map's table, searched from the end: {first, sixth (0 = any), errno}
+mtab:    .byte 'F', 0,   ENOENT     ; FILE DOESN'T EXIST
+         .byte 'A', 0,   EPERM      ; ACCESS DENIED
+         .byte 'F', 'E', EEXIST     ; FILE EXISTS
+         .byte 'F', 'I', EBUSY      ; FILE IS IN USE
+         .byte 'D', 'T', ENOTEMPTY  ; DIRECTORY NOT EMPTY
+         .byte 'D', 'I', ENOSPC     ; DISK IS FULL
 
 .segment "CODE"
 ; ---------------------------------------------------------------------
@@ -242,16 +249,20 @@ ut_map: lda stbuf
         cmp #'8'
         beq @e
         bne @io
-@nn:    cmp #'F'            ; FILE DOESN'T EXIST / FILE EXISTS
-        bne @na
-        lda stbuf+5
-        cmp #'E'
+@nn:    ldy #15             ; the file system's texts: first and sixth character
+@t:     lda mtab,y
+        cmp stbuf
+        bne @tn
+        lda mtab+1,y
+        beq @hit            ; 0: any
+        cmp stbuf+5
+        bne @tn
+@hit:   ldx mtab+2,y
         bne @e
-        ldx #EEXIST
-        bne @e
-@na:    ldx #EPERM
-        cmp #'A'            ; ACCESS DENIED
-        beq @e
+@tn:    dey
+        dey
+        dey
+        bpl @t
 @io:    ldx #EIO
 @e:     txa
         sec
