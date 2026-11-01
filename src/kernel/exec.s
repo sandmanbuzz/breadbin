@@ -8,6 +8,7 @@
 .import f_done, p_pslot, new_slot, proc_entry, name_off, con_file
 .import cwd_ptr, nm_dev, nm_ino, p_uid
 .export mod_load, mod_unload, mod_list
+.import check_signal, con_release
 .import kapi_hash
 NMOD = 4
 
@@ -63,6 +64,8 @@ spawn_kernel:
 ; spawn(r0 = path, r1 = argv, A = stdin fd, X = stdout fd, Y = flags)
 sys_spawn:
         sty sp_flags
+        cpy #SP_EXEC
+        bcs @argv           ; exec: no descriptors to find, the caller keeps its own
         stx sp_out
         jsr fd_get
         bcs @r
@@ -76,7 +79,7 @@ sys_spawn:
         bcc @e
         ldx #$ff
 @e:     stx sp_err
-        lda r1
+@argv:  lda r1
         ora r1+1
         beq @noargv
         jmp spawn_common
@@ -98,6 +101,8 @@ sys_spawn:
 
 .segment "CODEHI"            ; the loader chain runs once per process start: out of the pool's way
 spawn_common:
+        bit sp_flags
+        bmi @own            ; exec: the caller's own slot, no search
         ; free slot
         ldx #MAXPROC-1
 @fs:    lda p_state,x
@@ -107,6 +112,7 @@ spawn_common:
         lda #EAGAIN
         sec
         rts
+@own:   ldx cur
 @slot:  stx sp_slot
         jsr measure_args
         bcs @sr
@@ -116,7 +122,10 @@ spawn_common:
         bcs @sr
         jsr zero_bss
         jsr copy_args
-        jsr setup_proc
+        bit sp_flags
+        bpl @new
+        jmp exec_commit     ; the point of no return, below
+@new:   jsr setup_proc
         clc
 @sr:    rts
 
@@ -543,6 +552,11 @@ setup_proc:
         ; saved context: zero ZP image, then argv/argc/entry
         ldx sp_slot
         jsr slot_save_ptr
+        jsr init_ctx
+        jmp setup_stack
+; init_ctx: p3 -> a zero-page image (a process's save area, or $0002 for the live one): zero
+; it, then set argv, argc and the entry point (k_entry) for the image just loaded.
+init_ctx:
         ldy #0
         tya
 @z:     sta (p3),y
@@ -569,7 +583,8 @@ setup_proc:
         lda base
         iny
         sta (p3),y
-        ; initial stack: P, then return address into proc_entry
+        rts
+setup_stack:         ; initial stack: P, then return address into proc_entry
         ldy #ZPSAVE
         lda #$04
         sta (p3),y
@@ -663,7 +678,35 @@ copy_cwd:
         bpl @l
         rts
 
+; exec_commit: spawn_common's tail for SP_EXEC. Everything that can fail has happened: the
+; new image is loaded, relocated, and its argv copied, while the caller's own image is still
+; intact. From here nothing may fail (a fallible step added below would leave a half-replaced
+; process). The caller is `cur`; its zero page and stack are live, so p_save is not touched.
 .segment "CODE"
+exec_commit:
+        jsr set_name            ; pp still points at the path, in the old image
+        ldx cur
+        lda p_mpage,x
+        ldy p_mlen,x
+        jsr page_free           ; the old image goes back to the pool
+        ldx cur
+        lda base
+        sta p_mpage,x
+        lda npages
+        sta p_mlen,x
+        lda p_pid,x
+        jsr con_release         ; raw console mode is keyed by pid
+        lda #$02                ; p3 -> the live zero page
+        sta p3
+        lda #0
+        sta p3+1
+        jsr init_ctx
+        jsr check_signal        ; a signal that arrived during the load kills the new image
+        sei
+        ldx #$ff
+        txs                     ; drop the user stack and the sys_return frame
+        jmp proc_entry          ; in_kernel = 0, push user_ret, cli, jmp (k_entry)
+
 ; ---- kernel modules: a CX image loaded at the top of the pool, called through two entry points
 ; Module image: offset 0 `jmp init`, 3 `jmp fini`, 6 the kernel hash (2 bytes), 8 a class byte.
 ; init returns carry clear if it is happy; fini returns carry set to refuse unloading.

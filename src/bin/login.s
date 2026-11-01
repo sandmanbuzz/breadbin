@@ -51,15 +51,8 @@ start:
         sta r1
         lda #>sh_argv
         sta r1+1
-        lda #0
-        ldx #1
-        ldy #SP_IGNINT
-        jsr SYS_SPAWN
-        bcs @bad
-        ldx #0
-        jsr SYS_WAIT
-        lda #0
-        jmp SYS_EXIT
+        ldy #SP_EXEC        ; become the shell: this slot, its pid, uid and directory
+        jsr SYS_SPAWN       ; (it only returns if that failed)
 @bad:   lda #<s_bad
         ldx #>s_bad
         jsr eprint
