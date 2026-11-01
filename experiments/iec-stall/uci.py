@@ -28,6 +28,10 @@ def rdloop(target, chunk, total):
     return bytes([2, target]) + struct.pack("<HH", chunk, total)
 
 
+def rdtight(target, chunk, total, blind=False):
+    return bytes([6 if blind else 5, target]) + struct.pack("<HH", chunk, total)
+
+
 def ctrl(v):
     return bytes([3, v])
 
@@ -52,13 +56,27 @@ GROUPS = {
     "basic": ([("identify", cmd(1, 0x01)), ("echo", cmd(1, 0xF0, *b"hello")),
                ("get path", cmd(1, 0x12)), ("get time", cmd(1, 0x26)),
                ("identify target 2", cmd(2, 0x01))]),
-    "write": ([("create 32 KB file", cmd(1, 0x02, 0x0E, *FILE)), ("write 32 KB in 512-byte chunks", wrfill(1, 512, 32768)),
+    "write": ([("create 32 KB file", cmd(1, 0x02, 0x0A, *FILE)), ("write 32 KB in 512-byte chunks", wrfill(1, 512, 32768)),
                ("close", close()), ("stat", cmd(1, 0x08, *FILE))]),
     "latency": ([(f"{n} {i}", op) for i in range(10) for n, op in
                  (("open", open_read()), ("seek 0", seek(1, 0)), ("file info", cmd(1, 0x07)), ("close", close()))]),
     "throughput": ([x for c in (256, 512, 4096, 32768)
                     for x in ((f"open", open_read()), (f"read 32 KB in {c}-byte requests", rdloop(1, c, 32768)),
                               ("close", close()))]),
+    "tight": ([x for c, blind in ((512, False), (4096, False), (32768, False), (512, True), (4096, True), (32768, True))
+               for x in (("open", open_read()), (f"tight {'blind' if blind else 'checked'} read 32 KB in {c}-byte requests",
+                          rdtight(1, c, 32768, blind)), ("close", close()))]),
+    "paths": ([("change dir /Temp", cmd(1, 0x11, *b"/Temp")), ("get path", cmd(1, 0x12)),
+               ("file stat, relative name", cmd(1, 0x08, *b"uci32k.bin")),
+               ("file stat, absolute name", cmd(1, 0x08, *FILE)), ("change dir /", cmd(1, 0x11, *b"/")),
+               ("file stat, absolute name from /", cmd(1, 0x08, *FILE)), ("get path", cmd(1, 0x12))]),
+    "create": ([x for i in range(5) for x in ((f"create {i}", cmd(1, 0x02, 0x0A, *b"/Temp/uci-c.bin")), ("close", close()))]),
+    "reubig": ([x for name, size in (("128 KB", 128), ("512 KB", 512)) for x in
+                ([(f"create {name}", cmd(1, 0x02, 0x0A, *(b"/Temp/uci-" + name[:3].encode() + b".bin")))] +
+                 [(f"write {name} part {k}", wrfill(1, 512, 32768)) for k in range(size // 32)] +
+                 [("close", close()), (f"open {name}", cmd(1, 0x02, 0x01, *(b"/Temp/uci-" + name[:3].encode() + b".bin"))),
+                  (f"LOAD REU {name}", cmd(1, 0x21, *struct.pack("<I", 0x40000), *struct.pack("<I", size * 1024))),
+                  ("close", close())])]),
     "errors": ([("open a missing file", open_read(1, b"/Temp/no-such-file")), ("read with no file open", cmd(1, 0x04, 16, 0)),
                 ("close with no file open", close()), ("open", open_read()), ("open again, same target", open_read()),
                 ("write to a read-only file", cmd(1, 0x05, 0, 0, 1, 2, 3)), ("seek to the end", seek(1, 32768)),
