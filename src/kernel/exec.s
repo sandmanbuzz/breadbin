@@ -7,6 +7,8 @@
 .importzp fb, pp
 .import f_done, p_pslot, new_slot, proc_entry, name_off, con_file
 .import cwd_ptr, nm_dev, nm_ino, p_uid
+.export mod_load, mod_unload, mod_list
+NMOD = 4
 
 MAXARGS = 16
 
@@ -22,6 +24,12 @@ bss_sz:   .res 2
 nrel:     .res 2
 argsz:    .res 2
 nargs:    .res 1
+ld_hi:    .res 1        ; cx_load: 1 = allocate from the top of the pool
+mod_base: .res NMOD     ; loaded kernel modules: first page (0 = free slot),
+mod_np:   .res NMOD     ; page count,
+mod_cls:  .res NMOD     ; class byte from the module header
+md_slot:  .res 1
+md_jmp:   .res 3        ; jmp base+0 (init) or base+3 (fini), built on the fly
 base:     .res 1        ; first page
 npages:   .res 1
 rbuf:     .res 128
@@ -96,7 +104,22 @@ spawn_common:
         sec
         rts
 @slot:  stx sp_slot
-        ; find and check the program
+        jsr measure_args
+        bcs @sr
+        lda #0
+        sta ld_hi
+        jsr cx_load
+        bcs @sr
+        jsr zero_bss
+        jsr copy_args
+        jsr setup_proc
+        clc
+@sr:    rts
+
+; cx_load: r0 = path, argsz already set. ld_hi = 0 takes pages from the bottom of the pool
+; (processes), 1 from the top (kernel modules). Loads and relocates the CX image: base,
+; npages, img_sz, bss_sz. Carry set on error (A = errno), nothing left allocated.
+cx_load:
         lda r0
         sta pp
         lda r0+1
@@ -155,8 +178,6 @@ spawn_common:
         sta img_sz,x
         dex
         bpl @hc
-        jsr measure_args
-        bcs @r
         ; npages = ceil((img + bss + args) / 256)
         lda img_sz
         clc
@@ -180,8 +201,12 @@ spawn_common:
         bcs @nomem
 @np:    sta npages
         tay
+        lda ld_hi
+        bne @hi
         jsr page_alloc
-        bcc @mem
+        jmp @got
+@hi:    jsr page_alloc_hi
+@got:   bcc @mem
 @nomem: lda #ENOMEM
         sec
         rts
@@ -209,9 +234,6 @@ spawn_common:
         bne @bad
         jsr relocate
         bcs @fail
-        jsr zero_bss
-        jsr copy_args
-        jsr setup_proc
         clc
         rts
 @bad:   lda #ENOEXEC
@@ -636,3 +658,162 @@ copy_cwd:
         dey
         bpl @l
         rts
+
+; ---- kernel modules: a CX image loaded at the top of the pool, called through two entry points
+; Module image: offset 0 `jmp init`, 3 `jmp fini`, 6 the kernel hash (2 bytes), 8 a class byte.
+; init returns carry clear if it is happy; fini returns carry set to refuse unloading.
+
+; kapi_sum: tmp0/tmp1 = 16-bit sum of the exported kernel addresses
+kapi_sum:
+        lda #0
+        sta tmp0
+        sta tmp1
+        ldx #0
+@l:     lda kapi_tab,x
+        clc
+        adc tmp0
+        sta tmp0
+        lda kapi_tab+1,x
+        adc tmp1
+        sta tmp1
+        inx
+        inx
+        cpx #KAPI_N*2
+        bne @l
+        rts
+
+; mod_load(r0 = path) -> A = slot, carry set on error. Root only.
+mod_load:
+        ldx cur
+        lda p_uid,x
+        bne @perm
+        ldx #NMOD-1
+@f:     lda mod_base,x
+        beq @slot
+        dex
+        bpl @f
+        lda #ENOMEM
+        sec
+        rts
+@perm:  lda #EPERM
+        sec
+        rts
+@slot:  stx md_slot
+        lda #0
+        sta argsz
+        sta argsz+1
+        lda #1
+        sta ld_hi
+        jsr cx_load
+        bcs @r
+        jsr zero_bss
+        jsr kapi_sum
+        lda #0
+        sta p1
+        lda base
+        sta p1+1
+        ldy #6
+        lda (p1),y
+        cmp tmp0
+        bne @bad
+        iny
+        lda (p1),y
+        cmp tmp1
+        bne @bad
+        ldx md_slot
+        lda base
+        sta mod_base,x
+        lda npages
+        sta mod_np,x
+        ldy #8
+        lda (p1),y
+        sta mod_cls,x
+        lda #$4c
+        sta md_jmp
+        lda #0
+        sta md_jmp+1
+        lda base
+        sta md_jmp+2
+        jsr md_jmp          ; init
+        bcc @ok
+        ldx md_slot         ; refused: give the pages back
+        lda mod_base,x
+        ldy mod_np,x
+        jsr page_free
+        ldx md_slot
+        lda #0
+        sta mod_base,x
+        lda #ENODEV
+        sec
+        rts
+@ok:    lda md_slot
+        clc
+        rts
+@bad:   lda base
+        ldy npages
+        jsr page_free
+        lda #ENOEXEC
+        sec
+@r:     rts
+
+; mod_unload(A = slot) -> carry set on error. Root only.
+mod_unload:
+        pha
+        ldx cur
+        lda p_uid,x
+        bne @perm
+        pla
+        cmp #NMOD
+        bcs @inval
+        tax
+        lda mod_base,x
+        beq @inval
+        stx md_slot
+        sta md_jmp+2
+        lda #3
+        sta md_jmp+1
+        lda #$4c
+        sta md_jmp
+        jsr md_jmp          ; fini
+        bcs @busy
+        ldx md_slot
+        lda mod_base,x
+        ldy mod_np,x
+        jsr page_free
+        ldx md_slot
+        lda #0
+        sta mod_base,x
+        clc
+        rts
+@busy:  lda #EBUSY
+        sec
+        rts
+@perm:  pla
+        lda #EPERM
+        sec
+        rts
+@inval: lda #EINVAL
+        sec
+        rts
+
+; mod_list(r0 = buf of 12 bytes): per slot, first page (0 = empty), pages, class
+mod_list:
+        ldy #0
+        ldx #0
+@l:     lda mod_base,x
+        sta (r0),y
+        iny
+        lda mod_np,x
+        sta (r0),y
+        iny
+        lda mod_cls,x
+        sta (r0),y
+        iny
+        inx
+        cpx #NMOD
+        bne @l
+        clc
+        rts
+
+.segment "RODATA"
+.include "kapi.inc"

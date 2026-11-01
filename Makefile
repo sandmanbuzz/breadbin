@@ -7,6 +7,8 @@ CX      := $(patsubst %,$(BUILD)/root/bin/%,$(PROGS))
 LIBSRC  := $(wildcard src/lib/*.s)
 LIBOBJ  := $(BUILD)/lib/breadbin.lib
 ROOTSRC := $(shell find rootfs -type f)
+MODSRC  := $(wildcard src/mod/*.s)
+MODS    := $(patsubst src/mod/%.s,$(BUILD)/root/lib/km/%,$(MODSRC))
 
 .PHONY: FORCE all clean test test-host test-smoke test-only test-keyboard test-console size run run-reu
 .SECONDARY:
@@ -46,7 +48,25 @@ $(BUILD)/root/bin/%: $(BUILD)/p/%.o $(LIBOBJ) src/prog.cfg tools/cx.py
 	ld65 -C src/prog.cfg -S 256 -o $(BUILD)/p/$*.1 $< $(LIBOBJ)
 	python3 tools/cx.py $(BUILD)/p/$*.0 $(BUILD)/p/$*.1 $(BUILD)/p/$*.lbl $@
 
-$(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(ROOTSRC) tools/mkimage.py
+# kernel modules: CX files linked against the kernel's absolute addresses (tools/kexports.py)
+$(BUILD)/kexp.s: tools/kexports.py src/kernel/kapi.inc $(BUILD)/breadbin.prg
+	python3 tools/kexports.py src/kernel/kapi.inc $(BUILD)/kernel.lbl > $@
+
+$(BUILD)/m/%.o: src/mod/%.s include/breadbin.inc
+	@mkdir -p $(dir $@)
+	ca65 -g $< -o $@
+
+$(BUILD)/m/kexp.o: $(BUILD)/kexp.s
+	@mkdir -p $(dir $@)
+	ca65 $< -o $@
+
+$(BUILD)/root/lib/km/%: $(BUILD)/m/%.o $(BUILD)/m/kexp.o src/prog.cfg tools/cx.py
+	@mkdir -p $(dir $@) $(BUILD)/m
+	ld65 -C src/prog.cfg -S 0 -Ln $(BUILD)/m/$*.lbl -o $(BUILD)/m/$*.0 $< $(BUILD)/m/kexp.o
+	ld65 -C src/prog.cfg -S 256 -o $(BUILD)/m/$*.1 $< $(BUILD)/m/kexp.o
+	python3 tools/cx.py $(BUILD)/m/$*.0 $(BUILD)/m/$*.1 $(BUILD)/m/$*.lbl $@
+
+$(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(MODS) $(ROOTSRC) tools/mkimage.py
 	@mkdir -p $(BUILD)/root
 	cp -R rootfs/. $(BUILD)/root/
 	python3 tools/mkimage.py build $@ --boot $(BUILD)/breadbin.prg --root $(BUILD)/root --dev console:1 --dev null:0
