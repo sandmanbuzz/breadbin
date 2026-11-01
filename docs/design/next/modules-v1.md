@@ -47,4 +47,8 @@ Build rules enforced by `kexports.py` (hard errors): a whitelist name missing fr
 
 ## Later (not v1)
 
-CX v2 modules (trailer, delta relocs), per-class registration tables (C1/C2 in lens C), `cbm.km` (first real module), `uci.km`, versioned hash per class, signed modules (not needed while kernel and modules ship on one image).
+CX v2 modules (trailer, delta relocs), per-class registration tables (C1/C2 in lens C), versioned hash per class, signed modules (not needed while kernel and modules ship on one image).
+
+### uci.km (2026-11-01, feat/uci-km)
+
+The second real module, `/lib/km/uci` (`src/mod/uci.s`): loaded by `mount uci`, unloaded at its umount or when that mount fails (unlike `cbm.km`, which stays). Resident: sixteen `jmp` stubs whose operands the module patches (no vector table), `uci_load`/`uci_drop`; `init`/`fini` refuse unless the kernel is the caller (`uci_sl = $FF`). Details and numbers: `docs/design/next/uci-v1.md`, addendum "uci.km". `kapi.txt` grows by 24 names.
