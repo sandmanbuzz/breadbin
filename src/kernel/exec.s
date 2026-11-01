@@ -78,7 +78,9 @@ sys_spawn:
 @e:     stx sp_err
         lda r1
         ora r1+1
-        bne spawn_common
+        beq @noargv
+        jmp spawn_common
+@noargv:
         ; no argv given: use {path}
         lda r0
         sta kargv
@@ -94,6 +96,7 @@ sys_spawn:
         jmp spawn_common
 @r:     rts
 
+.segment "CODEHI"            ; the loader chain runs once per process start: out of the pool's way
 spawn_common:
         ; free slot
         ldx #MAXPROC-1
@@ -660,6 +663,7 @@ copy_cwd:
         bpl @l
         rts
 
+.segment "CODE"
 ; ---- kernel modules: a CX image loaded at the top of the pool, called through two entry points
 ; Module image: offset 0 `jmp init`, 3 `jmp fini`, 6 the kernel hash (2 bytes), 8 a class byte.
 ; init returns carry clear if it is happy; fini returns carry set to refuse unloading.
