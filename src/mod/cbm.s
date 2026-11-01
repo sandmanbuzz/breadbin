@@ -31,12 +31,24 @@ nbuf:    .res 16
 mw_dev:  .res 1
 
 .segment "CODE"
-init:   ldx #19                 ; fill the resident vectors
+; init is refused unless the kernel is loading the module (mod_busy): the file is a CX image
+; like any program, and running it (`/lib/km/cbm`) would point the vectors at memory that is
+; freed when that process exits. A second copy is refused too (cbm_up).
+init:   lda mod_busy
+        beq @no
+        lda cbm_up
+        bne @no
+        ldx #19                 ; fill the resident vectors
 @l:     lda vtab,x
         sta cbmv,x
         dex
         bpl @l
+        lda #1
+        sta cbm_up
         clc
+        rts
+@no:    lda #EBUSY
+        sec
         rts
 
 fini:   lda #EBUSY
