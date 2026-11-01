@@ -135,6 +135,20 @@ class Mounted(unittest.TestCase):
         u.force[0x16] = b"FILE EXISTS"
         self.assertEqual(s.errno(s.path_call("MKDIR", "/u/Temp/d")), "EEXIST")
 
+    def test_write_past_16mb_is_efbig(self):
+        """24-bit positions: a write that would wrap them must fail, not land at 0 (review 8)."""
+        s = self.s
+        with open(self.h("Temp", "huge"), "wb") as f:
+            f.truncate(0xFFFFF6)
+        fd = s.check(s.open("/u/Temp/huge", O_WRONLY | O_APPEND), "open")
+        self.assertEqual(s.write(fd, b"x" * 9), 9)                  # up to $FFFFFF: fine
+        self.assertEqual(s.errno(s.sys("WRITE", a=fd, r0=0x9100, r1=2)), "EFBIG")
+        s.close(fd)
+        with open(self.h("Temp", "huge"), "rb") as f:
+            self.assertEqual(f.read(4), bytes(4))
+            f.seek(0xFFFFF6)
+            self.assertEqual(f.read(), b"x" * 9)
+
     def test_no_delete_or_rename_under_an_open_file(self):
         s = self.s
         fd = s.check(s.open("/u/Temp/pattern.bin"), "open")
