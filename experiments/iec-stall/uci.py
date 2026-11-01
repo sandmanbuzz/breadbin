@@ -36,6 +36,10 @@ def wrtight(target, total):
     return bytes([7, target]) + struct.pack("<HH", 512, total) + bytes([0])
 
 
+def setpush(v):
+    return bytes([8, v])
+
+
 def ctrl(v):
     return bytes([3, v])
 
@@ -70,6 +74,9 @@ GROUPS = {
     "tight": ([x for c, blind in ((512, False), (4096, False), (32768, False), (512, True), (4096, True), (32768, True))
                for x in (("open", open_read()), (f"tight {'blind' if blind else 'checked'} read 32 KB in {c}-byte requests",
                           rdtight(1, c, 32768, blind)), ("close", close()))]),
+    "dmabit": ([("echo, plain push", cmd(1, 0xF0)), ("push with DMA bit ($81)", setpush(0x81)), ("echo, DMA push", cmd(1, 0xF0)),
+                ("identify, DMA push", cmd(1, 0x01)), ("file stat, DMA push", cmd(1, 0x08, *b"/Temp/uci-w.bin")), ("back to plain", setpush(0x01)),
+                ("echo, plain push again", cmd(1, 0xF0))]),
     "wtight": ([("create", cmd(1, 0x02, 0x0A, *b"/Temp/uci-w.bin")), ("write 32 KB, tight loop, 512-byte requests", wrtight(1, 32768)),
                 ("close", close()), ("create", cmd(1, 0x02, 0x0A, *b"/Temp/uci-w.bin")),
                 ("write 128 KB, tight loop", wrtight(1, 65024)), ("write another 64,000 bytes", wrtight(1, 64000 // 512 * 512)),
