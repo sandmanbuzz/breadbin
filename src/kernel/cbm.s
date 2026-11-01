@@ -677,7 +677,9 @@ cbm_fsinfo:
 ; ---------------------------------------------------------------------
 ; mount(A = drive 9-11, or 'U' for the Ultimate's storage, r0 = directory)
 sys_mount:
-        cmp #'U'
+        cmp #'U'            ; with X = 'U' too: mount 85 stays a bad drive number
+        bne @drv
+        cpx #'U'
         bne @drv
         lda dev_present+DEV_UCI
         bne @onboot         ; one UCI mount at a time
@@ -735,7 +737,10 @@ sys_mount:
         lda #ENOTDIR
         sec
 @r:     rts
-@dir:   lda mo_pino         ; not on top of another mount
+@dir:   lda mo_pdev         ; not inside UCI (its namei never sees mount points)
+        cmp #DEV_UCI
+        beq @busy
+        lda mo_pino         ; not on top of another mount
         cmp #ROOT_INO
         bne @nr
         lda mo_pdev
