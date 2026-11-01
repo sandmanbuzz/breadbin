@@ -1,7 +1,7 @@
 ; Breadbin kernel internal definitions
 .include "../../include/breadbin.inc"
 
-KSTART  = $8000     ; must match KRAM in kernel.cfg
+KSTART  = $A100     ; must match KRAM in kernel.cfg: the user pool is $0800-KSTART-1
 MAXPROC = 12
 NFD     = 8         ; fds per process
 NFILE   = 24        ; system open-file table
@@ -26,7 +26,8 @@ PS_BLOCKED = 2
 PS_ZOMBIE  = 3
 
 ; wait channels
-CH_TICK  = $01      ; woken every tick (console polling)
+CH_TICK  = $01      ; woken every tick
+CH_KEY   = $04      ; woken when the keyboard buffer is not empty
 CH_SLEEP = $02      ; woken when ticks reach p_wk (sleep)
 CH_CHILD = $80      ; | parent slot
 CH_PIPE  = $40      ; | pipe index
@@ -76,27 +77,20 @@ sb7 = $1B
 k_entry = $1E
 
 ; KERNAL
-CHROUT = $FFD2
-GETIN  = $FFE4
-CHKIN  = $FFC6
-CHKOUT = $FFC9
-CHRIN  = $FFCF
-CLRCHN = $FFCC
-SETLFS = $FFBA
-SETNAM = $FFBD
-OPEN   = $FFC0
-CLOSE  = $FFC3
-UDTIM  = $FFEA
-SCNKEY = $FF9F
 ST     = $90
 
 ; ---- shared symbols ----
 ; zero page globals (main.s)
 .globalzp cur, in_kernel, need_resched, slice, ticks, p1, p2, p3, p4
-.globalzp k_a, k_x, k_n, k_vec, tmp0, tmp1, tmp2, tmp3, stop_prev, intr_pending
+.globalzp k_a, k_x, k_n, tmp0, tmp1, tmp2, tmp3, stop_prev, intr_pending
 
 ; main.s
-.global kmain, panic, pool_first, pool_last
+.global kmain, panic, pool_first, pool_last, irq_exit
+; kbd.s
+.global kbd_init, kbd_scan, key_get
+; iec.s
+.global iec_ch_open, iec_ch_close, iec_out_begin, iec_out_byte, iec_out_end
+.global iec_in_begin, iec_in_byte, iec_in_end
 ; con.s
 .global con_init, con_putc, con_puts_ax, con_write, con_read, con_hex, con_dec
 .global con_cursor_tick, con_eof

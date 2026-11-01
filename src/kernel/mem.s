@@ -14,13 +14,14 @@ pa_n:        .res 1
 pa_run:      .res 1
 pa_start:    .res 1
 
-.segment "CODE"
+.segment "INIT"
 mem_init:
-        ldx #NPOOL-1
-        lda #0
+        ldx #0
+        txa
 @l:     sta pg_used,x
-        dex
-        bpl @l
+        inx
+        cpx #NPOOL
+        bne @l
         lda #NPOOL
         sta free_pages
         sta total_pages
@@ -28,6 +29,7 @@ mem_init:
 
 ; page_alloc: Y = number of pages -> A = first page (carry clear),
 ; or carry set (A = ENOMEM). First fit.
+.segment "CODE"
 page_alloc:
         sty pa_n
         cpy #0
