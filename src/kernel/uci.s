@@ -85,7 +85,7 @@ stbuf:   .res 7         ; the head of the last status text
 .segment "RODATA"
 ps_off:  .byte 0, 48, 96, 144, 192
 omode:   .byte 1, 2, 3, 3
-s_ident: .byte "ULTIMATE-II "
+s_ident: .byte "ULTIMATE"
 
 .segment "CODE"
 ; ---------------------------------------------------------------------
@@ -155,16 +155,17 @@ ut_str: ldy #0
         bne @l
 @r:     rts
 
-; ut_run: push the command, throw its data away -> carry/A from the status.
+; ut_run: push the command, throw its data away -> carry/A from the status (ut_got kept).
 ; ut_recv: the same, keeping up to ut_n bytes at (p4) -> ut_got = bytes kept
 ut_run: lda #0
         sta ut_n
         sta ut_n+1
+        beq ut_go
 ut_recv:
         lda #0
         sta ut_got
         sta ut_got+1
-        sta stbuf
+ut_go:  sta stbuf
         lda #$01
         sta UCI_CTL
         jsr ut_data
@@ -275,8 +276,8 @@ u_get12:
 ; handle slots
 ; hs_close: X = slot. Close what it holds (an error is of no interest). Uses X/Y.
 hs_close:
-        lda hs_own,x
-        cmp #HS_FREE
+        ldy hs_own,x
+        iny                 ; HS_FREE
         beq @r
         lda #HS_FREE
         sta hs_own,x
@@ -304,6 +305,14 @@ u_dropprobe:
 @n:     dex
         bpl @l
         rts
+
+; hs_find: A = owner -> X = its slot (N clear), or X = $FF (N set)
+hs_find: ldx #1
+@l:     cmp hs_own,x
+        beq @r
+        dex
+        bpl @l
+@r:     rts
 
 ; hs_claim: X = slot, A = owner. At position 0; the other slot is taken next
 hs_claim:
@@ -380,19 +389,15 @@ u_open: pha
         bcs @r
         ldx u_s
         lda u_e
-        jsr hs_claim
-        clc
+        jsr hs_claim        ; (carry clear from ut_run)
 @r:     rts
 
 ; uci_ensure: X = open-file entry, u_pos = where it is -> u_s = a slot open on it, there
 uci_ensure:
         stx u_e
-        ldx #1
-@f:     lda hs_own,x
-        cmp u_e
-        beq @have
-        dex
-        bpl @f
+        txa
+        jsr hs_find
+        bpl @have
         ldx u_e
         lda f_ino,x
         jsr ps_ptr
@@ -512,7 +517,7 @@ uci_namei:
 @path:  jsr uci_hpath
         bcc @in
         tax
-        bne @err
+        bne @err            ; A = errno, carry set
         ; walked out of the mount: resolve the normalized path from the top
         lda pp
         sta u_pp
@@ -530,17 +535,14 @@ uci_namei:
         stx pp+1
         plp
         rts
-@err:   txa
-        sec
-        rts
-@in:    lda u_root
-        ldx nm_parent
+@err:   rts
+@in:    lda nm_parent
         beq @full
-        cmp #0
+        lda u_root
         bne @busy
         lda #3              ; the parent: some directory (the host checks it)
         bne @ino
-@full:  cmp #0
+@full:  lda u_root
         beq uci_probe
         lda #ROOT_INO
 @ino:   sta nm_ino
@@ -553,7 +555,12 @@ uci_namei:
 ; uci_probe: what is at the host path? -> nm_ino 2 (a file: u_size, left open as a probe
 ; handle) or 3 (a directory). OPEN + FILE INFO, then CHANGE DIR (FILE STAT does not work).
 uci_probe:
-        ldx hs_lru
+        lda #HS_PROBE       ; only the newest probe's handle may be adopted or read by spawn
+        jsr hs_find
+        bmi @n
+        lda #HS_OLD
+        sta hs_own,x
+@n:     ldx hs_lru
         stx u_s
         jsr hs_close
         ldx u_s
@@ -565,6 +572,8 @@ uci_probe:
         jsr ut_run
         bcs @nf
         ldx u_s
+        lda #HS_PROBE       ; held from here on: hs_close undoes it
+        jsr hs_claim
         lda #C_INFO
         jsr u_get12
         bcs @bad
@@ -582,43 +591,27 @@ uci_probe:
         sta u_size
         sta u_size+1
         sta u_size+2
-@s:     lda u_s
-        eor #1
-        tax
-        lda hs_own,x        ; only the newest probe's handle may be adopted or read by spawn
-        cmp #HS_PROBE
-        bne @s1
-        lda #HS_OLD
-        sta hs_own,x
-@s1:    ldx u_s
-        lda #HS_PROBE
-        jsr hs_claim
-        lda #2
+@s:     lda #2
         bne @ino
 @bad:   pha
-        jsr @cl
+        ldx u_s
+        jsr hs_close
         pla
         sec
         rts
-@dir:   jsr @cl
-        jmp @isd
 @nf:    sta u_err
         ldx u_s
         lda #C_CD
-        jsr ut_tc
-        jsr ut_hpath
-        jsr ut_run
+        jsr u_path
         bcc @isd
         lda u_err
         rts
+@dir:   ldx u_s
+        jsr hs_close
 @isd:   lda #3
 @ino:   sta nm_ino
         clc
         rts
-@cl:    ldx u_s
-        lda #C_CLOSE
-        jsr ut_tc
-        jmp ut_run
 
 ; uci_iget: ci_ino 1/3 -> a directory, 2 -> the probed file
 uci_iget:
@@ -629,20 +622,17 @@ uci_iget:
         bpl @z
         lda #1
         sta ci+I_NLINK
+        ldy #T_DIR
         lda ci_ino
         cmp #2
-        beq @f
-        lda #T_DIR
-        sta ci+I_TYPE
-        clc
-        rts
-@f:     lda #T_FILE
-        sta ci+I_TYPE
+        bne @t
+        ldy #T_FILE
         ldx #2
 @s:     lda u_size,x
         sta ci+I_SIZE,x
         dex
         bpl @s
+@t:     sty ci+I_TYPE
         clc
         rts
 
@@ -652,10 +642,11 @@ uci_iget:
 uci_create:
         lda #1
         sta u_cr
+        ldx #2
         lda #0
-        sta u_size
-        sta u_size+1
-        sta u_size+2
+@z:     sta u_size,x
+        dex
+        bpl @z
         lda #2
         sta nm_ino
         jmp open_exists
@@ -673,10 +664,7 @@ uci_open:
         bpl @ps
         lda #EMFILE
 @hp:    ldx u_e
-        pha
-        lda #0
-        sta f_dev,x         ; nothing for uci_release to undo
-        pla
+        inc f_dev,x         ; not DEV_UCI any more: nothing for uci_release to undo
         sec
         rts
 @pg:    lda #1
@@ -700,16 +688,12 @@ uci_open:
         and #3
         ora u_cr
         bne @now
-        ldx #1              ; reading: the probe has just opened this very file
-@a:     lda hs_own,x
-        cmp #HS_PROBE
-        beq @ad
-        dex
-        bpl @a
-        bmi @ok             ; opened when first read
-@ad:    lda u_e
+        lda #HS_PROBE       ; reading: the probe has just opened this very file
+        jsr hs_find
+        bmi @ok             ; (or it is opened when first read)
+        lda u_e
         sta hs_own,x
-        jmp @ok
+        bpl @ok
 @now:   jsr u_dropprobe
         lda of_flags
         and #3
@@ -741,15 +725,10 @@ uci_open:
         sta f_pos1,x
         lda u_info+2
         sta f_pos2,x
-@ok:    lda #0
-        sta u_cr
-        ldx u_e
+@ok:    ldx u_e             ; (u_cr is cleared by the next uci_namei)
         clc
         rts
-@fail:  ldx #0
-        stx u_cr
-        ldx u_e
-        sec
+@fail:  ldx u_e
         rts
 
 ; uci_release: from oft_unref, X = an entry being freed. Keeps X.
@@ -762,16 +741,10 @@ uci_release:
         lda #0
         sta ps_used,y
         txa
-        ldy #1
-@h:     cmp hs_own,y
-        beq @c
-        dey
-        bpl @h
-        rts
-@c:     tya
-        tax
+        jsr hs_find
+        bmi @x
         jsr hs_close
-        ldx u_x
+@x:     ldx u_x
 @r:     rts
 
 ; uci_read: from sys_read, entry sb6, r0 = buffer, r1 = count -> r1 = bytes read
@@ -823,22 +796,18 @@ u_rd:   ldx u_s
 
 ; uci_xread: fs_read for spawn: f_off, f_cnt, fb, from the probe's handle -> f_done
 uci_xread:
-        ldx #1
-@f:     lda hs_own,x
-        cmp #HS_PROBE
-        beq @g
-        dex
-        bpl @f
+        ldy #2
+@i:     lda f_off,y
+        sta u_pos,y
+        dey
+        bpl @i
+        lda #HS_PROBE
+        jsr hs_find
+        bpl @g
         lda #EIO
         sec
         rts
-@g:     lda f_off
-        sta u_pos
-        lda f_off+1
-        sta u_pos+1
-        lda f_off+2
-        sta u_pos+2
-        jsr hs_at
+@g:     jsr hs_at
         bcs @r
         lda fb
         sta p4
@@ -860,7 +829,8 @@ uci_xread:
         lda ut_got+1
         sta f_done+1
         plp
-@r:     rts
+@r:
+u_ret0: rts
 
 ; uci_write: from sys_write, entry sb6, r0 = data, r1 = count -> r1 = written.
 ; WRITE DATA in requests of up to 512 bytes; no write-behind.
@@ -868,44 +838,37 @@ uci_write:
         ldx sb6
         jsr e_getpos
         jsr uci_ensure
-        bcc :+
-        jmp @r
-:
+        bcs u_ret0
         lda r0
         sta p4
         lda r0+1
         sta p4+1
-        lda #0
+        lda r1              ; u_w = bytes left
         sta u_w
-        sta u_w+1
-@ch:    lda r1              ; n = min(512, r1 - written)
-        sec
-        sbc u_w
-        sta u_c
         lda r1+1
-        sbc u_w+1
-        sta u_c+1
-        ora u_c
-        bne :+
-        jmp @done
-:
-        lda u_c+1
-        cmp #2
-        bcc @n
+        sta u_w+1
+@ch:    ldx #2              ; n = min(512, left)
         lda #0
-        sta u_c
-        lda #2
-        sta u_c+1
-@n:     ldx u_s
+        ldy u_w+1
+        cpy #2
+        bcs @cap
+        tya
+        tax
+        lda u_w
+@cap:   sta ut_got
+        stx ut_got+1
+        ora ut_got+1
+        beq @done
+        ldx u_s
         lda #C_WRITE
         jsr ut_tc
         lda #0
         sta UCI_CMD
         sta UCI_CMD
-        lda u_c
-        sta ut_got
-        lda u_c+1
-        sta ut_got+1
+        lda ut_got
+        sta u_c
+        lda ut_got+1
+        sta u_c+1
 @b:     ldy #0
         lda (p4),y
         sta UCI_CMD
@@ -919,39 +882,36 @@ uci_write:
         lda u_c
         ora u_c+1
         bne @b
-        lda ut_got          ; ut_run clears ut_got: keep n
-        pha
-        lda ut_got+1
-        pha
-        jsr ut_run
-        pla
-        sta ut_got+1
-        pla
-        sta ut_got
+        jsr ut_run          ; (keeps ut_got = n)
         bcs @err
         jsr u_adv
         lda u_w
-        clc
-        adc ut_got
+        sec
+        sbc ut_got
         sta u_w
         lda u_w+1
-        adc ut_got+1
+        sbc ut_got+1
         sta u_w+1
         jmp @ch
 @err:   ldx u_w             ; something written: report the count
+        cpx r1
         bne @done
         ldx u_w+1
+        cpx r1+1
         bne @done
         sec
-@r:     rts
+        rts
 @done:  ldx sb6
         jsr e_putpos
-        lda u_w
+        lda r1
+        sec
+        sbc u_w
         sta r1
-        lda u_w+1
+        lda r1+1
+        sbc u_w+1
         sta r1+1
         clc
-        rts
+u_ret:  rts
 
 ; uci_readdir: entry sb6 (path slot, entries delivered so far in f_pos0/1), r0, r1 ->
 ; 16-byte records {ino, name[15]}. Lists the directory again on every call (k skipped).
@@ -974,34 +934,24 @@ uci_readdir:
         jsr ut_tc
         jsr ut_str
         jsr ut_run
-        bcc :+
-        jmp @r
-:
+        bcs u_ret
         ldx u_s
         lda #C_ODIR
         jsr ut_tc
         jsr ut_run
-        bcc :+
-        jmp @r
-:
+        bcs u_ret
         lda stbuf+1
         cmp #'1'            ; 01 DIRECTORY EMPTY: READ DIR would answer an internal error
-        bne :+
-        jmp @done
-:
+        beq @done
         ldx u_s
         lda #C_RDIR
         jsr ut_tc
         lda #$01
         sta UCI_CTL
         jsr ut_data
-        bcc :+
-        jmp @r
-:
+        bcs u_ret
 @pk:    lda UCI_CTL         ; one entry per packet: attribute, name
-        bmi :+
-        jmp @next
-:
+        bpl @next
         lda UCI_DAT
         sta u_c
         ldx sb6
@@ -1019,7 +969,31 @@ uci_readdir:
         bne @room
         cpy #16
         bcc @skip
-@room:  ldy #0
+@room:  jsr u_rec
+@k:     ldx sb6
+        inc f_pos0,x
+        bne @skip
+        inc f_pos1,x
+@skip:  inc u_j
+        bne @next
+        inc u_j+1
+@next:  lda UCI_CTL         ; the rest of this packet
+        bpl @nx
+        lda UCI_DAT
+        jmp @next
+@nx:    jsr ut_pkt
+        bcc @pk
+        jsr ut_map
+        bcs @r
+@done:  lda u_w
+        sta r1
+        lda u_w+1
+        sta r1+1
+        clc
+@r:     rts
+
+; u_rec: one record {ino, name[15]} at (p4) from the packet (attribute in u_c); p4, u_w += 16
+u_rec:  ldy #0
         lda u_c
         and #$10
         beq @fi
@@ -1056,36 +1030,14 @@ uci_readdir:
         clc
         adc #16
         sta u_w
-        bcc @k
+        bcc @r
         inc u_w+1
-@k:     ldx sb6
-        inc f_pos0,x
-        bne @skip
-        inc f_pos1,x
-@skip:  inc u_j
-        bne @next
-        inc u_j+1
-@next:  lda UCI_CTL         ; the rest of this packet
-        bpl @nx
-        lda UCI_DAT
-        jmp @next
-@nx:    jsr ut_pkt
-        bcs :+
-        jmp @pk
-:
-        jsr ut_map
-        bcs @r
-@done:  lda u_w
-        sta r1
-        lda u_w+1
-        sta r1+1
-        clc
 @r:     rts
 
 ; ---------------------------------------------------------------------
 ; directory operations (after nameiparent: pbuf/u_hp = the full path)
 uci_mkdir:
-        ldx hs_lru
+        ldx #0
         lda #C_MKDIR
 u_path: jsr ut_tc
         jsr ut_hpath
@@ -1147,9 +1099,8 @@ uci_rename:
         sta pp
         lda r0+1
         sta pp+1
-        jsr uci_hpath       ; both are strings now: build them straight into the FIFO
-        bcs @x
-        ldx #0
+        jsr uci_hpath       ; both are strings now (both resolved by uci_namei just now:
+        ldx #0              ; they cannot fail), built straight into the FIFO
         lda #C_REN
         jsr ut_tc
         jsr ut_hpath
@@ -1160,29 +1111,22 @@ uci_rename:
         lda r1+1
         sta pp+1
         jsr uci_hpath
-        bcs @ab
         jsr ut_hpath
         jmp ut_run
-@ab:    lda #$04            ; drop the half-built command
-        sta UCI_CTL
-@x:     lda #EXDEV
-        sec
-        rts
 
-uci_fsinfo:             ; no free-space command exists
-        ldy #0
-        lda #$ff
-@l:     sta (r1),y
-        iny
-        cpy #4
-        bne @l
-        lda #0
-        sta (r1),y
-        iny
-        sta (r1),y
-        iny
+uci_fsinfo:             ; no free-space command exists: 65535 of 65535 blocks, no inodes
+        ldy #6
         lda #DEV_UCI
         sta (r1),y
+        lda #0
+        dey
+        sta (r1),y
+        dey
+        sta (r1),y
+        lda #$ff
+@l:     dey
+        sta (r1),y
+        bne @l
         clc
         rts
 
@@ -1196,15 +1140,11 @@ uci_hw: ldx #3
         bne @no
         dex
         bne @id
-        lda #$0C
-        sta UCI_CTL
-        jsr ut_idle
-        bcs @no
-        ldx #0
+        ldx #0              ; (ut_tc aborts and clears whatever a reset left)
         lda #C_IDENT
         jsr u_get12
         bcs @no
-        ldx #11
+        ldx #7
 @cm:    lda u_info,x
         cmp s_ident,x
         bne @no
@@ -1224,13 +1164,7 @@ uci_attach:
         sta u_page
         lda #HS_FREE
         sta hs_own
-        sta hs_own+1
-        lda #0
-        sta hs_lru
-        ldx #NUPATH-1
-@z:     sta ps_used,x
-        dex
-        bpl @z
+        sta hs_own+1        ; (ps_used is all clear: umount needs every file closed)
         lda #FS_UCI
         sta dev_type+DEV_UCI
         clc
