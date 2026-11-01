@@ -55,6 +55,25 @@ class Classic(unittest.TestCase):
         self.assertIsNone(s.mntinfo(3))
 
 
+class Stuck:
+    """A device that reads $C9 at $DF1D and has data/status-available stuck on at $DF1C."""
+
+    def read(self, a):
+        return 0xE0 if a == 0xDF1C else 0xC9
+
+    def write(self, a, v):
+        pass
+
+
+@unittest.skipIf(SKIP, SKIP)
+class StuckBits(unittest.TestCase):
+    def test_mount_does_not_hang_on_stuck_bits(self):
+        """Bounded receive and status loops (review 7): ENODEV, not a frozen kernel."""
+        s = Sim(Stuck())
+        self.assertEqual(s.errno(s.sys("MOUNT", a=ord("U"), x=ord("U"), r0=s.cstr("/mnt"), limit=2_000_000)),
+                         "ENODEV")
+
+
 @unittest.skipIf(SKIP, SKIP)
 class Mounted(unittest.TestCase):
     def setUp(self):
