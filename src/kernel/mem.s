@@ -16,11 +16,12 @@ pa_start:    .res 1
 
 .segment "INIT"
 mem_init:
-        ldx #NPOOL-1
-        lda #0
+        ldx #0
+        txa
 @l:     sta pg_used,x
-        dex
-        bpl @l
+        inx
+        cpx #NPOOL
+        bne @l
         lda #NPOOL
         sta free_pages
         sta total_pages
