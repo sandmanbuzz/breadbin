@@ -113,19 +113,20 @@ ut_poll: sta ut_m
 @w:     lda UCI_CTL
         and ut_m
         cmp ut_v
-        beq @ok
+        beq ut_ok
         dex
         bne @w
         dey
         bne @w
         dec ut_t
         bne @w
+ut_abort:
         lda #$04
         sta UCI_CTL
         lda #EIO
         sec
         rts
-@ok:    clc
+ut_ok:  clc
         rts
 
 ; ut_tc: A = command, X = slot: start a command to DOS target X+1
@@ -177,7 +178,13 @@ ut_go:  sta stbuf
         sta UCI_CTL
         jsr ut_data
         bcs @r
-@b:     lda UCI_CTL
+@bb:    lda #3              ; at most 512+ bytes a packet: a stuck DATA_AV ends in EIO
+        sta ut_t
+@b:     dex
+        bne @b1
+        dec ut_t
+        beq @eio
+@b1:    lda UCI_CTL
         bpl @pk
         lda UCI_DAT
         ldy ut_n
@@ -196,8 +203,9 @@ ut_go:  sta stbuf
         inc ut_got+1
         jmp @b
 @pk:    jsr ut_pkt
-        bcc @b
+        bcc @bb
         jmp ut_map
+@eio:   jmp ut_abort
 @r:     rts
 
 ; ut_pkt: keep the status of this packet (if it has one), accept it. Carry clear: the next
@@ -207,13 +215,16 @@ ut_pkt: ldy #0
         bvc @sd
         lda UCI_ST
         cpy #6
-        bcs @s
+        bcs @sx
         sta stbuf,y
-        iny
-        bne @s
-@sd:    cpy #0
+@sx:    iny
+        bne @s              ; (256 bytes of status: give up)
+@sd:    tya
         beq @ns
-        lda #0
+        cpy #6
+        bcc @tz
+        ldy #6
+@tz:    lda #0
         sta stbuf,y
 @ns:    lda UCI_CTL
         and #$30
@@ -1017,10 +1028,12 @@ uci_readdir:
 @skip:  inc u_j
         bne @next
         inc u_j+1
-@next:  lda UCI_CTL         ; the rest of this packet
+@next:  ldx #0              ; the rest of this packet (bounded: a stuck DATA_AV)
+@nl:    lda UCI_CTL
         bpl @nx
         lda UCI_DAT
-        jmp @next
+        dex
+        bne @nl
 @nx:    jsr ut_pkt
         bcc @pk
         jsr ut_map
