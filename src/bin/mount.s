@@ -24,6 +24,7 @@ idx = $23
         cmp #'u'
         bne @num
         lda #'U'            ; the kernel's name for the Ultimate's storage
+        sta isu
         bne @dv
 @num:   lda r0
         jsr parse_dec
@@ -34,6 +35,7 @@ idx = $23
         sta r0
         stx r0+1
         lda drv
+        ldx isu             ; X = 'U' marks the Ultimate (A alone could be drive 85)
         jsr SYS_MOUNT
         bcc @ok
         pha
@@ -135,4 +137,5 @@ s_c64: .byte " (c64fs)", 0
 s_cbm: .byte " (cbm dos)", 0
 .segment "BSS"
 drv: .res 1
+isu: .res 1
 buf: .res 34

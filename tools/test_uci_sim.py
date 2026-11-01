@@ -45,6 +45,8 @@ class Classic(unittest.TestCase):
         self.assertEqual(s.mem.touch, [("r", 0xDF1D)])     # one ID read, nothing written
         self.assertIsNone(s.mntinfo(3))
         self.assertEqual(s.errno(s.mount_uci("/nonexistent")), "ENODEV")   # probe first
+        self.assertEqual(s.errno(s.sys("MOUNT", a=ord("U"), r0=s.cstr("/mnt"))), "EINVAL")  # "mount 85"
+        self.assertEqual(len(s.mem.touch), 2)
 
     def test_open_bus_c9_without_an_interface(self):
         s = Sim(None)
@@ -85,6 +87,16 @@ class Mounted(unittest.TestCase):
     def test_mount_listed(self):
         self.assertEqual(self.s.mntinfo(3), (0, 0x80, "/u"))
         self.assertEqual(self.s.errno(self.s.mount_uci("/mnt")), "EBUSY")
+        self.assertEqual(self.s.errno(self.s.sys("MOUNT", a=9, r0=self.s.cstr("/u/Temp"))), "EBUSY")
+
+    def test_no_delete_or_rename_under_an_open_file(self):
+        s = self.s
+        fd = s.check(s.open("/u/Temp/pattern.bin"), "open")
+        self.assertEqual(s.errno(s.path_call("UNLINK", "/u/Temp/hello.txt")), "EBUSY")
+        self.assertEqual(s.errno(s.path_call("RENAME", "/u/Temp/hello.txt", "/u/Temp/h")), "EBUSY")
+        self.assertEqual(s.read(fd, 4), PATTERN[:4])
+        s.close(fd)
+        self.assertIsNone(s.errno(s.path_call("UNLINK", "/u/Temp/hello.txt")))
 
     def test_ls(self):
         s = self.s

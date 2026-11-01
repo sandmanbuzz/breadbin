@@ -510,7 +510,7 @@ class Sim:
         return self.sys(name, r0=self.cstr(path), r1=self.cstr(path2, 0x9080))
 
     def mount_uci(self, path):
-        return self.sys("MOUNT", a=ord("U"), r0=self.cstr(path))
+        return self.sys("MOUNT", a=ord("U"), x=ord("U"), r0=self.cstr(path))
 
     def listdir(self, path, chunk=16):
         fd = self.check(self.open(path), "open " + path)
