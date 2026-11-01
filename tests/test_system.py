@@ -236,6 +236,17 @@ class Boot(unittest.TestCase):
         time.sleep(3)
         self.assertEqual(self.run_("cat /home/e.txt | wc"), "     1      2     12")
 
+    def test_26_error_messages_from_the_file(self):
+        """perr looks messages up in /etc/errors; three are built in; a missing file gives 'error N'."""
+        self.assertIn("file exists", self.run_("mkdir /bin"))                 # from /etc/errors
+        self.run_("mv /etc/errors /etc/errors.x")
+        try:
+            self.assertIn("no such file or directory", self.run_("cat /nope"))   # built in
+            self.assertIn("error 17", self.run_("mkdir /bin"))                   # the file is gone
+        finally:
+            self.run_("mv /etc/errors.x /etc/errors")
+        self.assertIn("file exists", self.run_("mkdir /bin"))
+
     def test_25_login_password(self):
         import time
         self.v.type("clear\npasswd\n")
