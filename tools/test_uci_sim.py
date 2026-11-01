@@ -89,6 +89,22 @@ class Mounted(unittest.TestCase):
         self.assertEqual(self.s.errno(self.s.mount_uci("/mnt")), "EBUSY")
         self.assertEqual(self.s.errno(self.s.sys("MOUNT", a=9, r0=self.s.cstr("/u/Temp"))), "EBUSY")
 
+    def test_long_mount_point_is_refused(self):
+        """mt_path holds 31 characters: a longer mount point must not be cut (review 1)."""
+        s = self.s
+        p = ""
+        for c in ("abcdefghijklmn", "abcdefghijklm", "u", "v"):
+            p += "/" + c
+            s.check(s.path_call("MKDIR", p), "mkdir " + p)
+        os.makedirs(self.h("v", "Temp"))
+        with open(self.h("v", "Temp", "f"), "wb") as f:
+            f.write(b"keep me")
+        s.check(s.path_call("UMOUNT", "/u"), "umount")
+        self.assertEqual(s.errno(s.mount_uci(p)), "ENAMETOOLONG")
+        self.assertEqual(s.errno(s.path_call("UNLINK", p + "/Temp/f")), "ENOENT")
+        self.assertTrue(os.path.exists(self.h("v", "Temp", "f")))
+        self.assertIsNone(s.errno(s.mount_uci(p[:31])))     # 31 characters still fit
+
     def test_no_delete_or_rename_under_an_open_file(self):
         s = self.s
         fd = s.check(s.open("/u/Temp/pattern.bin"), "open")
