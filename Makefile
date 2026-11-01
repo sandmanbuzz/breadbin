@@ -20,7 +20,7 @@ $(BUILD)/cache.stamp: FORCE
 FORCE:
 $(BUILD)/k/blk.o: $(BUILD)/cache.stamp
 
-$(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc include/breadbin.inc
+$(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
 	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) $< -o $@
 

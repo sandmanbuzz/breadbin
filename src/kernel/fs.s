@@ -4,6 +4,7 @@
 ; block, so they use non-swapped globals. Buffers returned by bread are
 ; only trusted until the next bread.
 .include "k.inc"
+.include "uci.inc"
 
 .importzp bp
 .import bwrite, name_off
@@ -67,6 +68,8 @@ ba_dev:  .res 1
 .export inode_blk, s_dot, s_dotdot, sb_nblocks_lo, sb_nblocks_hi
 .export mt_used, mt_pdev, mt_pino, mt_dev, mt_path, mnt_point, mnt_of_dev, mount_dev
 .import cbm_iget, cbm_lookup, cache_attach
+.import uci_iget, uci_namei, uci_xread
+.export nm_parent
 
 .segment "RODATA"
 magic:  .byte "C64FS"
@@ -223,7 +226,9 @@ iget:
         tay
         lda dev_type,y
         beq @c64
-        jmp cbm_iget
+        bpl @cbm
+        jmp uci_iget
+@cbm:   jmp cbm_iget
 @c64:   lda ci_dev
         jsr inode_blk
         lda ci_dev
@@ -686,7 +691,11 @@ io_lim_cnt:
 ; fs_read: from ci at f_off, up to f_cnt bytes into (fb).
 ; -> f_done = bytes read, f_off advanced
 fs_read:
-        lda #0
+        ldx ci_dev
+        lda dev_type,x
+        bpl @fs
+        jmp uci_xread       ; spawn reading a program from UCI
+@fs:    lda #0
         sta f_done
         sta f_done+1
         sta bm_alloc
@@ -1098,7 +1107,11 @@ namei:
         rts
 @done:  clc
         rts
-@comp:  ; copy component into fs_name
+@comp:  lda nm_dev
+        cmp #DEV_UCI
+        bne @cc0
+        jmp uci_namei       ; below a UCI mount: the host resolves the rest in one go
+@cc0:   ; copy component into fs_name
         ldx #0
 @cc:    lda (pp),y
         beq @ce

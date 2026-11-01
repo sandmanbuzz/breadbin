@@ -53,10 +53,10 @@ rq_hi:   .res 1
 trk:     .res 1
 sct:     .res 1
 reu_banks: .res 1
-dev_present: .res NDEV
-dev_type: .res NDEV
+dev_present: .res NDEV+1  ; +1: DEV_UCI (uci.inc)
+dev_type: .res NDEV+1
 cur_drv: .res 1          ; drive number the IEC routines below talk to
-dev_drive: .res NDEV    ; drive number of each device (0 = the boot drive)
+dev_drive: .res NDEV+1  ; drive number of each device (0 = the boot drive)
 cmdbuf:  .res 40
 cmdlen:  .res 1
 rd_try:  .res 1
