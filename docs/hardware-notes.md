@@ -6,7 +6,7 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 
 | Item | Value |
 |---|---|
-| Ultimate model and firmware (`GET /v1/info`) | C64 Ultimate, firmware 1.1.0, FPGA 122, core 1.49 |
+| Ultimate model and firmware (`GET /v1/info`) | C64 Ultimate, firmware 1.1.0 |
 | REST password set? Reachable from where? | No password. Reachable over the LAN from the test host. |
 | Drive A: type and ROM | 1541, `JiffyDOS_1541-II.bin`, bus ID 9 (`GET /v1/drives`). Drive B disabled. "Resets when C64 resets": Yes. |
 | Physical drives on the IEC bus, and their device numbers | 2026-10-30: a physical 1541 (fresh media) at device 8; the Ultimate's emulated 1541 at device 9. The two collide with the harness and kernel, which assume device 8 (see log). Also a 1581 at 10 and the Ultimate's Software IEC ("IEC Drive", partition `/USB0/`) at 11. |
@@ -257,10 +257,93 @@ All on the physical 1541 as device 8, nothing else on the bus (the 1581 removed,
 
 - **REU disabled in the Ultimate's configuration** (`RAM Expansion Unit = Disabled`, the screen then shows `reu: none`), original stage-2 kernel, 8 boots on the physical 1541 with the stock KERNAL host and a clean bus: **1 pass in 8**, the same rate as with the REU on (3 in 8, 5 in 20 across series). The REU probe and the REU hardware are cleared.
 - **Hammering one block:** 512 consecutive stock-environment reads of track 16 sector 1 (the `/bin` directory block that three of five recorded stalls died on): no stall. The block is just one of the most-read in a boot.
-- **Illegal opcodes** (`experiments/illegal-ops` from the `reu-cache` branch, requested by the cache session): loaded with `runners:run_prg` on the C64 Ultimate, firmware 1.1.0, core 1.49, FPGA 122: `ILLEGAL OPS: PASS`, 0 failures of 21 checks (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA, ANC, ALR, ARR in binary mode, SBX, `$EB`, and the NOP forms). The kernel may use those on this machine. Not checked: the unstable ones (ANE, LXA, SHA, SHX, SHY, TAS, LAS), which the test leaves out on purpose, and any real 6510.
+- **Illegal opcodes** (`experiments/illegal-ops` from the `reu-cache` branch, requested by the cache session): loaded with `runners:run_prg` on the C64 Ultimate, firmware 1.1.0: `ILLEGAL OPS: PASS`, 0 failures of 21 checks (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA, ANC, ALR, ARR in binary mode, SBX, `$EB`, and the NOP forms). The kernel may use those on this machine. Not checked: the unstable ones (ANE, LXA, SHA, SHX, SHY, TAS, LAS), which the test leaves out on purpose, and any real 6510.
+
+### 2026-11-01, more negatives on the physical-1541 stall, and a recommendation to park it (hardware session)
+
+All on the physical 1541 as device 8, clean bus, stock KERNAL host, the original stage-2 kernel by DMA unless stated; baseline is about 1 pass in 4 (5 in 20 across series; individual series of 8 range from 1 to 3 passes).
+
+| Change | Passes |
+|---|---|
+| the 1581's short IEC cable, plugged into the 1541's other IEC socket | 1 of 8 |
+| upstream kernel with its IRQ vector pointed at the ROM's own handler (`$EA31`) | 2 of 8 |
+| `Command Interface` disabled in the Ultimate (UCI registers off) | 1 of 8 |
+| `RAM Expansion Unit` disabled (earlier entry) | 1 of 8 |
+
+- **Drive RAM** (`experiments/iec-stall/drvram.s`): 25 passes of 8 patterns over the drive's free buffer RAM `$0300-$06FF` through `M-W`/`M-R` (about 200 KB written and read back, about 6,400 write commands): 0 mismatches.
+- **State at a stall** (`envdump.py`): a stalled upstream kernel against a stock BASIC machine, every register that a read cannot disturb: the CPU port, the CIA data-direction and control registers, the VIC mode and enable registers and the SID are identical. What differs is cosmetic (character set, colours), the interrupt vectors, the KERNAL's IEC bookkeeping (consistent with "reading from device 8 in the bit loop") and the running timer counters. Upstream never touches the CIA1 timers.
+- The upstream interrupt handler is the ROM's plus Breadbin's own work (cursor, sleeper scan, Ctrl-C check, scheduler tick); replacing it with the ROM's gave the same rate, and a deliberately slow handler (5 ms per tick) in the stock environment did not stall either.
+- **Everything the stock environment can vary has now passed 1,600+ full block reads on this drive without a single stall:** BASIC and machine code, sequential, random and spread tracks, CR or EOI-only commands, a hostile IRQ handler, 512 reads of one block. Every Breadbin kernel, including the pre-fork upstream one, stalls at about 3 boots in 4.
+
+**Recommendation: park the root-cause hunt.** It is a rathole by the usual test: more than 130 boots across about 30 conditions, each eliminating a hypothesis and none localising the cause, the problem appears with code we did not write, and the cost is mostly wall time on a machine that other work needs. What it costs the product is limited: the Recommended tier (UCI) and the Expanded tier (the REU cache) do not depend on repeated bus reads; Classic on a real 1541 does, and is the exposure. Reopen if any of these happens: (1) a second physical 1541 or another C64 shows the stall or does not (the cheapest high-value datum there is); (2) Classic reliability on real drives becomes a ship criterion; (3) the fast-loader work (M0-8) needs the bus understood; (4) the stall appears on the emulated drive or in a UCI-era design.
+
+**One last piece of work worth doing before parking, because it turns the finding into product value whatever the cause:** in a stall the drive is waiting for us (CLK held low, in its talker loop, where per the 1541 DOS source only ATN ends the wait). Make the stage-2 driver time out at every bus wait, assert ATN (UNTALK) to release the drive, and retry the block. That converts a hang into a retry. It needs two things to be checked on hardware first: that ATN really releases a stalled drive, and that a stall never completes silently with wrong bytes (all recorded stalls ended in a timeout, and 1,600+ full-speed reads showed none; with the host DMA polling a corrupted transfer was seen on stage 1 and 2 alike, which is a different mechanism).
+
+### 2026-11-01, UCI as measured (hardware session; answers WP1 and the seven items from the breadbin-next session)
+
+C64 Ultimate, firmware 1.1.0, Command Interface enabled. Tool: `experiments/iec-stall/uci.s` + `uci.py` (a script interpreter on the C64 side polling the registers, timed with CIA2 timers A and B cascaded: 1 us resolution). The DOS target identifies as `ULTIMATE-II DOS V1.2`. Test file: 32,768 bytes in `/Temp` (a RAM disk), created through the interface itself.
+
+| What | Measured |
+|---|---|
+| IDENTIFY | 2.4 ms |
+| ECHO / GET PATH / GET TIME | 1.4 ms / 0.8 ms / 2.8 ms |
+| OPEN (read) | 4.3 to 4.8 ms (10 samples) |
+| FILE INFO | 4.7 to 5.1 ms |
+| SEEK | 0.8 ms |
+| CLOSE | 0.8 to 0.9 ms |
+| CREATE file (open for write, create) | 54 ms |
+| WRITE 32 KB in 64 requests of 512 bytes | 1.53 s, **21 KB/s** |
+| **READ 32 KB** in requests of 256 / 512 / 4,096 / 32,768 bytes | **15.7 / 16.1 / 16.2 / 16.2 KB/s** (2.03 to 2.08 s) |
+| **LOAD REU** of the 32 KB file (needs the file open first) | **6.2 ms, about 5 MB/s**; reply `$008000 BYTES LOADED TO ...` |
+
+1. **Latency** is in the table. **Throughput** through the data register is about 62 us per byte, flat in the request size: the cost is the byte-wise register read (`LDA $DF1E` loop storing to memory), not the command. A request larger than 512 bytes completes as a chain of `Data More` chunks (one command, 32,768 bytes). Anything that wants more than about 16 KB/s should not read through `$DF1E`: **`LOAD REU` moves a file into the REU on the Ultimate's side at about 5 MB/s**, after which the REU-to-C64 DMA is the only C64 cost. The DMA bit of the control register (`$DF1C` bit 7) was not tried.
+2. **Status strings and errors:** open of a missing file `FILE DOESN'T EXIST` (no number); read with no file open `85,NO FILE OPEN`; close with none open `84,NO FILE TO CLOSE`; write to a file opened read-only `ACCESS DENIED`; read past the end of file returns no data and an **empty status**; seeking to or beyond the end of file `00,OK`; `LOAD REU` with no file open `85,NO FILE OPEN`. `FILE STAT` with the absolute path that `OPEN` accepted returned `82,FILE NOT FOUND` (not understood; `FILE INFO` after an open works and returns 22 bytes: size, date, time, extension, attributes, name).
+3. **Two files open at once:** a **second open on the same target succeeds** (`00,OK`, re-opens). **Both DOS targets (`$01` and `$02`) can have the same file open at the same time with independent positions**, and a command on one target does not disturb the file open on the other (a read on target 1 continued at byte 16 after a seek on target 2 to byte 100, and target 2 read from byte 100).
+4. **Interrupt on completion: not usable as documented.** With the IRQ bit written, the identification register never read `$49` at the moment the data was ready, and after that command the interface did not return to idle: the next command timed out (100 s in my loop). Poll.
+5. **Network target (`$03`) is present:** `ULTIMATE-II NETWORK INTERFACE` (34-byte identification, `00,OK`). The control target (`$04`) answers `CONTROL TARGET V1.1`. Not exercised further.
+6. **Mounted image write-back: not measured yet** (needs the drive to write and then a look at the file on the Ultimate's side).
+7. **Effect of the UCI registers on the 1541 path:** none seen. The physical-1541 stall rate is the same with the Command Interface disabled (1 of 8) as enabled (about 1 in 4).
+
+### 2026-11-01, UCI as measured: CORRECTION to the throughput above, and more (hardware session)
+
+**The 16 KB/s read figure in the entry above was my measuring loop, not the interface** (a `JSR` to a store routine with a wrap check per byte, about 60 cycles; the breadbin-next session spotted this). With a tight loop (`experiments/iec-stall/uci.s` ops 5 and 6) reading a 32 KB file:
+
+| Read loop | Throughput |
+|---|---|
+| tight loop, `DATA_AV` tested on every byte (`LDA $DF1C / BPL / LDA $DF1E / STA page,Y / INY / BNE`, about 20 cycles) | **44.0 to 44.8 KB/s** (0.73 s), the same for 512-byte, 4,096-byte and 32,768-byte requests |
+| tight loop, no status test, 512 bytes per chunk (about 14 cycles) | **61.6 to 63.3 KB/s** (0.52 s); the per-chunk handshake costs about 0.2 ms |
+
+So the interface keeps up with the CPU and the figure to design with is about **44 KB/s with a safe loop, 62 KB/s blind**. The 21 KB/s write figure was measured with the same kind of loop (the command is built byte by byte through a routine) and is probably also loop-bound; not re-measured.
+
+- **`LOAD REU`** (the file must be open for read): 32 KB 6.2 ms; **128 KB 13.7 ms (9.6 MB/s); 512 KB 44.4 ms (11.8 MB/s)**: a few ms of fixed cost plus about 12 to 13 MB/s. Reply text: `$080000 BYTES LOADED TO ...`.
+- **Create (open for write, create always, flag `$0A`):** 54.8 to 55.7 ms for a new file, the same for an overwrite; close 1.1 ms. Flag `$0E` (write + create new + create always) answers `FILE EXISTS` for an existing file: use `$0A` to overwrite.
+- **Paths:** `CHANGE DIR /Temp` works (7.8 ms); `GET PATH` returns `/Temp/`; `OPEN` accepts an absolute path. **`FILE STAT` (`$08`) answered `82,FILE NOT FOUND` for every name I gave it, absolute or relative, while `OPEN` and `FILE INFO` of the same file work**; use `OPEN` + `FILE INFO` (4.9 ms, 22 bytes: size, date, time, extension, attributes, name) to get a size.
+- Not tried: the DMA bit (`$DF1C` bit 7), SAVE REU, writes at higher rates.
+
+### 2026-11-01, ATN frees a stalled drive (hardware session)
+
+`experiments/iec-stall/atnprobe.py`: boot the original stage-2 kernel by DMA on the physical 1541 (clean bus) until it stalls, then point the IRQ vector at a probe in free RAM (the hung kernel keeps taking timer interrupts), which calls the driver's own routines: `UNTALK` under ATN, then `TALK` device 8 secondary 2, then reads the drive's buffer byte by byte. Three stalls, three identical outcomes:
+
+- **Before:** CLK held low by the drive, DATA released (`$DD00 = $87`), `ST = $02`.
+- **After `UNTALK` under ATN:** CLK released (DATA reads low, the ATN acknowledge while the bus is in attention).
+- **A fresh `TALK` is answered** (`ST = 0`), and the drive sends the **rest of its buffer ending with a proper EOI and no timeout**: 61, 192 and 146 bytes. If it continued from its pointer, as it appears to, it had already sent 195, 64 and 110 bytes of that 256-byte block before the stall: the stall point is spread over the block, not fixed.
+- (Display bug in that run, fixed in the tool: the second stall was printed as "256, no EOI" because the probe's flag shared a byte with the first-bytes copy; the counts above are right.)
+
+**So the drive is healthy and recoverable: ATN is all it needs.** A recovery in the driver is: on any receive timeout, send `UNTALK` (ATN), then re-issue the whole `U1` (a fresh block, not the remainder), `TALK`, and read again; the unbounded wait in `bus_acptr`'s `@rdy` becomes a bounded one so a hang can no longer occur. Not yet tried in the driver: how often the retry itself stalls (about 1 in 40 block reads by the earlier rate), and whether a stalled receive can ever complete *silently* with wrong bytes; every recorded stall ended in a timeout.
+
+### 2026-11-01, UCI write throughput re-measured with a tight loop (hardware session)
+
+The 21 KB/s write figure was loop-bound as well. With a tight loop (`uci.s` op 7: the header four bytes, then 512 bytes sent with `LDA page,Y / STA $DF1D / INY / BNE`, about 13 cycles per byte) writing 32 KB, 127 requests of 512 bytes and 125 more: **64.8 to 65.1 KB/s**. `FILE INFO` of the file afterwards reports exactly the bytes sent (129,024 = 252 x 512), so nothing was dropped. Create for write about 56 to 58 ms; close 1.2 ms. So polled **reads reach 44 KB/s (status checked per byte) to 62 KB/s (blind), writes 65 KB/s**; `LOAD REU` is 10 to 12 MB/s.
 
 
 ## Request from the cache session, 2026-10-31
 
 1. (Answered: PASS 21 of 21, see above.) Run `experiments/illegal-ops` once on the C64 Ultimate (README has the build line and what a FAIL means). It decides whether the kernel may use the stable undocumented opcodes. Expected: `ILLEGAL OPS: PASS` (it does under VICE).
 2. When the regression bisect is done: the cache A/B on `reu-cache` (`make CACHE=0` against `make CACHE=2`, cold REU each boot, five or more boots each), and one run of the `Cache` behaviours that need hardware: warm boot should show far fewer bus reads. The cache does not fix the root-mount stall; it can only hide it on REU machines.
+
+### 2026-11-01, ATN recovery in the driver: 8 of 8 boots on the physical 1541 (hardware session)
+
+`fix/iec-recover` (commit c2e13ca, on top of the cloud kernel): `bus_acptr`'s ready wait is bounded (about 2 s, three passes of a 256 x 256 loop with interrupts enabled; it sets ST bit 1 like the other timeouts), and `iec_read` (blk.s) stops at the first timeout, sends UNTALK under ATN (`iec_in_end`) and asks for the block again, up to three times in all. Cost +56 bytes of code (13,400 to 13,456); room below $CF00 after merging main is 180 bytes.
+
+Series: the image written onto the physical disk (683 sectors verified; the copy took a little over 25 min, so `mcdup.py` now allows an hour), stock KERNAL host, DMA boot, clean bus, 8 boots: **8 of 8 reached the login prompt, 52 s each** (the unmodified kernel passed about 1 in 4 on the same drive and cable; 5 of 20 across series). Not measured: how often the retry fired in those boots (no counter; the 52 s is a pass without a visible 2 s wait, a boot with one stall plus recovery would show about 54 s), and a block checksum is not available, so a stall that completed with wrong bytes is not excluded by this series, only by the earlier observation that the stalled drive ends the buffer with EOI. Not run: VICE tests, JiffyDOS-ROM subset, the hardware list.
+
