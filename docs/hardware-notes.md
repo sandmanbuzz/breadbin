@@ -279,3 +279,28 @@ All on the physical 1541 as device 8, clean bus, stock KERNAL host, the original
 
 **One last piece of work worth doing before parking, because it turns the finding into product value whatever the cause:** in a stall the drive is waiting for us (CLK held low, in its talker loop, where per the 1541 DOS source only ATN ends the wait). Make the stage-2 driver time out at every bus wait, assert ATN (UNTALK) to release the drive, and retry the block. That converts a hang into a retry. It needs two things to be checked on hardware first: that ATN really releases a stalled drive, and that a stall never completes silently with wrong bytes (all recorded stalls ended in a timeout, and 1,600+ full-speed reads showed none; with the host DMA polling a corrupted transfer was seen on stage 1 and 2 alike, which is a different mechanism).
 
+### 2026-11-01, UCI as measured (hardware session; answers WP1 and the seven items from the breadbin-next session)
+
+C64 Ultimate, firmware 1.1.0, Command Interface enabled. Tool: `experiments/iec-stall/uci.s` + `uci.py` (a script interpreter on the C64 side polling the registers, timed with CIA2 timers A and B cascaded: 1 us resolution). The DOS target identifies as `ULTIMATE-II DOS V1.2`. Test file: 32,768 bytes in `/Temp` (a RAM disk), created through the interface itself.
+
+| What | Measured |
+|---|---|
+| IDENTIFY | 2.4 ms |
+| ECHO / GET PATH / GET TIME | 1.4 ms / 0.8 ms / 2.8 ms |
+| OPEN (read) | 4.3 to 4.8 ms (10 samples) |
+| FILE INFO | 4.7 to 5.1 ms |
+| SEEK | 0.8 ms |
+| CLOSE | 0.8 to 0.9 ms |
+| CREATE file (open for write, create) | 54 ms |
+| WRITE 32 KB in 64 requests of 512 bytes | 1.53 s, **21 KB/s** |
+| **READ 32 KB** in requests of 256 / 512 / 4,096 / 32,768 bytes | **15.7 / 16.1 / 16.2 / 16.2 KB/s** (2.03 to 2.08 s) |
+| **LOAD REU** of the 32 KB file (needs the file open first) | **6.2 ms, about 5 MB/s**; reply `$008000 BYTES LOADED TO ...` |
+
+1. **Latency** is in the table. **Throughput** through the data register is about 62 us per byte, flat in the request size: the cost is the byte-wise register read (`LDA $DF1E` loop storing to memory), not the command. A request larger than 512 bytes completes as a chain of `Data More` chunks (one command, 32,768 bytes). Anything that wants more than about 16 KB/s should not read through `$DF1E`: **`LOAD REU` moves a file into the REU on the Ultimate's side at about 5 MB/s**, after which the REU-to-C64 DMA is the only C64 cost. The DMA bit of the control register (`$DF1C` bit 7) was not tried.
+2. **Status strings and errors:** open of a missing file `FILE DOESN'T EXIST` (no number); read with no file open `85,NO FILE OPEN`; close with none open `84,NO FILE TO CLOSE`; write to a file opened read-only `ACCESS DENIED`; read past the end of file returns no data and an **empty status**; seeking to or beyond the end of file `00,OK`; `LOAD REU` with no file open `85,NO FILE OPEN`. `FILE STAT` with the absolute path that `OPEN` accepted returned `82,FILE NOT FOUND` (not understood; `FILE INFO` after an open works and returns 22 bytes: size, date, time, extension, attributes, name).
+3. **Two files open at once:** a **second open on the same target succeeds** (`00,OK`, re-opens). **Both DOS targets (`$01` and `$02`) can have the same file open at the same time with independent positions**, and a command on one target does not disturb the file open on the other (a read on target 1 continued at byte 16 after a seek on target 2 to byte 100, and target 2 read from byte 100).
+4. **Interrupt on completion: not usable as documented.** With the IRQ bit written, the identification register never read `$49` at the moment the data was ready, and after that command the interface did not return to idle: the next command timed out (100 s in my loop). Poll.
+5. **Network target (`$03`) is present:** `ULTIMATE-II NETWORK INTERFACE` (34-byte identification, `00,OK`). The control target (`$04`) answers `CONTROL TARGET V1.1`. Not exercised further.
+6. **Mounted image write-back: not measured yet** (needs the drive to write and then a look at the file on the Ultimate's side).
+7. **Effect of the UCI registers on the 1541 path:** none seen. The physical-1541 stall rate is the same with the Command Interface disabled (1 of 8) as enabled (about 1 in 4).
+
