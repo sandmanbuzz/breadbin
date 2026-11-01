@@ -496,20 +496,24 @@ class Exec(unittest.TestCase):
             sh = [pid for pid, r in rows.items() if r[2] == "sh"][0]
             self.assertEqual(rows[sh][0], 1)                # still init's child
 
-    def test_exec_keeps_the_pid(self):
+    def test_exec_replaces_the_process(self):
+        """`exec` is a program: it replaces itself, not the shell that ran it."""
         with Vice(IMAGE) as v:
             v.wait_shell()
-            v.run("echo ps > /tmp/e.sh")
-            v.run("echo exec /bin/ps >> /tmp/e.sh")
-            v.run("echo echo notreached >> /tmp/e.sh")
-            out = v.run("sh /tmp/e.sh")
-            self.assertNotIn("notreached", out)             # the script shell was replaced
-            first, second = out.split("pid ppid")[1:3]
-            first, second = self.ps(" pid ppid" + first), self.ps(" pid ppid" + second)
-            outer = [p for p, r in first.items() if r[2] == "sh" and r[0] == 1][0]
-            script = [p for p, r in first.items() if r[2] == "sh" and r[0] == outer][0]
-            self.assertEqual(second[script][2], "ps")       # same pid, now named ps
-            self.assertEqual(second[script][0], outer)      # same parent
+            rows = self.ps(v.run("exec /bin/ps"))
+            names = [r[2] for r in rows.values()]
+            self.assertNotIn("exec", names)                 # no process left under that name
+            outer = [p for p, r in rows.items() if r[2] == "sh" and r[0] == 1][0]
+            psrows = [(p, r) for p, r in rows.items() if r[2] == "ps"]
+            self.assertEqual(len(psrows), 1)
+            self.assertEqual(psrows[0][1][0], outer)        # the shell is its parent
+
+    def test_exec_keeps_descriptors_and_directory(self):
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            self.assertEqual(v.run("exec /bin/echo piped | cat"), "piped")   # stdout and EOF intact
+            v.run("cd /tmp")
+            self.assertEqual(v.run("exec /bin/pwd"), "/tmp")                  # cwd carried over
 
     def test_failures_leave_the_caller_alone(self):
         with Vice(IMAGE) as v:
