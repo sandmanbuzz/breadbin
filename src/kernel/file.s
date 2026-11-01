@@ -1,5 +1,6 @@
 ; Breadbin files: open-file table, descriptors, pipes, file syscalls
 .include "k.inc"
+.include "uci.inc"
 
 .importzp fb, pp
 .import fs_name2, nm_dev, nm_ino, dl_off, f_done, dir_put, sb_ok
@@ -41,6 +42,9 @@ pb_len:  .res 1
 .export pbuf, build_path
 .import cbm_read, cbm_readdir, cbm_open_write, cbm_write, cbm_wclose
 .import cbm_scratch, cbm_rename, cbm_fsinfo
+.import uci_read, uci_write, uci_open, uci_create, uci_release, uci_fsinfo
+.import uci_mkdir, uci_rmdir, uci_unlink, uci_rename
+.export of_flags, open_exists, is_dot
 
 .segment "INIT"
 file_init:
@@ -136,7 +140,8 @@ oft_unref:
         lda pi_page,y
         ldy #1
         jmp page_free
-@free:  lda #FT_FREE
+@free:  jsr uci_release   ; a UCI file: its path slot and host handle (keeps X)
+        lda #FT_FREE
         sta f_type,x
 @r:     rts
 
@@ -231,7 +236,9 @@ sys_open:
         ldx nm_dev
         lda dev_type,x
         beq @c64c
-        jmp cbm_create
+        bpl @cbmc
+        jmp uci_create
+@cbmc:  jmp cbm_create
 @c64c:  lda nm_dev
         sta of_dev
         lda nm_ino
@@ -254,6 +261,7 @@ sys_open:
         lda of_dev
         sta nm_dev
 @exists:
+:                           ; open_exists: uci_create comes back here
         lda nm_dev
         ldx nm_ino
         jsr iget
@@ -261,6 +269,7 @@ sys_open:
         ldx nm_dev
         lda dev_type,x
         beq @c64o
+        bmi @c64o
         jmp cbm_open
 @c64o:  jsr oft_alloc
         bcs @err
@@ -270,6 +279,18 @@ sys_open:
         sta f_ino,x
         lda of_flags
         sta f_flags,x
+        ldy nm_dev
+        lda dev_type,y
+        bpl @nu
+        jsr uci_open        ; path slot, host handle; X = the entry
+        bcc @nu
+        pha
+        txa
+        jsr oft_unref
+        pla
+        sec
+        rts
+@nu:
         lda ci+I_TYPE
         cmp #T_DIR
         beq @dir
@@ -310,6 +331,7 @@ sys_open:
         sta f_type,x
 @inst:  jmp fd_install
 
+open_exists = :-
 ; isatty(A = fd): carry clear if fd is the console
 .export sys_isatty
 sys_isatty:
@@ -455,7 +477,9 @@ sys_read:
 @file:  ldy f_dev,x
         lda dev_type,y
         beq @c64r
-        lda f_type,x
+        bpl @cbmr
+        jmp uci_read
+@cbmr:  lda f_type,x
         cmp #FT_DIR
         bne @cf
         jmp cbm_readdir
@@ -594,7 +618,11 @@ sys_write:
 @bad:   lda #EBADF
         sec
         rts
-@file:  jsr file_setup
+@file:  ldy f_dev,x
+        lda dev_type,y
+        bpl @c64w
+        jmp uci_write
+@c64w:  jsr file_setup
         bcs @r
         ldx sb6
         lda f_flags,x
@@ -826,11 +854,17 @@ set_name_dotdot:
         bpl @l
         rts
 
+; is_uci: N set if nm_dev is UCI (Z set if c64fs)
+is_uci: ldx nm_dev
+        lda dev_type,x
+        rts
+
 ; not_cbm: carry set (A = EPERM) if nm_dev is a flat CBM disk
 not_cbm:
         ldx nm_dev
         lda dev_type,x
         beq @ok
+        bmi @ok             ; UCI: the callers dispatch after their own checks
         lda #EPERM
         sec
         rts
@@ -844,7 +878,9 @@ sys_mkdir:
         bcs @r
         jsr not_cbm
         bcs @r
-        jsr dir_lookup
+        bpl @c64m
+        jmp uci_mkdir
+@c64m:  jsr dir_lookup
         beq @new
         lda #EEXIST
         sec
@@ -892,7 +928,10 @@ sys_rmdir:
         lda #EINVAL
         sec
 @r:     rts
-@nd:    lda nm_dev
+@nd:    jsr is_uci
+        bpl @c64d
+        jmp uci_rmdir
+@c64d:  lda nm_dev
         sta of_dev
         lda nm_ino
         sta of_ino
@@ -945,7 +984,10 @@ sys_unlink:
         jsr set_pp_r0
         jsr nameiparent
         bcs @r
-        lda nm_dev
+        jsr is_uci
+        bpl @c64l
+        jmp uci_unlink
+@c64l:  lda nm_dev
         sta of_dev
         lda nm_ino
         sta of_ino
@@ -1000,7 +1042,10 @@ sys_rename:
 @inval: lda #EINVAL
         sec
 @r:     rts
-@nd:    lda nm_dev
+@nd:    jsr is_uci
+        bpl @c64v
+        jmp uci_rename
+@c64v:  lda nm_dev
         sta rn_od
         lda nm_ino
         sta rn_opi
@@ -1327,10 +1372,11 @@ sys_fsinfo:
         jsr set_pp_r0
         jsr namei
         bcs @r
-        ldx nm_dev
-        lda dev_type,x
+        jsr is_uci
         beq @c64
-        lda nm_dev
+        bpl @cbmf
+        jmp uci_fsinfo
+@cbmf:  lda nm_dev
         jsr cbm_fsinfo
         bcs @r
         tya
