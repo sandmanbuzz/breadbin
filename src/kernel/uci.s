@@ -893,7 +893,12 @@ uci_write:
         sbc ut_got+1
         sta u_w+1
         jmp @ch
-@err:   ldx u_w             ; something written: report the count
+@err:   pha                 ; the host's position is unknown now: drop the handle
+        ldx u_s
+        jsr hs_close
+        pla
+        sec
+        ldx u_w             ; something written: report the count
         cpx r1
         bne @done
         ldx u_w+1
@@ -1044,10 +1049,30 @@ u_path: jsr ut_tc
         jmp ut_run
 
 ; u_del: DELETE the path in pbuf, every handle closed first
-u_del:  jsr uci_closeall
+u_del:  jsr u_nofiles
+        bcs u_dret
+        jsr uci_closeall
         ldx #0
         lda #C_DEL
         bne u_path
+
+; u_nofiles: EBUSY while any UCI file is open: a handle closed here would be reopened by
+; its path later, which after a delete or rename is another file (or none)
+u_nofiles:
+        ldx #NFILE-1
+@l:     lda f_type,x
+        cmp #FT_FILE
+        bne @n
+        lda f_dev,x
+        cmp #DEV_UCI
+        beq @b
+@n:     dex
+        bpl @l
+        clc
+        rts
+@b:     lda #EBUSY
+        sec
+u_dret: rts
 
 uci_rmdir:              ; pp = the path
         jsr namei
@@ -1094,7 +1119,9 @@ uci_rename:
         lda #EXDEV
         sec
 @r:     rts
-@s:     jsr uci_closeall
+@s:     jsr u_nofiles
+        bcs @r
+        jsr uci_closeall
         lda r0
         sta pp
         lda r0+1
