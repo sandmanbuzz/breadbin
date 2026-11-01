@@ -33,6 +33,14 @@ Build rules enforced by `kexports.py` (hard errors): a whitelist name missing fr
 
 `kapi_hash` is read from the kernel, the module from `base+6`; `cx_load` (split out of `spawn_common`) with `argsz = 0`; `mod_load`/`mod_unload`/list on cache ops 4-6; four table entries `{base page, npages, class}`. None of that is in this note's scope, only the contract above.
 
+### What landed (2026-11-01, main)
+
+- `exec.s`: `cx_load` (path in r0, `argsz` preset, `ld_hi` picks the allocator) is split out of `spawn_common`; `mod_load`, `mod_unload`, `mod_list` with a 4-slot table (`mod_base/np/cls`). Root only (load, unload). The lowest free slot is used. `init` runs on the caller's stack with `in_kernel` set.
+- `mem.s`: `page_alloc_hi` (first fit from the top of the pool).
+- `blk.s`: `SYS_CACHE` ops 4 (load, r0 = path -> A = slot), 5 (unload slot X), 6 (list into r0, 12 bytes: base page, pages, class per slot). Command: `mod [ls | load PATH | unload SLOT]`.
+- Proven: `tests.test_system.Modules` (load at the top of the pool, unload runs fini, a non-CX file and a missing file are refused) and the whole suite.
+- Cost: loader about 320 bytes resident; `KSTART` went $9700 -> $9600 (one page of TPA on loan until `cbm.km` takes about 1.2 KB out).
+
 ## First module and test
 
 `src/mod/hello.s`: `init` prints `hello from module` with `con_puts_ax`, `fini` prints `bye`. Proves: link against `kexp`, relocation, hash, load top-down, unload, `free` shows pages back. VICE test (kernel side): `cache load hello`, screen shows the greeting, `free` drops by the module's pages; `cache unload hello`, pages return. Host test `tools/test_kexports.py`: unresolved name, INIT name, duplicate, ZP vs absolute export forms, stable hash, `--check` fails when an address moves.
