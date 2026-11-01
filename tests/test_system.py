@@ -208,6 +208,8 @@ class Boot(unittest.TestCase):
         self.assertIn("size: %d" % size, self.run_("stat /etc/motd"))
         self.assertIn("0000: 77 65 6c 63", self.run_("hexdump /etc/motd | head -1"))
         self.assertIn("themes:", self.run_("theme nosuch"))
+        out = self.run_("turbo 99")               # no $D031 registers under VICE; a bad index on an Ultimate that has them
+        self.assertTrue("no turbo registers" in out or "usage: turbo" in out, out)
         self.run_("theme green")
 
     def test_23_wildcards_and_jobs(self):
