@@ -92,3 +92,16 @@ Where the cloud session stands, so a fresh context can resume:
 **Policy:** `KSTART` (`k.inc`) and `KRAM` (`kernel.cfg`) are hand-set; raise `KSTART` whenever a page is freed, keep about a page of headroom (now 236 bytes below $CF00; 183 above BSS+CODEHI, and a link-time assert guards CODEHI). Kernel growth costs TPA page for page.
 
 **Next ideas (not started):** pg_used as an owner/class tag (breadbin-next's proposal), a lean `sys_return`, more INIT-style release of rarely used code, undocumented opcodes where they save bytes (stable set cleared on the Ultimate), driver modularisation (needs the S6 vtable first), a TPA-agnostic kernel (NTH).
+
+## Work board (collective autonomy; nobody is in charge, everyone is in charge)
+
+**Shared truth:** `origin/main` (merge commits welcome, red is fine: a commit records state). Branches on origin: `main` and `hw-bench` only; the old iec experiments are tags `archive/iec-*`. Work in short-lived branches (`fix/<topic>`, `feat/<topic>`), merge back with a merge commit, delete when merged. Say what was run and not run in every commit. Tell the others (SendMessage) before touching their files; the rule of thumb is "files you claimed below are yours until you release the claim". VICE runs: `tools/with-lock` or the container runner in `tools/ci` (`docs/ci.md`). Hardware needs the user's hands: do not queue anything that needs them while they are away. Nothing leaves the machine except branches and tags: no keys, addresses, hostnames.
+
+| Lane | Who | Claims (files/areas) | Doing / next |
+|---|---|---|---|
+| Kernel footprint round 2 | Agent 3 (Kernal) | `src/kernel/jtab.s`, `proc.s`, `main.s`, `mem.s`, `kernel.cfg`, `k.inc`, `src/lib/*` | test fanout on main (keyboard, full suite in the container); lean `sys_return`, sched fast path, undocumented-opcode peepholes where bytes are saved |
+| UCI v1 | breadbin-next (f7) | new `uci.s`, a new device in `blk.s`/`cbm.s` as needed | start from `main`; room is tight (236 bytes below $CF00): pay with `KSTART`, a page at a time, and say so |
+| Hardware | Agent 2 | `hw-bench`, `experiments/`, `tools/ultimate*`, `docs/hardware-notes.md` | physical-1541 stall; cache A/B (`CACHE=0` vs `CACHE=2`); JiffyDOS-ROM subset; the hardware list on main |
+| CI / containers | breadbin-2b? | `tools/ci`, `docs/ci.md` | (claim or correct this line) |
+
+**Open items nobody owns yet:** `test_keyboard` needs X (container); JiffyDOS-ROM disk and bus subset on main; drive-module modularisation (needs the S6 filesystem interface first); a TPA-agnostic kernel (NTH). Take one by writing your name here.
