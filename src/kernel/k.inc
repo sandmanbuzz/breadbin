@@ -82,7 +82,7 @@ ST     = $90
 ; ---- shared symbols ----
 ; zero page globals (main.s)
 .globalzp cur, in_kernel, need_resched, slice, ticks, p1, p2, p3, p4
-.globalzp k_a, k_x, k_n, k_p, tmp0, tmp1, tmp2, tmp3, stop_prev, intr_pending
+.globalzp k_a, k_x, k_n, tmp0, tmp1, tmp2, tmp3, stop_prev, intr_pending
 
 ; main.s
 .global kmain, panic, pool_first, pool_last, irq_exit
