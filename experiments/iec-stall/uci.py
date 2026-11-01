@@ -70,6 +70,11 @@ GROUPS = {
               ("close 1", close(1)), ("close 2", close(2))]),
     "irq": ([("control register: IRQ enable", ctrl(0x20)), ("identify with the IRQ bit set", cmd(1, 0x01)),
              ("control register: IRQ off", ctrl(0x00)), ("identify", cmd(1, 0x01))]),
+    "reu": ([("load 32 KB into REU at $010000 (LOAD REU)", cmd(1, 0x21, *struct.pack("<II", 0x10000, 32768)) if False else
+              cmd(1, 0x21, *struct.pack("<I", 0x10000), *struct.pack("<I", 32768))),
+             ("open the file again", open_read()),
+             ("load the same, again", cmd(1, 0x21, *struct.pack("<I", 0x20000), *struct.pack("<I", 32768))),
+             ("close", close())]),
     "net": ([("target 3 identify", cmd(3, 0x01)), ("target 4 identify", cmd(4, 0x01))]),
 }
 
