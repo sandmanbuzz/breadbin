@@ -307,6 +307,8 @@ class Mounted(unittest.TestCase):
         self.assertEqual(s.errno(s.path_call("RENAME", "/u/Temp/pattern.bin", "/u/Temp/sub/h2")), "EEXIST")
         self.assertEqual(s.errno(s.path_call("RENAME", "/u/Temp/pattern.bin", "/home/p")), "EXDEV")
         self.assertEqual(s.errno(s.path_call("RENAME", "/etc/motd", "/u/Temp/m")), "EXDEV")
+        self.assertEqual(s.errno(s.path_call("RENAME", "/u/Temp/pattern.bin", "/u/Temp/sub/.")), "EINVAL")
+        self.assertEqual(s.errno(s.path_call("RENAME", "/u/Temp/pattern.bin", "/u/Temp/sub/..")), "EINVAL")
         s.check(s.path_call("CHDIR", "/u/Temp"), "chdir")
         self.assertIsNone(s.errno(s.path_call("RENAME", "sub", "sub2")))
         self.assertTrue(os.path.isdir(self.h("Temp", "sub2")))

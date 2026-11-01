@@ -503,6 +503,7 @@ class Drives(unittest.TestCase):
             # UCI v1: VICE has no Command Interface; the probe says so and changes nothing
             self.assertIn("no such device", v.run("mount uci /mnt"))
             self.assertIn("no such device", v.run("mount uci /nowhere"))
+            self.assertIn("invalid argument", v.run("mount ufoo /mnt"))       # exactly "uci"
             self.assertNotIn("uci", v.run("mount"))
             self.assertEqual(v.run("ls /mnt"), "")
         out = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "mkimage.py"),
