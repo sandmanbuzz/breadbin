@@ -3,6 +3,7 @@
 Skips when py65 is not installed or the kernel has not been built (`make`). See docs/testing.md.
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -342,8 +343,9 @@ class Mounted(unittest.TestCase):
         self.assertEqual(s.errno(s.path_call("UMOUNT", "/u")), "EBUSY")
         s.check(s.path_call("CHDIR", "/"), "chdir")
         free = s.mem.b[s.lbl["free_pages"]]
+        (_, np), = s.modules()
         self.assertIsNone(s.errno(s.path_call("UMOUNT", "/u")))
-        self.assertEqual(s.mem.b[s.lbl["free_pages"]], free + 1)       # the path page is back
+        self.assertEqual(s.mem.b[s.lbl["free_pages"]], free + 1 + np)  # the path page and uci.km
         self.assertIsNone(s.mntinfo(3))
         self.assertTrue(all(t.file is None for t in self.u.targets.values()))
         self.assertEqual(s.errno(s.open("/u/Temp/hello.txt")), "ENOENT")   # c64fs /u again
@@ -383,6 +385,135 @@ class Mounted(unittest.TestCase):
         names = [n for _, n in s.listdir("/bin")]
         self.assertIn("echo", names)
         self.assertEqual(s.errno(s.path_call("RENAME", "/home/x", "/u/Temp/x")), "EXDEV")
+
+
+@unittest.skipIf(SKIP, SKIP)
+class Module(unittest.TestCase):
+    """uci.km: loaded by `mount uci` through the kernel's mod_load, unloaded at umount."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="ucisim")
+        os.makedirs(os.path.join(self.dir, "Temp"))
+        with open(os.path.join(self.dir, "Temp", "hello.txt"), "wb") as f:
+            f.write(b"hello\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def stubs_idle(self, s):
+        """Every resident stub is `jmp cbm_none`."""
+        none = s.lbl["cbm_none"]
+        return all(s.stub(i) == none for i in range(16))
+
+    def test_classic_never_loads_the_module(self):
+        s = Sim(None)
+        free = s.free()
+        fd = s.check(s.open("/etc/motd"), "open")
+        s.read_all(fd)
+        s.close(fd)
+        s.check(s.path_call("MKDIR", "/u"), "mkdir")
+        self.assertEqual(s.modules(), [])
+        self.assertEqual(s.mem.touch, [])
+        self.assertTrue(self.stubs_idle(s))
+        self.assertEqual(s.free(), free)
+
+    def test_classic_mount_loads_and_unloads(self):
+        s = Sim(None)
+        s.mem.b[0xDF1D] = 0xFF
+        free = s.free()
+        self.assertEqual(s.errno(s.mount_uci("/mnt")), "ENODEV")
+        self.assertEqual(s.mem.touch, [("r", 0xDF1D)])
+        self.assertEqual(s.modules(), [])
+        self.assertEqual(s.free(), free)
+        self.assertTrue(self.stubs_idle(s))
+        self.assertEqual(s.mem.b[s.lbl["uci_sl"]], 0)
+
+    def test_mount_twice_umount_remount(self):
+        u = FakeUCI(self.dir)
+        s = Sim(u)
+        s.check(s.path_call("MKDIR", "/u"), "mkdir")
+        free = s.free()
+        s.check(s.mount_uci("/u"), "mount")
+        mods = s.modules()
+        self.assertEqual(len(mods), 1)
+        base, np = mods[0]
+        with open(os.path.join(os.path.dirname(BUILD), "src", "kernel", "k.inc")) as f:
+            kstart = int(re.search(r"^KSTART\s*=\s*\$([0-9A-Fa-f]+)", f.read(), re.M).group(1), 16)
+        self.assertEqual(base + np, kstart >> 8)                # loaded at the top of the pool
+        self.assertEqual(s.free(), free - np - 1)               # the module and the path page
+        # every stub jumps to the module's routine of the same name
+        mlbl = {}
+        with open(os.path.join(BUILD, "mod", "uci.lbl")) as f:
+            for line in f:
+                m = re.match(r"al ([0-9A-F]+) \.(\S+)$", line.strip())
+                if m:
+                    mlbl[m.group(2)] = int(m.group(1), 16)
+        for i, name in enumerate(STUBS):
+            self.assertEqual(s.lbl[name], s.lbl["ucv"] + 3 * i, name)
+            self.assertEqual(s.stub(i), base * 256 + mlbl[name], name)
+        self.assertEqual(s.errno(s.mount_uci("/u")), "EBUSY")
+        self.assertEqual(s.errno(s.mount_uci("/mnt")), "EBUSY")
+        self.assertEqual(s.modules(), mods)                     # still the one copy
+        fd = s.check(s.open("/u/Temp/hello.txt"), "open")
+        self.assertEqual(s.read_all(fd), b"hello\n")
+        s.close(fd)
+        s.check(s.path_call("UMOUNT", "/u"), "umount")
+        self.assertEqual(s.modules(), [])
+        self.assertEqual(s.free(), free)
+        self.assertTrue(self.stubs_idle(s))
+        self.assertEqual(s.errno(s.open("/u/Temp/hello.txt")), "ENOENT")
+        for _ in range(2):
+            s.check(s.mount_uci("/u"), "remount")
+            fd = s.check(s.open("/u/Temp/hello.txt"), "open after remount")
+            self.assertEqual(s.read_all(fd), b"hello\n")
+            s.close(fd)
+            s.check(s.path_call("UMOUNT", "/u"), "umount")
+            self.assertEqual(s.free(), free)
+        self.assertEqual(u.leaks, 0)
+
+    def test_failed_mount_unloads(self):
+        s = Sim(FakeUCI(self.dir))
+        free = s.free()
+        self.assertEqual(s.errno(s.mount_uci("/nonexistent")), "ENOENT")
+        self.assertEqual(s.errno(s.mount_uci("/etc/motd")), "ENOTDIR")
+        self.assertEqual(s.modules(), [])
+        self.assertEqual(s.free(), free)
+        self.assertTrue(self.stubs_idle(s))
+
+    def test_hash_mismatch_is_enoexec(self):
+        s = Sim(FakeUCI(self.dir))
+        s.check(s.path_call("MKDIR", "/u"), "mkdir")
+        free = s.free()
+        s.mem.b[s.lbl["kapi_hash"]] ^= 0x01                    # a kernel built with another API
+        self.assertEqual(s.errno(s.mount_uci("/u")), "ENOEXEC")
+        self.assertEqual(s.modules(), [])
+        self.assertEqual(s.free(), free)
+        self.assertEqual(s.mem.touch, [])                       # the probe never ran
+        self.assertTrue(self.stubs_idle(s))
+        self.assertEqual(s.mem.b[s.lbl["uci_sl"]], 0)
+        s.mem.b[s.lbl["kapi_hash"]] ^= 0x01
+        s.check(s.mount_uci("/u"), "mount with the right hash")
+
+    def test_mod_load_and_unload_by_hand_are_refused(self):
+        s = Sim(FakeUCI(self.dir))
+        s.check(s.path_call("MKDIR", "/u"), "mkdir")
+        free = s.free()
+        self.assertEqual(s.errno(s.sys("CACHE", a=4, r0=s.cstr("/lib/km/uci"))), "ENODEV")   # init refuses
+        self.assertEqual(s.modules(), [])
+        self.assertEqual(s.free(), free)
+        self.assertTrue(self.stubs_idle(s))
+        s.check(s.mount_uci("/u"), "mount")
+        slot = [i for i in range(4) if s.mem.b[s.lbl["mod_base"] + i]][0]
+        self.assertEqual(s.errno(s.sys("CACHE", a=5, x=slot)), "EBUSY")                    # fini refuses
+        fd = s.check(s.open("/u/Temp/hello.txt"), "open")
+        s.close(fd)
+        s.check(s.path_call("UMOUNT", "/u"), "umount")
+        self.assertEqual(s.free(), free)
+
+
+STUBS = ["uci_namei", "uci_iget", "uci_read", "uci_xread", "uci_write", "uci_open", "uci_create",
+         "uci_release", "uci_hw", "uci_attach", "uci_umount", "uci_fsinfo", "uci_mkdir", "uci_rmdir",
+         "uci_unlink", "uci_rename"]
 
 
 if __name__ == "__main__":
