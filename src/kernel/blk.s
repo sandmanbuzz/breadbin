@@ -74,7 +74,7 @@ ep_done: .res 1          ; this boot has given the disk a new build id (it is be
 ep_x:    .res 1
 
 .export bwrite, buf_idx_ptr, cache_attach, sys_cache
-.import mod_load, mod_unload, mod_list
+.import mod_load, mod_unload, mod_list, p_uid
 
 .segment "RODATA"
 ; first linear block of each track (tracks 1..36), 16-bit
@@ -983,6 +983,26 @@ cache_epoch:
         jmp cache_hdr_put
 @r:     rts
 
+; su_check: carry set, A = EPERM unless the caller is root (A and X are preserved otherwise)
+su_check:
+        pha
+        txa
+        pha
+        ldx cur
+        lda p_uid,x
+        bne @no
+        pla
+        tax
+        pla
+        clc
+        rts
+@no:    pla
+        tax
+        pla
+        lda #EPERM
+        sec
+        rts
+
 ; sys_cache(A = op, r0 = buf): 0 = status into buf: state (0 none, 1 off, 2 on), hits,
 ; bus reads, bus errors (16 bits each); 1 = off, 2 = on, 3 = flush;
 ; 4 = load the kernel module at r0 -> A = slot, 5 = unload slot X, 6 = list modules into r0
@@ -993,9 +1013,15 @@ sys_cache:
         cmp #6
         beq @mlist              ; 6: list the modules into r0 (12 bytes)
         bcs @inval
-        txa                     ; 5: unload the module in slot X (root only)
+        jsr su_check            ; 5: unload the module in slot X (root only)
+        bcs @su
+        txa
         jmp mod_unload
-@mload: jmp mod_load
+@mload: jsr su_check
+        bcs @su
+        jmp mod_load
+@su:    rts
+
 @mlist: jmp mod_list
 @cache: cmp #0
         beq @stat
