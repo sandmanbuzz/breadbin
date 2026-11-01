@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Take a lease from the broker, run a command while holding it.
+
+  tools/ci/lease [-r RESOURCE] [-t SECONDS] [-l LABEL] -- command args...
+
+Same shape as tools/with-lock (default resource "vice", default wait 3600 s, exit 75 on
+timeout). The broker address is $BREADBIN_BROKER (HOST:PORT or unix:/path; default
+127.0.0.1:7077). The lease lasts as long as this process holds its connection, so it is
+released if the client dies. If the broker is unreachable: exit 69 with a message, or,
+with BREADBIN_LEASE_FALLBACK=with-lock, run tools/with-lock instead (host-local only).
+If the broker restarts mid-command the lease is lost; the command keeps running and a
+warning is printed. Re-run to re-request.
+"""
+import getpass
+import os
+import select
+import signal
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from broker import DEFAULT_ADDR, connect  # noqa: E402
+
+
+def main(argv):
+    res, wait, label = "vice", 3600.0, None
+    a = list(argv)
+    while a:
+        if a[0] == "-r" and len(a) > 1:
+            res = a[1]; a = a[2:]
+        elif a[0] == "-t" and len(a) > 1:
+            wait = float(a[1]); a = a[2:]
+        elif a[0] == "-l" and len(a) > 1:
+            label = a[1]; a = a[2:]
+        elif a[0] == "--":
+            a = a[1:]; break
+        else:
+            break
+    if not a:
+        print("usage: lease [-r resource] [-t secs] [-l label] -- cmd...", file=sys.stderr)
+        return 2
+    addr = os.environ.get("BREADBIN_BROKER", DEFAULT_ADDR)
+    label = label or f"{os.environ.get('BREADBIN_LEASE_LABEL') or getpass.getuser()} pid {os.getpid()} {' '.join(a)}"[:200]
+    try:
+        s = connect(addr)
+    except OSError as e:
+        if os.environ.get("BREADBIN_LEASE_FALLBACK") == "with-lock":
+            print(f"lease: broker {addr} unreachable ({e}); falling back to tools/with-lock", file=sys.stderr)
+            wl = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "with-lock")
+            os.execv(wl, [wl, "-r", res, "-t", str(int(wait)), "--"] + a)
+        print(f"lease: broker at {addr} is unreachable ({e}). Start it with tools/ci/run-broker.sh "
+              f"(or 'python3 tools/ci/broker.py'), set BREADBIN_BROKER, or set "
+              f"BREADBIN_LEASE_FALLBACK=with-lock for the host-local lock. Not running the command.",
+              file=sys.stderr)
+        return 69
+    s.sendall(f"ACQUIRE {res} {label.replace(chr(10), ' ')}\n".encode())
+    deadline = time.time() + wait
+    buf = b""
+    granted = False
+    announced = False
+    while not granted:
+        left = deadline - time.time()
+        if left <= 0:
+            print(f"lease: timeout waiting for '{res}'", file=sys.stderr)
+            return 75
+        r, _, _ = select.select([s], [], [], left)
+        if not r:
+            continue
+        d = s.recv(4096)
+        if not d:
+            print("lease: broker closed the connection while waiting; re-request", file=sys.stderr)
+            return 69
+        buf += d
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            line = line.decode()
+            if line == "GRANTED":
+                granted = True
+            elif line.startswith("QUEUED") and not announced:
+                announced = True
+                print(f"lease: '{res}' is busy; queued (position {line.split()[1]}), waiting up to {int(wait)}s."
+                      " 'broker.py status' shows holders", file=sys.stderr)
+    p = subprocess.Popen(a)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda n, f: p.send_signal(n))
+    warned = False
+    while p.poll() is None:
+        r, _, _ = select.select([s], [], [], 0.5)
+        if r and not warned:
+            if not s.recv(4096):
+                warned = True
+                print("lease: WARNING broker connection lost; lease is gone, command still running",
+                      file=sys.stderr)
+    s.close()
+    rc = p.returncode
+    return 128 - rc if rc < 0 else rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
