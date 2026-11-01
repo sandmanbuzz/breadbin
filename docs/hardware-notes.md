@@ -340,3 +340,10 @@ The 21 KB/s write figure was loop-bound as well. With a tight loop (`uci.s` op 7
 
 1. (Answered: PASS 21 of 21, see above.) Run `experiments/illegal-ops` once on the C64 Ultimate (README has the build line and what a FAIL means). It decides whether the kernel may use the stable undocumented opcodes. Expected: `ILLEGAL OPS: PASS` (it does under VICE).
 2. When the regression bisect is done: the cache A/B on `reu-cache` (`make CACHE=0` against `make CACHE=2`, cold REU each boot, five or more boots each), and one run of the `Cache` behaviours that need hardware: warm boot should show far fewer bus reads. The cache does not fix the root-mount stall; it can only hide it on REU machines.
+
+### 2026-11-01, ATN recovery in the driver: 8 of 8 boots on the physical 1541 (hardware session)
+
+`fix/iec-recover` (commit c2e13ca, on top of the cloud kernel): `bus_acptr`'s ready wait is bounded (about 2 s, three passes of a 256 x 256 loop with interrupts enabled; it sets ST bit 1 like the other timeouts), and `iec_read` (blk.s) stops at the first timeout, sends UNTALK under ATN (`iec_in_end`) and asks for the block again, up to three times in all. Cost +56 bytes of code (13,400 to 13,456); room below $CF00 after merging main is 180 bytes.
+
+Series: the image written onto the physical disk (683 sectors verified; the copy took a little over 25 min, so `mcdup.py` now allows an hour), stock KERNAL host, DMA boot, clean bus, 8 boots: **8 of 8 reached the login prompt, 52 s each** (the unmodified kernel passed about 1 in 4 on the same drive and cable; 5 of 20 across series). Not measured: how often the retry fired in those boots (no counter; the 52 s is a pass without a visible 2 s wait, a boot with one stall plus recovery would show about 54 s), and a block checksum is not available, so a stall that completed with wrong bytes is not excluded by this series, only by the earlier observation that the stalled drive ends the buffer with EOI. Not run: VICE tests, JiffyDOS-ROM subset, the hardware list.
+

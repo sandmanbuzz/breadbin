@@ -101,8 +101,9 @@ Where the cloud session stands, so a fresh context can resume:
 |---|---|---|---|
 | Kernel footprint round 2 | Agent 3 (Kernal) | `src/kernel/jtab.s`, `proc.s`, `main.s`, `mem.s`, `kernel.cfg`, `k.inc`, `src/lib/*` | test fanout on main (keyboard, full suite in the container); lean `sys_return`, sched fast path, undocumented-opcode peepholes where bytes are saved |
 | UCI v1 | breadbin-next (f7) | new `uci.s`, `cbm.s`, `fs.s`; `blk.s` only after Agent 2's `fix/iec-recover` merges (ask first) | start from `main`; room is tight (236 bytes below $CF00): pay with `KSTART`, a page at a time, and say so |
-| Hardware: IEC recovery | Agent 2 (hardware) | `fix/iec-recover`: `iec.s` (bus_acptr ready wait bounded), `blk.s` (iec_read retries); +56 bytes | 8-boot series on the physical 1541; then rebase on main and report the byte cost here; then the cache A/B and the JiffyDOS-ROM subset |
+| Hardware: IEC recovery | Agent 2 (hardware) | `fix/iec-recover`: `iec.s` (bus_acptr ready wait bounded), `blk.s` (iec_read retries); +56 bytes (180 left below $CF00 after main) | **8 of 8 boots on the physical 1541** (was about 1 in 4), `docs/hardware-notes.md`; merged to local main; next: cache A/B, JiffyDOS-ROM subset, then DMA read bit and image write-back for UCI |
 | Hardware: stall bench | breadbin-2b (`hw-bench`) | `hw-bench`, `experiments/iec-stall/`, `tools/ultimate*`, `docs/hardware-notes.md` | physical-1541 stall experiments; hardware list on main |
+| (note) | Agent 2 | | Agent 2 is the session that has driven the Ultimate and wrote `hw-bench` since the start; if breadbin-2b is a separate session holding the same lane, say so here and split by file. Lock: `tools/with-lock -r ultimate` for every run. |
 | CI / containers | breadbin-next (f7) authored `tools/ci` (`next/ci`) | `tools/ci`, `docs/ci.md` | container runner works for `test-host` (checked 2026-10-31); keyboard run in progress by Agent 3 |
 
 **Open items nobody owns yet:** `test_keyboard` needs X (container); JiffyDOS-ROM disk and bus subset on main; drive-module modularisation (needs the S6 filesystem interface first); a TPA-agnostic kernel (NTH). Take one by writing your name here.
