@@ -18,8 +18,8 @@
 .export cbm_iget, cbm_lookup, cbm_read, cbm_readdir, cbm_open_write
 .export cbm_write, cbm_wclose, cbm_scratch, cbm_rename, cbm_fsinfo
 .export sys_mount, sys_umount, sys_mntinfo, sys_diskio
-.import uci_hw, uci_attach, uci_umount, mod_load
-.export cbmv, w_busy
+.import uci_hw, uci_attach, uci_umount, mod_load, uci_load, uci_drop
+.export cbmv, w_busy, cbm_none
 
 .segment "BSS"
 cbm_up:  .res 1         ; the cbm module is loaded
@@ -81,7 +81,18 @@ sys_mount:
         bne @drv
         cpx #'U'
         bne @drv
-        lda dev_present+DEV_UCI
+        lda $DF1D           ; nothing answering as a UCI here: ENODEV without loading the module
+        cmp #$C9            ; (the same first read the module's probe makes; Classic touches only this)
+        beq @load
+        lda #ENODEV
+        sec
+        rts
+@load:  jsr uci_load        ; the probe and the rest are module code: load uci.km first
+        bcs @rr
+        jsr @uci            ; (every way out of the code below is an rts)
+        bcc @rr
+        jmp uci_drop        ; the mount failed: unload uci.km again (keeps A and carry)
+@uci:   lda dev_present+DEV_UCI
         bne @onboot         ; one UCI mount at a time
         jsr uci_hw          ; probe the hardware first (only here, never at boot)
         bcs @rr
@@ -388,6 +399,7 @@ sys_umount:
         cpx #DEV_UCI
         bne @iec
         jsr uci_umount
+        jsr uci_drop        ; the last (only) UCI mount: unload uci.km
         clc
         rts
 @iec:   jsr iec_close
