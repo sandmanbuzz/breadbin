@@ -76,27 +76,17 @@ s_km:   .byte "/lib/km/cbm", 0
 .segment "CODEHI"
 ; ---------------------------------------------------------------------
 ; mount(A = drive 9-11, or 'U' for the Ultimate's storage, r0 = directory)
-; mount uci: load uci.km first (its probe is module code), unload it again if the mount fails
 sys_mount:
-        cmp #'U'
-        bne mount_any
-        cpx #'U'
-        bne mount_any
-        jsr uci_load
-        bcs @r
-        lda #'U'
-        tax
-        jsr mount_any
-        bcc @r
-        jmp uci_drop        ; (keeps A and carry)
-@r:     rts
-
-mount_any:
         cmp #'U'            ; with X = 'U' too: mount 85 stays a bad drive number
         bne @drv
         cpx #'U'
         bne @drv
-        lda dev_present+DEV_UCI
+        jsr uci_load        ; the probe and the rest are module code: load uci.km first
+        bcs @rr
+        jsr @uci            ; (every way out of the code below is an rts)
+        bcc @rr
+        jmp uci_drop        ; the mount failed: unload uci.km again (keeps A and carry)
+@uci:   lda dev_present+DEV_UCI
         bne @onboot         ; one UCI mount at a time
         jsr uci_hw          ; probe the hardware first (only here, never at boot)
         bcs @rr
