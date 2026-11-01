@@ -50,6 +50,7 @@ C_MKDIR = $16
 
 HS_FREE  = $FF          ; handle slot owners: an open-file entry, or one of these
 HS_PROBE = $FE          ; left open by the last probe (a read handle at position 0)
+HS_OLD   = $FD          ; left open by an earlier probe: closed when taken
 NUPATH   = 5            ; path slots of CWDLEN bytes in the mount page
 
 .segment "BSS"
@@ -294,8 +295,10 @@ uci_closeall:
 u_dropprobe:
         ldx #1
 @l:     lda hs_own,x
-        cmp #HS_PROBE
-        bne @n
+        cmp #HS_OLD
+        bcc @n
+        cmp #HS_FREE
+        beq @n
         jsr hs_close
         jmp u_dropprobe
 @n:     dex
@@ -579,7 +582,15 @@ uci_probe:
         sta u_size
         sta u_size+1
         sta u_size+2
-@s:     ldx u_s
+@s:     lda u_s
+        eor #1
+        tax
+        lda hs_own,x        ; only the newest probe's handle may be adopted or read by spawn
+        cmp #HS_PROBE
+        bne @s1
+        lda #HS_OLD
+        sta hs_own,x
+@s1:    ldx u_s
         lda #HS_PROBE
         jsr hs_claim
         lda #2
@@ -653,15 +664,19 @@ uci_create:
 ; -> X = entry; carry set (A = errno): the caller drops the entry
 uci_open:
         stx u_e
+        jsr uci_hpath       ; pp is still the path (namei stops at "/u" without building it)
+        bcs @hp
         ldx #NUPATH-1       ; a path slot, holding the host path
 @ps:    lda ps_used,x
         beq @pg
         dex
         bpl @ps
-        ldx u_e
+        lda #EMFILE
+@hp:    ldx u_e
+        pha
         lda #0
         sta f_dev,x         ; nothing for uci_release to undo
-        lda #EMFILE
+        pla
         sec
         rts
 @pg:    lda #1
