@@ -125,6 +125,7 @@ class FakeUCI:
 
     # ---- the DOS target
     def host(self, t, name):
+        name = name.replace("\\", "/")         # the firmware's Path::cd takes '\\' as a separator too
         p = name if name.startswith("/") else t.path.rstrip("/") + "/" + name
         parts = []
         for c in p.split("/"):
