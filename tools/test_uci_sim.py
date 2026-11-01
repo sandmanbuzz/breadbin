@@ -114,6 +114,13 @@ class Mounted(unittest.TestCase):
         self.assertEqual(s.errno(s.sys("OPEN", r0=s.cstr("/u/Temp/" + "./" * 150 + "hello.txt"), limit=500_000)),
                          "ENAMETOOLONG")
 
+    def test_backslash_refused(self):
+        """The host splits on '\\' too: "x\\.." would bypass the mount checks (review 3)."""
+        s = self.s
+        self.assertEqual(s.errno(s.open("/u/Temp/sub\\..\\hello.txt")), "EINVAL")
+        self.assertEqual(s.errno(s.path_call("UNLINK", "/u/Temp\\..\\Temp\\hello.txt")), "EINVAL")
+        self.assertTrue(os.path.exists(self.h("Temp", "hello.txt")))
+
     def test_no_delete_or_rename_under_an_open_file(self):
         s = self.s
         fd = s.check(s.open("/u/Temp/pattern.bin"), "open")
