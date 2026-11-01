@@ -664,11 +664,9 @@ copy_cwd:
 ; Module image: offset 0 `jmp init`, 3 `jmp fini`, 6 the kernel hash (2 bytes), 8 a class byte.
 ; init returns carry clear if it is happy; fini returns carry set to refuse unloading.
 
-; mod_load(r0 = path) -> A = slot, carry set on error. Root only.
+; mod_load(r0 = path) -> A = slot, carry set on error. The caller checks the privilege: the
+; syscall (blk.s sys_cache) is root only, the kernel itself loads what it needs (cbm.km).
 mod_load:
-        ldx cur
-        lda p_uid,x
-        bne @perm
         ldx #0              ; the lowest free slot
 @f:     lda mod_base,x
         beq @slot
@@ -676,9 +674,6 @@ mod_load:
         cpx #NMOD
         bne @f
         lda #ENOMEM
-        sec
-        rts
-@perm:  lda #EPERM
         sec
         rts
 @slot:  stx md_slot
@@ -738,13 +733,8 @@ mod_load:
         sec
 @r:     rts
 
-; mod_unload(A = slot) -> carry set on error. Root only.
+; mod_unload(A = slot) -> carry set on error (privilege is the caller's business, as for mod_load).
 mod_unload:
-        pha
-        ldx cur
-        lda p_uid,x
-        bne @perm
-        pla
         cmp #NMOD
         bcs @inval
         tax
@@ -768,10 +758,6 @@ mod_unload:
         clc
         rts
 @busy:  lda #EBUSY
-        sec
-        rts
-@perm:  pla
-        lda #EPERM
         sec
         rts
 @inval: lda #EINVAL
