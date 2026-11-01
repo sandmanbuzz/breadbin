@@ -412,6 +412,34 @@ class Cache(unittest.TestCase):
             self.assertEqual(self.stat(v.run("cache"))[0], "none")
 
 
+class Pool(unittest.TestCase):
+    """The user pool is $0800-$A0FF: pages above the old $8000 edge are usable."""
+
+    @staticmethod
+    def label(name):
+        with open(os.path.join(ROOT, "build", "kernel.lbl")) as f:
+            for line in f:
+                m = re.match(r"al ([0-9A-F]+) \.%s$" % name, line.strip())
+                if m:
+                    return int(m.group(1), 16)
+        raise KeyError(name)
+
+    def test_processes_run_above_the_old_edge(self):
+        pg_used = self.label("pg_used")        # index = page - 8
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            self.assertIn("38", v.run("free"))                 # 153 pages = 38 K
+            # pretend pages $08-$7F are taken: the next process must live at $80 or above
+            v._cmd("fill %04x %04x 01" % (pg_used, pg_used + 0x77))
+            v._cmd("x")
+            self.assertEqual(v.run("echo above the old edge"), "above the old edge")
+            v.run("sleep 300 &")
+            top = v.mem(pg_used + 0x78, pg_used + 0x98)        # pages $80-$A0
+            self.assertTrue(any(top), "no page at or above $80 was allocated")
+            self.assertIn("sleep", v.run("ps"))
+            self.assertEqual(v.run("echo still fine | cat"), "still fine")
+
+
 class Drives(unittest.TestCase):
     """mount: normal C64 disks and Breadbin disks on drive 9."""
 
