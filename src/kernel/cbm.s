@@ -19,7 +19,7 @@
 .export cbm_write, cbm_wclose, cbm_scratch, cbm_rename, cbm_fsinfo
 .export sys_mount, sys_umount, sys_mntinfo, sys_diskio
 .import uci_hw, uci_attach, uci_umount, mod_load, uci_load, uci_drop
-.export cbmv, w_busy, cbm_none
+.export cbmv, w_busy, cbm_up, cbm_none
 
 .segment "BSS"
 cbm_up:  .res 1         ; the cbm module is loaded
@@ -63,10 +63,8 @@ cbm_ensure:
         sta r0
         lda #>s_km
         sta r0+1
-        jsr mod_load
-        bcs @r
-        lda #1
-        sta cbm_up
+        jsr mod_load        ; its init sets cbm_up
+        rts
 @ok:    clc
 @r:     rts
 
@@ -216,7 +214,7 @@ sys_mount:
         cmp #$41
         bne @nodisk
         jsr cbm_ensure      ; the filesystem code is a module: load it on first use
-        bcs @nodisk
+        bcs @ensfail
         ldx mo_dev
         lda #FS_CBM
         sta dev_type,x
@@ -250,6 +248,15 @@ sys_mount:
         lda mo_dev
         jsr binval
         lda #ENODEV
+        sec
+        rts
+@ensfail:
+        pha                 ; the module could not be loaded: say why (ENOMEM, not "no device")
+        ldx mo_dev
+        jsr iec_close
+        lda mo_dev
+        jsr binval
+        pla
         sec
         rts
 
