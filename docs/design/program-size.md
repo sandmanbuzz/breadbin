@@ -1,6 +1,6 @@
 # How big are the user programs?
 
-Measured on `fix/iec-recover` at `75de245` (`make`, then a relink of each program with `ld65 -m`
+Measured on `fix/iec-recover` at `75de245`; rebased onto `origin/main` `67d0972`, whose only change under `src/lib`, `src/bin` and `tools/cx.py` is the new `turbo` program (43 programs, 57,870 bytes, 245 blocks there; the tables below are the 42-program measurement) (`make`, then a relink of each program with `ld65 -m`
 to attribute bytes to modules). Blocks are 254 data bytes. Nothing in the tree was changed.
 Savings below marked *est.* are arithmetic on these measurements, not builds.
 
