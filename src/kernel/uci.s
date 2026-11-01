@@ -445,6 +445,16 @@ e_putpos:
 uci_hpath:
         jsr build_path
         bcs @r
+        ldy #0              ; the host splits on '\' as well: refuse it
+@bs:    lda pbuf,y
+        beq @bd
+        iny
+        cmp #'\'
+        bne @bs
+        lda #EINVAL
+        sec
+        rts
+@bd:
         lda #DEV_UCI
         jsr mnt_of_dev
         bcs @out
