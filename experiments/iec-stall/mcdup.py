@@ -82,7 +82,7 @@ feed("sys49152\n")
 t0 = time.time()
 last, lastt = -1, time.time()
 ok = False
-while time.time() - t0 < 1500:
+while time.time() - t0 < 3600:
     time.sleep(20)
     p = u.readmem(0xC7F0, 9)
     n = p[1] | p[2] << 8
