@@ -13,7 +13,7 @@ BSS savings turn into pool pages only if there is **movable code** to put in the
 
 | # | Move | Pages | Breaks / risk | Effort |
 |---|---|---|---|---|
-| 1 | **login becomes part of sh (or `exec`)**: one program prompts for the login and then is the shell, so login's 6 pages are not resident behind sh. User-space only, no kernel change. The general form is `exec` (replace image), the A6 proposal in A-process-memory, which also lets init `exec`-chain | **~6 at every idle prompt** | `login` program changes; password code (`passwd.o`, 423 B) is shared. A failed login must still return to the prompt. Low | 1 day |
+| 1 | **`exec` (replace the image in the same slot), then login `exec`s sh.** CORRECTED 2026-11-01: my first version said "login becomes part of sh, user space only, ~6 pages". Reading `login.s` shows why that does not hold: login sets *its own* uid (`SYS_SETUID`) and cwd (`SYS_CHDIR`) and then spawns sh, which inherits both. If login simply exits and init spawns sh, the shell loses the user's uid and home. User-space-only alternatives: merge the login code into sh (~+0.8 KB, so sh 17 -> ~20 pages, net about **2-3 pages**, and every nested sh carries dead login code), or pass uid and home through init (needs a file or a spawn extension). The clean 6 pages (login is 1,198 B image + 498 B BSS = 7 pages) needs `exec`: a kernel change (A6 in A-process-memory; ABI v2 `cx2-abi2.md`), not a `src/bin` change. Syscall slots are full, but `SYS_CACHE` already carries the module ops, so `exec` can be one more op of that call | **~6-7 at every idle prompt** (once `exec` exists) | kernel: `exec.s` + `proc.s` (atomic: everything that can fail before the old pages are freed; reset the stack to the entry frame); ~100-200 B of resident code (about 0.5-0.8 page, so net ~5.5). Medium | 2-3 days (kernel) |
 | 2 | **uci.km** (already planned) | ~9 on non-Ultimate machines | the module loader; UCI sim tests move to loading the module | in progress |
 | 3 | **cbm.km** (already planned) | ~4-5 | a CBM mount needs `/lib/km/cbm` on the root disk | in progress |
 | 4 | **Cold kernel code above the BSS (CODEHI) without modules**: park the rarely used resident code (`mkdir/rmdir/rename/unlink`, `format`/`diskio` helpers, `mount/umount/mntinfo`, `cache` ops) in KHI. Pure placement through the linker config; no behaviour change | each 256 B moved = 1 page, **capped by the free KHI space** (58 bytes today, so it needs 5 or 6 below first) | none functionally; check that nothing in the IRQ or boot path runs it before it is in place; `make size` shows it | hours each |
@@ -22,7 +22,7 @@ BSS savings turn into pool pages only if there is **movable code** to put in the
 | 7 | **`p_cwd` (12 x 48 = 576 B): store cwd as an inode, rebuild the string on demand** (roadmap lever 4) | ~2 KHI pages | `getcwd` must walk `..` (costs disk reads on c64fs); a mounted UCI path cannot be rebuilt this way (it is a host path) so the UCI cwd string must stay. Medium | 1-2 days |
 | 8 | **Err strings out of `err.o`, then the shared library** (F, A-process-memory M4): 494 B of messages linked into 24 programs; init/login/sh link them. Shared library saves ~1 KB per resident process | ~2 pages at idle (err strings alone), ~4-6 with the shared library | CX v2 for the library class; `perr` reads messages from a file on the error path only. Medium-high | 1 week |
 
-Rough total if 1, 2, 3 and 4+5 land: **+6 +9 +4.5 +6 = about 25 pages** on top of today's 142 (the same order as the kernel session's own 155-160 estimate for modules alone, plus idle usage).
+Rough total if 1 (with exec), 2, 3 and 4+5 land: **+6 +9 +4.5 +6 = about 25 pages** on top of today's 142 (the same order as the kernel session's own 155-160 estimate for modules alone, plus idle usage).
 
 ## What I would not do
 
@@ -34,7 +34,7 @@ Rough total if 1, 2, 3 and 4+5 land: **+6 +9 +4.5 +6 = about 25 pages** on top o
 
 ## Order I would take
 
-1 (login into sh) first: biggest user-visible win, no kernel risk, and it tests the "idle footprint" idea cheaply. Then 2 and 3 (already moving). Then 4 as the conversion layer for BSS savings, then 6 (`NBUF` experiment, one build constant, quickly reversible), then 5 only when the sched path is next quiet. 7 and 8 are optional.
+2 and 3 (already moving). Then 4 as the conversion layer for BSS savings, then 6 (`NBUF` experiment, one build constant, quickly reversible). 1 (`exec`) is the biggest single user-visible win but is a kernel change in the exec/proc path: take it after cbm.km, with the full suite. 5 only when the sched path is next quiet; 7 and 8 are optional. Cheap user-space crumbs while waiting: `sh` has 1,284 B of BSS (5 pages: ibuf 256, tbuf 256, gbuf 256, line 128 ...); sharing `gbuf` with a buffer that is idle during globbing could return a page, but needs a lifetime check of ibuf/tbuf/gbuf in sh.s first.
 
 ## Measure before claiming
 
