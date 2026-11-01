@@ -754,7 +754,16 @@ sys_mount:
         rts
 @ok:    jsr build_path
         bcs @r
-        ldx mo_dev
+        ldx #0              ; mt_path holds 31 characters: refuse to cut the mount point
+@ln:    lda pbuf,x
+        beq @lok
+        inx
+        cpx #32
+        bne @ln
+        lda #ENAMETOOLONG
+        sec
+        rts
+@lok:   ldx mo_dev
         cpx #DEV_UCI
         bne @iec
         jsr uci_attach
