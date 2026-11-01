@@ -66,7 +66,7 @@ ba_dev:  .res 1
 .export bfree, mnt_active, mnt_ino, fs_count_inodes, sb_ninodes, ci_load_type
 .export inode_blk, s_dot, s_dotdot, sb_nblocks_lo, sb_nblocks_hi
 .export mt_used, mt_pdev, mt_pino, mt_dev, mt_path, mnt_point, mnt_of_dev, mount_dev
-.import cbm_iget, cbm_lookup
+.import cbm_iget, cbm_lookup, cache_attach
 
 .segment "RODATA"
 magic:  .byte "C64FS"
@@ -75,10 +75,11 @@ s_dotdot: .byte "..", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 s_tmp:  .byte "tmp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 s_tmpp: .byte "/tmp", 0
 
-.segment "CODE"
+.segment "INIT"
 ; ---------------------------------------------------------------------
 ; fs_mount: mount dev 0 (and the REU RAM disk at /tmp if present)
 fs_mount:
+        jsr cache_attach
         lda #0
         ldx #<376
         ldy #>376
@@ -122,6 +123,7 @@ fs_mount:
 @r:     rts
 
 ; mnt_point: A = dev, X = ino -> X = mount entry, carry clear if mounted on
+.segment "CODE"
 mnt_point:
         sta tmp0
         stx tmp1
@@ -1212,6 +1214,7 @@ nameiparent:
 @ok:    clc
 @r:     rts
 
+.segment "INIT"
 ; ---------------------------------------------------------------------
 ; fs_mkfs_reu: format the REU as c64fs (superblock 0, bitmap 1, inodes 2-17)
 fs_mkfs_reu:
@@ -1349,3 +1352,5 @@ fs_mkfs_reu:
         lda #ROOT_INO
         jsr dir_add
 @r:     rts
+
+.segment "CODE"

@@ -8,18 +8,26 @@ LIBSRC  := $(wildcard src/lib/*.s)
 LIBOBJ  := $(BUILD)/lib/breadbin.lib
 ROOTSRC := $(shell find rootfs -type f)
 
-.PHONY: all clean test test-host test-smoke test-only test-keyboard test-console size run run-reu
+.PHONY: FORCE all clean test test-host test-smoke test-only test-keyboard test-console size run run-reu
 .SECONDARY:
 all: $(BUILD)/breadbin.d64
 
+# make CACHE=0 builds a kernel whose REU block cache stays off until `cache on` (bench images)
+CACHE   ?= 1
+$(BUILD)/cache.stamp: FORCE
+	@mkdir -p $(BUILD)
+	@echo "$(CACHE)" | cmp -s - $@ || echo "$(CACHE)" > $@
+FORCE:
+$(BUILD)/k/blk.o: $(BUILD)/cache.stamp
+
 $(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
-	ca65 -g -I src/kernel $< -o $@
+	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) $< -o $@
 
 $(BUILD)/breadbin.prg: $(KOBJ) src/kernel.cfg
 	ld65 -C src/kernel.cfg -m $(BUILD)/kernel.map -Ln $(BUILD)/kernel.lbl -o $@ $(KOBJ)
 
-$(BUILD)/lib/%.o: src/lib/%.s include/breadbin.inc
+$(BUILD)/lib/%.o: src/lib/%.s src/lib/lib.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
 	ca65 -g $< -o $@
 
