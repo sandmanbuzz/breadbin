@@ -63,3 +63,5 @@ f_off
 f_type
 namei
 nameiparent
+mod_busy
+cbm_up

@@ -7,7 +7,7 @@
 .importzp fb, pp
 .import f_done, p_pslot, new_slot, proc_entry, name_off, con_file
 .import cwd_ptr, nm_dev, nm_ino, p_uid
-.export mod_load, mod_unload, mod_list
+.export mod_load, mod_unload, mod_list, mod_busy
 .import check_signal, con_release
 .import kapi_hash
 NMOD = 4
@@ -31,6 +31,7 @@ mod_base: .res NMOD     ; loaded kernel modules: first page (0 = free slot),
 mod_np:   .res NMOD     ; page count,
 mod_cls:  .res NMOD     ; class byte from the module header
 md_slot:  .res 1
+mod_busy: .res 1        ; 1 while the kernel itself runs a module's init: init refuses to run otherwise
 md_jmp:   .res 3        ; jmp base+0 (init) or base+3 (fini), built on the fly
 base:     .res 1        ; first page
 npages:   .res 1
@@ -758,7 +759,13 @@ mod_load:
         sta md_jmp+1
         lda base
         sta md_jmp+2
+        lda #1
+        sta mod_busy        ; init checks this: run as a program (spawn, exec) it must refuse
         jsr md_jmp          ; init
+        php
+        lda #0
+        sta mod_busy
+        plp
         bcc @ok
         ldx md_slot         ; refused: give the pages back
         lda mod_base,x
