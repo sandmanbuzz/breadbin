@@ -30,7 +30,7 @@ def main():
         m = re.match(r"^\s+(\w+)\s+Offs=\w+\s+Size=([0-9A-F]+)", line)
         if m and cur:
             mods[cur][m.group(1)] = int(m.group(2), 16)
-    cols = ("CODE", "RODATA", "DATA", "BSS")
+    cols = ("CODE", "RODATA", "DATA", "CODEHI", "INIT", "BSS")
     print(f"{'module':10s}" + "".join(f"{c:>8s}" for c in cols) + f"{'total':>8s}")
     tot = dict.fromkeys(cols, 0)
     for name, s in sorted(mods.items(), key=lambda kv: -sum(kv[1].values())):
@@ -44,9 +44,13 @@ def main():
         return int(m.group(2), 16) if m else None
     code_end = max(end(sg) or 0 for sg in ("CODE", "RODATA", "DATA"))
     bss_end = end("BSS")
+    init = tot["INIT"]
+    if init:
+        print(f"INIT (boot-only, runs from the load area and is then released to the user pool): {init} bytes")
     print(f"\ncode and data end at ${code_end:04X}; room below ${KRAM_TOP:04X}: {KRAM_TOP - code_end - 1} bytes")
-    if bss_end and bss_end >= 0xE000:
-        print(f"BSS ends at ${bss_end:04X}; room below ${HI_TOP:04X}: {HI_TOP - bss_end - 1} bytes")
+    hi_end = max(end("BSS") or 0, end("CODEHI") or 0)
+    if hi_end >= 0xE000:
+        print(f"BSS and CODEHI end at ${hi_end:04X}; room below ${HI_TOP:04X}: {HI_TOP - hi_end - 1} bytes")
     elif bss_end:
         print(f"BSS ends at ${bss_end:04X} (in the code region)")
     progs = "build/root/bin"

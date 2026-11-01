@@ -3,6 +3,8 @@
 
 .import __CODE_LOAD__, __CODE_RUN__, __CODE_SIZE__, __RODATA_SIZE__, __DATA_SIZE__
 .import __JUMPTAB_LOAD__, __JUMPTAB_RUN__, __BSS_RUN__, __BSS_SIZE__
+.import __CODEHI_LOAD__, __CODEHI_RUN__, __CODEHI_SIZE__
+.assert __CODEHI_RUN__ + __CODEHI_SIZE__ <= $fffa, error, "CODEHI runs into the hardware vectors"
 
 .segment "ZEROPAGE"
 cur:          .res 1    ; current process slot, $FF = none
@@ -17,7 +19,7 @@ p4:           .res 2
 k_a:          .res 1
 k_x:          .res 1
 k_n:          .res 1
-k_vec:        .res 2
+
 tmp0:         .res 1
 tmp1:         .res 1
 tmp2:         .res 1
@@ -59,6 +61,25 @@ stub:
         sta $fe
         ldx #1
         jsr stub_copy
+        lda #<__CODEHI_LOAD__
+        sta $fb
+        lda #>__CODEHI_LOAD__
+        sta $fc
+        lda #<__CODEHI_RUN__
+        sta $fd
+        lda #>__CODEHI_RUN__
+        sta $fe
+        ldx #>__CODEHI_SIZE__   ; whole pages, then the rest byte by byte: the copy must not run
+        beq @tail               ; past the end of CODEHI (it ends close to the top of RAM)
+        jsr stub_copy
+@tail:  ldy #0
+@tl:    cpy #<__CODEHI_SIZE__
+        beq @td
+        lda ($fb),y
+        sta ($fd),y
+        iny
+        bne @tl
+@td:
         ; the hardware vectors live in RAM now: write them under the ROM first
         lda #<nmi_handler
         sta $fffa
@@ -84,7 +105,7 @@ stub_copy:                  ; copy X pages ($fb) -> ($fd)
         rts
 
 ; ---------------------------------------------------------------------
-.segment "RODATA"
+.segment "INIT"
 banner: .byte "breadbin 0.2", 10
         .byte "unix-like os by kpatronas@gmail.com", 10, 0
 s_mem:  .byte "memory: ", 0
@@ -92,12 +113,16 @@ s_kb:   .byte " pages free", 10, 0
 s_reu:  .byte "reu: ", 0
 s_reuk: .byte " x 64k", 10, 0
 s_noreu: .byte "reu: none", 10, 0
+.segment "RODATA"
 s_init: .byte "/bin/init", 0
 s_noinit: .byte "cannot start /bin/init", 0
 s_panic: .byte 10, "kernel panic: ", 0
 s_mount: .byte "cannot mount root filesystem", 0
 
-.segment "CODE"
+.segment "INIT"
+; Everything marked INIT runs from where the loader put it, before the first page is
+; allocated, and is not copied up: its pages go to the user pool. Nothing may call it
+; once kmain_run has started (spawn_kernel allocates).
 kmain:
         ldx #$ff
         txs
@@ -176,7 +201,10 @@ kmain:
         lda #<s_mount
         ldx #>s_mount
         jmp panic
-@ok:
+@ok:    jmp kmain_run
+
+.segment "CODE"
+kmain_run:
         lda #<s_init
         ldx #>s_init
         jsr spawn_kernel

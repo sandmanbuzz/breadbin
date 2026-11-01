@@ -28,7 +28,7 @@ raw_pid: .res 1
 .export con_raw, raw_pid, to_ascii, to_petscii
 dec_buf: .res 6
 
-.segment "CODE"
+.segment "INIT"
 con_init:
         lda #13             ; light green text
         sta $0286
@@ -48,6 +48,7 @@ con_init:
         rts
 
 ; ---- cursor ----
+.segment "CODE"
 cursor_hide:
         lda cur_vis
         beq @r

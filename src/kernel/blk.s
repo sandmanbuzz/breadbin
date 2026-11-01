@@ -18,6 +18,22 @@ REU_LENLO  = $df07
 REU_LENHI  = $df08
 REU_CTRL   = $df0a
 
+; The REU block cache holds the boot drive's blocks (dev 0) in REU banks above the
+; /tmp RAM disk (banks 0-7): page 0 = header (magic, build id), pages 1-3 = one valid
+; byte per block, then block b at page 4+b. It is write-through, and keyed by the build
+; id in the c64fs superblock: a different id on the disk discards it. Needs 11 banks.
+.ifndef CACHE_DEFAULT
+CACHE_DEFAULT = 1       ; make CACHE=0: reads always use the bus; 1: the cache; 2: the cache, but
+                        ; every boot starts cold (nothing a previous boot left is trusted)
+.endif
+CACHE_BANK  = 8
+CACHE_NBLK  = 683       ; a 35-track 1541
+SB_BLOCK    = 376
+CH_LEN      = 24        ; cache header: magic(4) build id(4) disk label(16)
+BAM_BLOCK   = 357       ; track 18 sector 0: the CBM disk label is at offset $90
+BAM_LABEL   = $90
+SB_BUILD_ID = 15        ; superblock offset of the 4-byte build id (tools/mkimage.py)
+
 .segment "ZEROPAGE"
 bp:      .res 2         ; pointer to the buffer returned by bread
 .exportzp bp
@@ -45,8 +61,19 @@ cmdbuf:  .res 40
 cmdlen:  .res 1
 rd_try:  .res 1
 reu_tmp: .res 1
+cache_ok: .res 1         ; attached to a valid REU cache
+cache_on: .res 1         ; reads consult it
+c_hit:   .res 2
+c_miss:  .res 2          ; reads that went to the bus
+c_err:   .res 2          ; bus read/write errors
+c_hdr:   .res CH_LEN     ; magic, build id, disk label of the disk
+c_rd:    .res CH_LEN
+cd_regs: .res 7          ; C64 addr, REU addr (lo, hi, bank), length: the REU registers $df02-$df08
+cd_ctl:  .res 1
+ep_done: .res 1          ; this boot has given the disk a new build id (it is being written)
+ep_x:    .res 1
 
-.export bwrite, buf_idx_ptr
+.export bwrite, buf_idx_ptr, cache_attach, sys_cache
 
 .segment "RODATA"
 ; first linear block of each track (tracks 1..36), 16-bit
@@ -54,8 +81,10 @@ trk_lo: .lobytes 0,21,42,63,84,105,126,147,168,189,210,231,252,273,294,315,336,3
 trk_hi: .hibytes 0,21,42,63,84,105,126,147,168,189,210,231,252,273,294,315,336,357,376,395,414,433,452,471,490,508,526,544,562,580,598,615,632,649,666,683
 s_hash: .byte "#"
 s_init: .byte "i0"
+cmagic: .byte "BBCH"
 
 .segment "CODE"
+.segment "INIT"
 blk_init:
         ldx #NBUF-1
         lda #0
@@ -85,6 +114,7 @@ blk_init:
         sta dev_present
         jmp reu_detect
 
+.segment "CODE"
 ; iec_open: X = dev. Open the drive's command channel (15) and a data channel
 ; (2) with a drive buffer. Carry set (A = ENODEV) if the drive is not there.
 iec_open:
@@ -183,8 +213,17 @@ bread:
         lda rq_dev
         cmp #1
         beq @reu
+        jsr cache_get       ; carry clear: served from the REU
+        bcc @chk
+        lda rq_dev
         jsr cur_dev_set
         jsr iec_read
+        bcs @e
+        jsr cache_put
+        clc
+        jmp @chk
+@e:     jsr cache_err
+        sec
         jmp @chk
 @reu:   jsr reu_read
 @chk:   ldx b_idx
@@ -221,6 +260,19 @@ bget_buf:
 bwrite:
         stx b_idx
         lda b_dev,x
+        bne @go
+        lda cache_ok
+        beq @go
+        lda ep_done
+        bne @go
+        lda b_clock             ; keep this buffer from being the victim of the superblock read
+        sta b_age,x
+        stx ep_x
+        jsr cache_epoch
+        ldx ep_x
+        stx b_idx
+        bcs @r
+@go:    lda b_dev,x
         sta rq_dev
         lda b_lo,x
         sta rq_lo
@@ -231,7 +283,15 @@ bwrite:
         cmp #1
         beq @reu
         jsr cur_dev_set
+        jsr cache_inval     ; not valid while the disk is being changed (a reset in between)
         jsr iec_write
+        bcs @we
+        jsr cache_wr        ; write-through: the REU copy follows the disk
+        clc
+        jmp @r
+@we:    jsr cache_err
+        jsr cache_inval
+        sec
         jmp @r
 @reu:   jsr reu_write
 @r:     ldx b_idx
@@ -555,6 +615,7 @@ reu_byte:
         sty REU_CMD
         rts
 
+.segment "INIT"
 reu_detect:
         lda #0
         sta reu_banks
@@ -569,6 +630,15 @@ reu_detect:
         bne @none
         dex
         bpl @q
+        ; keep byte 0 of every bank (the cache header lives there); bufs is free this early
+        ldx #127
+@sv:    txa
+        ldy #$91
+        jsr reu_byte
+        lda reu_tmp
+        sta bufs,x
+        dex
+        bpl @sv
         ; write bank number into each bank, highest first
         ldx #127
 @w:     stx reu_tmp
@@ -588,7 +658,15 @@ reu_detect:
         cpx #128
         bne @r
 @done:  stx reu_banks
-        cpx #0
+        ldx #127
+@rs:    lda bufs,x
+        sta reu_tmp
+        txa
+        ldy #$90
+        jsr reu_byte
+        dex
+        bpl @rs
+        lda reu_banks
         beq @none
         lda #1
         sta dev_present+1
@@ -596,3 +674,357 @@ reu_detect:
         sta dev_type+1
 @none:  rts
 pat:    .byte $5a, $a5, $3c, $c3
+
+.segment "CODE"
+; ---- REU block cache ----
+; cdma: A = command ($90 stash, $91 fetch); cd_regs and cd_ctl set
+cdma:   pha
+        ldx #6
+@l:     lda cd_regs,x
+        sta REU_C64LO,x
+        dex
+        bpl @l
+        lda cd_ctl
+        sta REU_CTRL
+        pla
+        sta REU_CMD
+        rts
+
+; cache_chk: carry clear if rq_dev/rq_lo/rq_hi is a block the cache holds
+cache_chk:
+        lda cache_ok
+        beq @no
+        lda rq_dev
+        bne @no
+        lda rq_hi
+        cmp #>CACHE_NBLK
+        bcc @yes
+        bne @no
+        lda rq_lo
+        cmp #<CACHE_NBLK
+        bcs @no
+@yes:   clc
+        rts
+@no:    sec
+        rts
+
+; the block's valid byte is in the REU at bank CACHE_BANK, offset $0100+block
+cache_vaddr:
+        lda #<reu_tmp
+        sta cd_regs
+        lda #>reu_tmp
+        sta cd_regs+1
+        lda rq_lo
+        sta cd_regs+2
+        lda rq_hi
+        clc
+        adc #1
+        sta cd_regs+3
+        lda #CACHE_BANK
+        sta cd_regs+4
+        lda #1
+        sta cd_regs+5
+        lda #0
+        sta cd_regs+6
+        rts
+
+cache_valid:                ; -> A = valid byte (Z clear if valid)
+        jsr cache_vaddr
+        lda #$91
+        jsr cdma
+        lda reu_tmp
+        rts
+
+cache_setvalid:             ; A = 0 or 1
+        sta reu_tmp
+        jsr cache_vaddr
+        lda #$90
+        jmp cdma
+
+; the block's data is at page 4+block; bp is the C64 side
+cache_page:
+        lda bp
+        sta cd_regs
+        lda bp+1
+        sta cd_regs+1
+        lda #0
+        sta cd_regs+2
+        lda rq_lo
+        clc
+        adc #4
+        sta cd_regs+3
+        lda rq_hi
+        adc #CACHE_BANK
+        sta cd_regs+4
+        lda #0
+        sta cd_regs+5
+        lda #1
+        sta cd_regs+6
+        rts
+
+; cache_get: carry clear if the block was fetched from the REU into bp
+cache_get:
+        jsr cache_chk
+        bcs @no
+        lda cache_on
+        beq @no
+        jsr cache_valid
+        beq @no
+        jsr cache_page
+        lda #$91
+        jsr cdma
+        ldx #0
+        jsr cinc
+        clc
+        rts
+@no:    sec
+        rts
+
+; cache_put: a block was just read from the bus into bp
+cache_put:
+        jsr cache_chk
+        bcs @r
+        ldx #2
+        jsr cinc
+        jmp cache_wr
+@r:     rts
+
+; cache_wr: bp holds the block's current contents; keep the REU copy in step
+cache_wr:
+        jsr cache_chk
+        bcs @r
+        jsr cache_page
+        lda #$90
+        jsr cdma
+        lda #1
+        jmp cache_setvalid
+@r:     rts
+
+; cache_inval: forget the block (the disk's contents are in doubt)
+cache_inval:
+        jsr cache_chk
+        bcs @r
+        lda #0
+        jmp cache_setvalid
+@r:     rts
+
+; cache_err: a bus error on the boot drive (the other drives are not the cache's business)
+cache_err:
+        lda rq_dev
+        bne cinc_r
+        ldx #4
+        ; fall through
+; cinc: count one in the 16-bit counter at c_hit+X, saturating at $ffff
+cinc:   inc c_hit,x
+        bne cinc_r
+        inc c_hit+1,x
+        bne cinc_r
+        lda #$ff
+        sta c_hit,x
+        sta c_hit+1,x
+cinc_r: rts
+
+; cache_clear: forget every block and write c_hdr as the header
+cache_clear:
+        lda #0
+        sta reu_tmp
+        sta cd_regs+2
+        sta cd_regs+3
+        sta cd_regs+5
+        lda #<reu_tmp
+        sta cd_regs
+        lda #>reu_tmp
+        sta cd_regs+1
+        lda #CACHE_BANK
+        sta cd_regs+4
+        lda #4              ; header page + three map pages
+        sta cd_regs+6
+        lda #$80            ; C64 address fixed: fills with the zero byte
+        sta cd_ctl
+        lda #$90
+        jsr cdma
+        lda #0
+        sta cd_ctl
+        ; fall through
+; cache_hdr_put: write c_hdr to the REU header
+cache_hdr_put:
+        lda #<c_hdr
+        sta cd_regs
+        lda #>c_hdr
+        sta cd_regs+1
+        lda #0
+        sta cd_regs+2
+        sta cd_regs+3
+        lda #CACHE_BANK
+        sta cd_regs+4
+        lda #CH_LEN
+        sta cd_regs+5
+        lda #0
+        sta cd_regs+6
+        lda #$90
+        jmp cdma
+
+.segment "INIT"
+; cache_attach: before the root is mounted. Reads the superblock from the bus, and
+; discards the REU cache unless it belongs to this disk (same build id).
+ca_r:   rts
+cache_attach:
+        lda #0
+        sta cache_ok
+        sta cache_on
+        sta cd_ctl
+        sta ep_done
+.if CACHE_DEFAULT = 0
+        rts                     ; no cache at all: the bus is all there is
+.endif
+        lda reu_banks
+        cmp #CACHE_BANK+3
+        bcc ca_r
+        lda #0
+        ldx #<BAM_BLOCK
+        ldy #>BAM_BLOCK
+        jsr bread               ; cache_ok is clear: from the bus
+        bcs ca_r
+        ldx #15                 ; the label tells disks apart even when the build id cannot
+        ldy #BAM_LABEL+15
+@lb:    lda (bp),y
+        sta c_hdr+8,x
+        dey
+        dex
+        bpl @lb
+        lda #0
+        ldx #<SB_BLOCK
+        ldy #>SB_BLOCK
+        jsr bread
+        bcs ca_r
+        ldy #3
+@m:     lda cmagic,y
+        sta c_hdr,y
+        dey
+        bpl @m
+        ldx #3
+        ldy #SB_BUILD_ID+3
+@i:     lda (bp),y
+        sta c_hdr+4,x
+        dey
+        dex
+        bpl @i
+        lda c_hdr+4             ; no id: a disk the cache cannot vouch for
+        ora c_hdr+5
+        ora c_hdr+6
+        ora c_hdr+7
+        beq ca_r
+        lda #<c_rd
+        sta cd_regs
+        lda #>c_rd
+        sta cd_regs+1
+        lda #0
+        sta cd_regs+2
+        sta cd_regs+3
+        sta cd_regs+6
+        lda #CACHE_BANK
+        sta cd_regs+4
+        lda #CH_LEN
+        sta cd_regs+5
+        lda #$91
+        jsr cdma
+.if CACHE_DEFAULT <> 2
+        ldx #CH_LEN-1
+@c:     lda c_rd,x
+        cmp c_hdr,x
+        bne @fmt
+        dex
+        bpl @c
+        bmi @ok
+.endif
+@fmt:   jsr cache_clear
+@ok:    lda #1
+        sta cache_ok
+        sta cache_on
+        jmp cache_wr            ; the superblock (bp) goes in
+
+.segment "CODE"
+; cache_epoch: the first write to the boot drive in a boot. Gives the disk a new build id
+; (and the cache header the same), so a copy of the disk that was not written by this
+; boot, such as the pristine image mounted again, no longer matches the cache.
+; Carry set if the superblock could not be changed (the write must then not go ahead).
+cache_epoch:
+        lda #1
+        sta ep_done
+        lda #0
+        ldx #<SB_BLOCK
+        ldy #>SB_BLOCK
+        jsr bread
+        bcs @r
+        ldy #SB_BUILD_ID
+        lda $dc04               ; free-running timers stand in for a random number
+        ora #1                  ; and the id always changes
+        eor (bp),y
+        sta (bp),y
+        sta c_hdr+4
+        iny
+        lda (bp),y
+        eor $dc05
+        sta (bp),y
+        sta c_hdr+5
+        iny
+        lda (bp),y
+        eor $dd04
+        sta (bp),y
+        sta c_hdr+6
+        iny
+        lda (bp),y
+        eor $dd05
+        sta (bp),y
+        sta c_hdr+7
+        jsr bwrite              ; the superblock; ep_done is set, so no recursion
+        bcs @r
+        jmp cache_hdr_put
+@r:     rts
+
+; sys_cache(A = op, r0 = buf): 0 = status into buf: state (0 none, 1 off, 2 on), hits,
+; bus reads, bus errors (16 bits each); 1 = off, 2 = on, 3 = flush
+sys_cache:
+        cmp #4
+        bcs @inval
+        cmp #0
+        beq @stat
+        ldx cache_ok
+        beq @nodev
+        cmp #3
+        beq @flush
+        and #1                  ; 1 -> 1 (off), 2 -> 0
+        eor #1
+        sta cache_on
+        clc
+        rts
+@flush: jmp cache_clear_c
+@stat:  ldx #0
+        lda cache_ok
+        beq @st
+        inx
+        lda cache_on
+        beq @st
+        inx
+@st:    txa
+        ldy #0
+        sta (r0),y
+        ldx #0
+@cp:    lda c_hit,x
+        iny
+        sta (r0),y
+        inx
+        cpx #6
+        bne @cp
+        clc
+        rts
+@inval: lda #EINVAL
+        sec
+        rts
+@nodev: lda #ENODEV
+        sec
+        rts
+cache_clear_c:
+        jsr cache_clear
+        clc
+        rts

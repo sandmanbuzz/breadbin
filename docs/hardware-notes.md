@@ -335,3 +335,8 @@ So the interface keeps up with the CPU and the figure to design with is about **
 
 The 21 KB/s write figure was loop-bound as well. With a tight loop (`uci.s` op 7: the header four bytes, then 512 bytes sent with `LDA page,Y / STA $DF1D / INY / BNE`, about 13 cycles per byte) writing 32 KB, 127 requests of 512 bytes and 125 more: **64.8 to 65.1 KB/s**. `FILE INFO` of the file afterwards reports exactly the bytes sent (129,024 = 252 x 512), so nothing was dropped. Create for write about 56 to 58 ms; close 1.2 ms. So polled **reads reach 44 KB/s (status checked per byte) to 62 KB/s (blind), writes 65 KB/s**; `LOAD REU` is 10 to 12 MB/s.
 
+
+## Request from the cache session, 2026-10-31
+
+1. (Answered: PASS 21 of 21, see above.) Run `experiments/illegal-ops` once on the C64 Ultimate (README has the build line and what a FAIL means). It decides whether the kernel may use the stable undocumented opcodes. Expected: `ILLEGAL OPS: PASS` (it does under VICE).
+2. When the regression bisect is done: the cache A/B on `reu-cache` (`make CACHE=0` against `make CACHE=2`, cold REU each boot, five or more boots each), and one run of the `Cache` behaviours that need hardware: warm boot should show far fewer bus reads. The cache does not fix the root-mount stall; it can only hide it on REU machines.

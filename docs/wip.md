@@ -70,3 +70,39 @@ Where the cloud session stands, so a fresh context can resume:
 
 **For a fresh context:** `make test-host` first; the hardware needs `BREADBIN_ULTIMATE` set to the machine's address (ask the user; keep the address out of the repo); read the last four entries of `docs/hardware-notes.md`.
 
+
+## Cache session state (2026-10-31, second co-agent; all co-agents are peer committers)
+
+**Branch `reu-cache`** (worktree `.claude/worktrees/reu-cache` in the shared clone; pushed). Done: the REU block cache (see `docs/roadmap.md`, "Disk speed"), `cache` command, `make CACHE=0|1|2`, mkimage build id, `Cache` test class (9 tests; with `REU`, 10 pass under VICE with stock ROMs), an adversarial review whose BLOCK (stale blocks when a pristine image is mounted again on a warm REU) is fixed and has a regression test. Code room 5,295 bytes.
+
+**Not run:** the JiffyDOS-ROM disk and bus subset, hardware, the full suite. Treat a hardware surprise as NEEDSFIX on this branch. **Open requests:** the hardware A/B (`CACHE=0` against `CACHE=2`, cold REU) is queued behind the regression bisect on the hardware side; `experiments/illegal-ops` PASSED on the C64 Ultimate (firmware 1.1.0, core 1.49, 21 of 21; hardware agent, 2026-10-31), so the stable undocumented opcodes are cleared for the kernel on that core.
+
+**Decisions from the user:** undocumented (stable) 6510 opcodes are allowed in the kernel (the Ultimate core passes `experiments/illegal-ops`); SuperCPU is declared unsupported; CPU list = anything OEM-shipped, whatever upstream was tested on, and modern enthusiast hardware that is not niche. Branches may be pushed freely; nothing goes to `main` without the user.
+
+**Next (planned, not started):** the M0-7 footprint pass: baseline `make size`, then `fs`, `cbm`, `blk` and the 1.2 KB of library per program; drive-module modularisation is the open design question (user in favour, tradeoffs first); illegal opcodes only where the byte count justifies them. Early next sprint: containerised VICE and Xvfb (`docs/roadmap.md`, "Keep the lights on").
+
+**Known gaps:** the cache covers the boot drive only; two disks of the same build written by other machines can still look alike (the label and the per-boot id make that unlikely, not impossible); the first write of a boot costs one extra superblock write.
+
+## Footprint pass state (2026-10-31, second co-agent; branch `footprint`, on top of `reu-cache`)
+
+**Done and pushed (tip 05eb474):** TPA 120 -> 153 pages ($0800-$A0FF, 38 KB; was 30 KB). Where it came from: the `INIT` segment (1,140 bytes of boot-only code, released to the pool), `cbm.s` running above the BSS (`CODEHI`, 1,902 bytes), the whole syscall entry in the $CF00 page (`jsr enter` plus 3-byte address records, constant cost, ABI addresses unchanged), a split `lib.s` (programs total 73.7 -> 54.7 KB; `clear` 1,229 -> 192 bytes), plus `cld` on syscall entry. An adversarial review found no live bug; its gaps (cbm.s code never run, no process above $8000, a CODEHI copy that could wrap, a `mem_init` loop that only worked below 128 pages) are fixed and have tests (`Pool`; `Drives` run).
+
+**Evidence:** `make test-host` 48; VICE (stock ROMs, `-console`): Pool, Drives, Persistence, Boot, Cache, REU and `test_console`, 48 pass. **Not run:** JiffyDOS ROMs, hardware, `test_keyboard`.
+
+**Policy:** `KSTART` (`k.inc`) and `KRAM` (`kernel.cfg`) are hand-set; raise `KSTART` whenever a page is freed, keep about a page of headroom (now 236 bytes below $CF00; 183 above BSS+CODEHI, and a link-time assert guards CODEHI). Kernel growth costs TPA page for page.
+
+**Next ideas (not started):** pg_used as an owner/class tag (breadbin-next's proposal), a lean `sys_return`, more INIT-style release of rarely used code, undocumented opcodes where they save bytes (stable set cleared on the Ultimate), driver modularisation (needs the S6 vtable first), a TPA-agnostic kernel (NTH).
+
+## Work board (collective autonomy; nobody is in charge, everyone is in charge)
+
+**Shared truth:** `origin/main` (merge commits welcome, red is fine: a commit records state). Branches on origin: `main` and `hw-bench` only; the old iec experiments are tags `archive/iec-*`. Work in short-lived branches (`fix/<topic>`, `feat/<topic>`), merge back with a merge commit, delete when merged. Say what was run and not run in every commit. Tell the others (SendMessage) before touching their files; the rule of thumb is "files you claimed below are yours until you release the claim". VICE runs: `tools/with-lock` or the container runner in `tools/ci` (`docs/ci.md`). Hardware needs the user's hands: do not queue anything that needs them while they are away. Nothing leaves the machine except branches and tags: no keys, addresses, hostnames.
+
+| Lane | Who | Claims (files/areas) | Doing / next |
+|---|---|---|---|
+| Kernel footprint round 2 | Agent 3 (Kernal) | `src/kernel/jtab.s`, `proc.s`, `main.s`, `mem.s`, `kernel.cfg`, `k.inc`, `src/lib/*` | test fanout on main (keyboard, full suite in the container); lean `sys_return`, sched fast path, undocumented-opcode peepholes where bytes are saved |
+| UCI v1 | breadbin-next (f7) | new `uci.s`, `cbm.s`, `fs.s`; `blk.s` only after Agent 2's `fix/iec-recover` merges (ask first) | start from `main`; room is tight (236 bytes below $CF00): pay with `KSTART`, a page at a time, and say so |
+| Hardware: IEC recovery | Agent 2 (hardware) | `fix/iec-recover`: `iec.s` (bus_acptr ready wait bounded), `blk.s` (iec_read retries); +56 bytes | 8-boot series on the physical 1541; then rebase on main and report the byte cost here; then the cache A/B and the JiffyDOS-ROM subset |
+| Hardware: stall bench | breadbin-2b (`hw-bench`) | `hw-bench`, `experiments/iec-stall/`, `tools/ultimate*`, `docs/hardware-notes.md` | physical-1541 stall experiments; hardware list on main |
+| CI / containers | breadbin-next (f7) authored `tools/ci` (`next/ci`) | `tools/ci`, `docs/ci.md` | container runner works for `test-host` (checked 2026-10-31); keyboard run in progress by Agent 3 |
+
+**Open items nobody owns yet:** `test_keyboard` needs X (container); JiffyDOS-ROM disk and bus subset on main; drive-module modularisation (needs the S6 filesystem interface first); a TPA-agnostic kernel (NTH). Take one by writing your name here.

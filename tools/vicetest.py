@@ -139,7 +139,7 @@ class Target:
 
 
 class Vice(Target):
-    def __init__(self, image, reu=False, port=None, warp=True, extra=(), boot_device=8):
+    def __init__(self, image, reu=False, port=None, warp=True, extra=(), boot_device=8, reu_image=None):
         self.image = image
         self.port = port or (6510 + os.getpid() % 500)
         args = [X64, "-default", "+sound", "-minimized",
@@ -147,7 +147,9 @@ class Vice(Target):
         if warp:
             args.append("-warp")
         if reu:
-            args += ["-reu", "-reusize", "512"]
+            args += ["-reu", "-reusize", str(512 if reu is True else reu)]
+            if reu_image:       # keep the REU contents across runs (the emulator saves it on exit)
+                args += ["-reuimage", reu_image, "-reuimagerw"]
         args += list(extra)
         # extra emulator options for a whole run, e.g. other ROM images kept outside
         # the repo: BREADBIN_VICE_ARGS="-kernal /path/kernal.bin -dos1541II /path/drive.bin"

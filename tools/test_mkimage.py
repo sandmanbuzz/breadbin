@@ -52,6 +52,21 @@ class TestImage(unittest.TestCase):
         self.assertEqual(sb[8], 128)
         self.assertEqual(sb[9] | sb[10] << 8, 377)
 
+    def test_build_id(self):
+        sb = self.img.block(376)
+        bid = bytes(sb[15:19])
+        self.assertNotEqual(bid, bytes(4))
+        again = os.path.join(self.tmp.name, "y.d64")
+        t = self.tmp.name
+        M.build(again, os.path.join(t, "boot.prg"), os.path.join(t, "root"),
+                ["console:1", "null:0"])
+        self.assertEqual(bytes(M.load(again).block(376)[15:19]), bid)   # same content, same id
+        with open(os.path.join(t, "root", "home", "readme"), "ab") as f:
+            f.write(b"x")
+        M.build(again, os.path.join(t, "boot.prg"), os.path.join(t, "root"),
+                ["console:1", "null:0"])
+        self.assertNotEqual(bytes(M.load(again).block(376)[15:19]), bid)
+
     def test_root_entries(self):
         names = [n for n, _ in self.fs.dir_entries(M.ROOT_INO)]
         self.assertEqual(names[:2], [b".", b".."])

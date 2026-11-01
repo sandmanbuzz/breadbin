@@ -42,7 +42,7 @@ pb_len:  .res 1
 .import cbm_read, cbm_readdir, cbm_open_write, cbm_write, cbm_wclose
 .import cbm_scratch, cbm_rename, cbm_fsinfo
 
-.segment "CODE"
+.segment "INIT"
 file_init:
         ldx #NFILE-1
         lda #FT_FREE
@@ -65,6 +65,7 @@ file_init:
         rts
 
 ; oft_alloc -> X = free entry (ref 1, pos 0), carry set if table full
+.segment "CODE"
 oft_alloc:
         ldx #NFILE-1
 @l:     lda f_type,x
