@@ -147,9 +147,9 @@ class Boot(unittest.TestCase):
         self.assertNotIn("count", self.run_("ps"))
 
     def test_15_too_many_processes(self):
-        # init + login + sh + 9 jobs fill the 12-slot process table
+        # init + sh (login has exec'd into it) + 10 jobs fill the 12-slot process table
         pids = []
-        for _ in range(9):
+        for _ in range(10):
             pids.append(self.run_("sleep 9999 &").strip("[]"))
         out = self.v.run("sleep 9999 &", clear=False)
         self.assertIn("too many processes", out)
@@ -472,6 +472,55 @@ class Modules(unittest.TestCase):
             self.assertIn("exec format", v.run("mod load /etc/passwd"))      # not a CX file
             self.assertIn("no such file", v.run("mod load /lib/km/nothing"))
             self.assertEqual(v.run("mod ls"), "")
+
+
+class Exec(unittest.TestCase):
+    """exec: a process replaces its own image, keeping its pid, descriptors and directory."""
+
+    @staticmethod
+    def ps(text):
+        rows = {}
+        for line in text.splitlines():
+            m = re.match(r"\s*(\d+)\s+(\d+)\s+\S\s+(\d+)\s+(\S+)", line)
+            if m:
+                rows[int(m.group(1))] = (int(m.group(2)), int(m.group(3)), m.group(4))
+        return rows
+
+    def test_login_became_the_shell(self):
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            rows = self.ps(v.run("ps"))
+            names = sorted(r[2] for r in rows.values())
+            self.assertNotIn("login", names)                # login exec'd into sh
+            self.assertEqual(names, ["init", "ps", "sh"])
+            sh = [pid for pid, r in rows.items() if r[2] == "sh"][0]
+            self.assertEqual(rows[sh][0], 1)                # still init's child
+
+    def test_exec_replaces_the_process(self):
+        """`exec` is a program: it replaces itself, not the shell that ran it."""
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            rows = self.ps(v.run("exec /bin/ps"))
+            names = [r[2] for r in rows.values()]
+            self.assertNotIn("exec", names)                 # no process left under that name
+            outer = [p for p, r in rows.items() if r[2] == "sh" and r[0] == 1][0]
+            psrows = [(p, r) for p, r in rows.items() if r[2] == "ps"]
+            self.assertEqual(len(psrows), 1)
+            self.assertEqual(psrows[0][1][0], outer)        # the shell is its parent
+
+    def test_exec_keeps_descriptors_and_directory(self):
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            self.assertEqual(v.run("exec /bin/echo piped | cat"), "piped")   # stdout and EOF intact
+            v.run("cd /tmp")
+            self.assertEqual(v.run("exec /bin/pwd"), "/tmp")                  # cwd carried over
+
+    def test_failures_leave_the_caller_alone(self):
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            self.assertIn("exec format", v.run("exec /etc/passwd"))
+            self.assertIn("no such file", v.run("exec /bin/nothing").replace("\n", ""))
+            self.assertEqual(v.run("echo alive"), "alive")
 
 
 class Drives(unittest.TestCase):
