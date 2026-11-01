@@ -220,3 +220,25 @@ bytes with the standalone `uci.py` after a reset. `/Temp` (Ultimate RAM disk) fo
 
 Settled by measurement: poll, not IRQ; two slots (targets independent); packets as Data More chains; network target present, out of
 scope.
+
+## Addendum (2026-10-31): corrected and added measurements
+
+From the hardware session (C64 Ultimate, firmware 1.1.0, polled; source: the entry "CORRECTION to the throughput above" in `docs/hardware-notes.md` on `hw-bench`). They supersede the 16 KB/s and 21 KB/s figures used earlier in this note, which were bound by the measuring loop (a `jsr` to a store routine per byte), as the note's Q1 suspected.
+
+| Item | Measured |
+|---|---|
+| Read, DATA_AV tested on every byte (`lda $DF1C / bpl / lda $DF1E / sta page,y / iny / bne`, ~20 cycles) | 44.0-44.8 KB/s, same for requests of 512 / 4096 / 32768 |
+| Read, no status test (512 bytes per chunk blind, ~14 cycles) | 61.6-63.3 KB/s; each chunk handshake costs ~0.2 ms |
+| LOAD REU (file open for read first) | 32 KB 6.2 ms; 128 KB 13.7 ms (9.6 MB/s); 512 KB 44.4 ms (11.8 MB/s) |
+| Create (open for write, create-always, flag $0A) | 54.8-55.7 ms; overwrite the same; flag $0E answers FILE EXISTS; close 1.1 ms |
+| CHANGE DIR /Temp | works, 7.8 ms; GET PATH then returns /Temp/ |
+| OPEN | accepts an absolute path |
+| FILE STAT ($08) | answers 82,FILE NOT FOUND for any name: use OPEN + FILE INFO (4.9 ms, 22-byte stat packet) |
+| Write throughput | 21 KB/s was measured with the same slow loop; probably also loop-bound, not yet re-measured |
+| DMA bit ($DF1C bit 7) for reads | not tried |
+
+Consequences for the design:
+- **The v1 byte path is comfortably enough**: design for ~44 KB/s (safe), ~62 KB/s blind. A 6.4 KB program (`as`) loads in roughly 0.15 s through the registers, so Q1's "LOAD REU is not in v1" holds with more margin than assumed. LOAD REU remains the right tool for bulk (REU cache fill, overlays, swap staging) at 10x or more the byte path.
+- **Creating a file is slow** (about 55 ms against 4.5 ms for an open): workloads that create many small files (compiler temporaries, `mkdir` trees) will notice. Prefer keeping a created handle open over reopening, and do not create-per-write.
+- **Absolute paths on OPEN** confirm the whole-path resolution design (section 3): the kernel strips the mount prefix and passes one host path, no per-component walk needed. `stat` goes through OPEN + FILE INFO; there is no cheap stat-by-name.
+- Q1, and the open-for-write and absolute-path questions listed in section 9, are now answered; image write-back timing, the DMA read bit and a write-throughput re-measure remain open.
