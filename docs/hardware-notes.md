@@ -331,3 +331,7 @@ So the interface keeps up with the CPU and the figure to design with is about **
 
 **So the drive is healthy and recoverable: ATN is all it needs.** A recovery in the driver is: on any receive timeout, send `UNTALK` (ATN), then re-issue the whole `U1` (a fresh block, not the remainder), `TALK`, and read again; the unbounded wait in `bus_acptr`'s `@rdy` becomes a bounded one so a hang can no longer occur. Not yet tried in the driver: how often the retry itself stalls (about 1 in 40 block reads by the earlier rate), and whether a stalled receive can ever complete *silently* with wrong bytes; every recorded stall ended in a timeout.
 
+### 2026-11-01, UCI write throughput re-measured with a tight loop (hardware session)
+
+The 21 KB/s write figure was loop-bound as well. With a tight loop (`uci.s` op 7: the header four bytes, then 512 bytes sent with `LDA page,Y / STA $DF1D / INY / BNE`, about 13 cycles per byte) writing 32 KB, 127 requests of 512 bytes and 125 more: **64.8 to 65.1 KB/s**. `FILE INFO` of the file afterwards reports exactly the bytes sent (129,024 = 252 x 512), so nothing was dropped. Create for write about 56 to 58 ms; close 1.2 ms. So polled **reads reach 44 KB/s (status checked per byte) to 62 KB/s (blind), writes 65 KB/s**; `LOAD REU` is 10 to 12 MB/s.
+

@@ -9,6 +9,7 @@
 ;                                     is stored into a sink the way a driver would (timing includes consuming it)
 ;   3 CTRL  value                     write the control register; log $DF1C and $DF1D read straight after
 ;   4 WRFILL target chunk(2) total(2) pattern   WRITE DATA ($05) total bytes in chunks; pattern byte, or $FF = index
+;   7 WRTIGHT target chunk(2) total(2) pattern   like WRFILL but fixed 512-byte chunks sent from a prepared page with a tight loop
 ;   5 RDTIGHT / 6 RDBLIND: like RDLOOP, but the byte loop is a tight loop straight to a page ($4000 window, 8 KB wrapped);
 ;     5 still tests DATA_AV on every byte, 6 reads 512 bytes per chunk blind (use a total that is a multiple of 512)
 ; Log entry (64 bytes): +0 op number, +1 last $DF1C, +2..5 elapsed us (32 bits), +6..7 response bytes, +8 status bytes,
@@ -100,7 +101,11 @@ start:  lda #$FF            ; the 32-bit microsecond clock: CIA2 timer A (phi2) 
 @n5:    cmp #5
         beq @rl
         cmp #6
+        beq @rl
+        cmp #7
         bne @end
+        jsr op_wrtight
+        jmp @next
 @rl:    jsr op_rdloop
 @next:  jsr log_end
         inc nops
@@ -566,6 +571,55 @@ op_wrfill: ldy #1
         lda rlen+1
         adc tmp+1
         sta rlen+1
+        jmp @lp
+@d:     jsr stamp_e
+        lda #7
+        jmp adv
+
+op_wrtight: ldy #1          ; WRITE DATA in 512-byte requests, the bytes sent by a tight loop from two prepared pages
+        lda (sp),y
+        sta target
+        ldy #5
+        lda (sp),y
+        sta tot+1           ; (total is a multiple of 512: only the high byte matters)
+        ldy #0
+@f:     tya
+        sta sink,y
+        sta sink+$100,y
+        iny
+        bne @f
+        lda #0
+        sta mode
+        jsr wait_idle
+        jsr stamp_s
+@lp:    lda rlen+1
+        cmp tot+1
+        bcs @d
+        jsr wait_idle
+        lda target
+        sta UCI_CMD
+        lda #$05
+        sta UCI_CMD
+        lda #0
+        sta UCI_CMD
+        sta UCI_CMD
+        ldy #0
+@a:     lda sink,y
+        sta UCI_CMD
+        iny
+        bne @a
+@b:     lda sink+$100,y
+        sta UCI_CMD
+        iny
+        bne @b
+        lda #$01
+        sta UCI_CTL
+        inc ncmd
+        jsr finish
+        lda result
+        bne @d
+        inc rlen+1          ; rlen counts bytes written here: +512
+        inc rlen+1
         jmp @lp
 @d:     jsr stamp_e
         lda #7
