@@ -1,0 +1,23 @@
+1 operation not permitted
+2 no such file or directory
+3 no such process
+5 i/o error
+7 argument list too long
+8 exec format error
+9 bad file descriptor
+10 no child processes
+11 too many processes
+12 out of memory
+16 device busy
+17 file exists
+18 cross-device link
+19 no such device or no disk
+20 not a directory
+21 is a directory
+22 invalid argument
+24 too many open files
+27 file too large
+28 no space left on device
+32 broken pipe
+36 file name too long
+39 directory not empty
