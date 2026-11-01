@@ -500,7 +500,9 @@ uci_namei:
         inx
 @sk:    iny
         bne @cc
+        beq @lg             ; 256 bytes of path: Y would wrap
 @sl:    iny
+        beq @lg
         lda (pp),y
         cmp #'/'
         beq @sl
@@ -535,6 +537,8 @@ uci_namei:
         stx pp+1
         plp
         rts
+@lg:    lda #ENAMETOOLONG
+        sec
 @err:   rts
 @in:    lda nm_parent
         beq @full
