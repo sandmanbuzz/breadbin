@@ -59,6 +59,7 @@ O_APPEND = $40
 ; spawn flags (Y)
 SP_BG     = $01
 SP_IGNINT = $02
+SP_EXEC   = $80         ; replace the caller's image in its own process slot (A and X ignored)
 
 ; wait flags (X)
 W_NOHANG = $01
