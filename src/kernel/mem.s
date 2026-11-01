@@ -73,6 +73,48 @@ page_alloc:
         sec
         rts
 
+; page_alloc_hi: like page_alloc, but first fit from the TOP of the pool (kernel modules
+; live there, out of the way of processes). Y = pages -> A = first page, carry clear.
+page_alloc_hi:
+        sty pa_n
+        cpy #0
+        beq @fail
+        ldx #NPOOL-1
+        lda #0
+        sta pa_run
+@l:     lda pg_used,x
+        beq @free
+        lda #0
+        sta pa_run
+        beq @next
+@free:  inc pa_run
+        lda pa_run
+        cmp pa_n
+        beq @got
+@next:  cpx #0
+        beq @fail
+        dex
+        jmp @l
+@got:   stx pa_start        ; X is the lowest page of the run
+        ldy pa_n
+        lda #1
+@m:     sta pg_used,x
+        inx
+        dey
+        bne @m
+        lda free_pages
+        sec
+        sbc pa_n
+        sta free_pages
+        lda pa_start
+        clc
+        adc #POOL_FIRST
+        clc
+        rts
+@fail:  lda #ENOMEM
+        sec
+        rts
+
 ; page_free: A = first page, Y = count
 page_free:
         cpy #0

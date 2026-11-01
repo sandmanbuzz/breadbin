@@ -89,3 +89,5 @@ clean:
 # byte budget per kernel module and the headroom left
 size: all
 	python3 tools/size.py
+
+-include mk/modules.mk

@@ -450,6 +450,30 @@ class Pool(unittest.TestCase):
             self.assertEqual(v.run("echo still fine | cat"), "still fine")
 
 
+class Modules(unittest.TestCase):
+    """Kernel modules: a CX image loaded at the top of the pool, called through init/fini."""
+
+    def test_hello_module_loads_and_unloads(self):
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            self.assertEqual(v.run("mod ls"), "")
+            out = v.run("mod load /lib/km/hello")
+            self.assertIn("hello from module", out)
+            ls = v.run("mod ls")
+            self.assertRegex(ls, r"slot 0: page \d+, pages 1, class 0")
+            page = int(re.search(r"page (\d+)", ls).group(1))
+            self.assertGreater(page, 100)                 # top of the pool, not the bottom
+            self.assertIn("bye from module", v.run("mod unload 0"))
+            self.assertEqual(v.run("mod ls"), "")
+
+    def test_bad_module_is_refused(self):
+        with Vice(IMAGE) as v:
+            v.wait_shell()
+            self.assertIn("exec format", v.run("mod load /etc/passwd"))      # not a CX file
+            self.assertIn("no such file", v.run("mod load /lib/km/nothing"))
+            self.assertEqual(v.run("mod ls"), "")
+
+
 class Drives(unittest.TestCase):
     """mount: normal C64 disks and Breadbin disks on drive 9."""
 
