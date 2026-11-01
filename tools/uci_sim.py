@@ -343,7 +343,7 @@ class KernelError(Exception):
 
 class Sim:
     TRAMP = 0x0340              # JSR SYS_x; the return lands on TRAMP + 3
-    SCRATCH = 0x9000            # pages $90-$97: buffers for the tests (reserved in pg_used)
+    SCRATCH = 0x8000            # pages $80-$87: buffers for the tests (reserved in pg_used)
 
     def __init__(self, uci=None, image=None):
         with open(os.path.join(BUILD, "breadbin.prg"), "rb") as f:
@@ -438,7 +438,7 @@ class Sim:
         for i in range(8):
             m[L["p_fd"] + i] = con if i < 3 else 0xFF
         m[L["p_cwd"]:L["p_cwd"] + 2] = b"/\0"
-        for p in range(0x90, 0x98):
+        for p in range(0x80, 0x88):
             m[L["pg_used"] + p - 8] = 1
         self.mpu.p &= ~0x04                         # (no interrupt will come anyway)
 
@@ -482,7 +482,7 @@ class Sim:
     def close(self, fd):
         return self.check(self.sys("CLOSE", a=fd), "close")
 
-    def read(self, fd, n, buf=0x9100):
+    def read(self, fd, n, buf=0x8100):
         res = self.sys("READ", a=fd, r0=buf, r1=n)
         self.check(res, "read")
         got = self.r1()
@@ -496,23 +496,23 @@ class Sim:
                 return out
             out += d
 
-    def write(self, fd, data, buf=0x9100):
+    def write(self, fd, data, buf=0x8100):
         self.put(buf, data)
         res = self.sys("WRITE", a=fd, r0=buf, r1=len(data))
         self.check(res, "write")
         return self.r1()
 
     def stat(self, path):
-        res = self.sys("STAT", r0=self.cstr(path), r1=0x90F0)
+        res = self.sys("STAT", r0=self.cstr(path), r1=0x80F0)
         if res[0]:
             return res
-        b = self.mem.b[0x90F0:0x90F8]
+        b = self.mem.b[0x80F0:0x80F8]
         return {"type": b[0], "nlink": b[1], "size": b[2] | b[3] << 8 | b[4] << 16, "ino": b[5], "dev": b[6]}
 
     def path_call(self, name, path, path2=None):
         if path2 is None:
             return self.sys(name, r0=self.cstr(path))
-        return self.sys(name, r0=self.cstr(path), r1=self.cstr(path2, 0x9080))
+        return self.sys(name, r0=self.cstr(path), r1=self.cstr(path2, 0x8080))
 
     def mount_uci(self, path):
         return self.sys("MOUNT", a=ord("U"), x=ord("U"), r0=self.cstr(path))
@@ -533,14 +533,14 @@ class Sim:
         return names
 
     def getcwd(self):
-        self.check(self.sys("GETCWD", a=64, r0=0x9100), "getcwd")
-        return bytes(self.mem.b[0x9100:0x9140]).split(b"\0")[0].decode()
+        self.check(self.sys("GETCWD", a=64, r0=0x8100), "getcwd")
+        return bytes(self.mem.b[0x8100:0x8140]).split(b"\0")[0].decode()
 
     def mntinfo(self, i):
-        res = self.sys("MNTINFO", a=i, r0=0x9100)
+        res = self.sys("MNTINFO", a=i, r0=0x8100)
         if res[0]:
             return None
-        b = self.mem.b[0x9100:0x9122]
+        b = self.mem.b[0x8100:0x8122]
         return b[0], b[1], bytes(b[2:]).split(b"\0")[0].decode()
 
     def spawn(self, path):
