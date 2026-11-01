@@ -81,7 +81,13 @@ sys_mount:
         bne @drv
         cpx #'U'
         bne @drv
-        jsr uci_load        ; the probe and the rest are module code: load uci.km first
+        lda $DF1D           ; nothing answering as a UCI here: ENODEV without loading the module
+        cmp #$C9            ; (the same first read the module's probe makes; Classic touches only this)
+        beq @load
+        lda #ENODEV
+        sec
+        rts
+@load:  jsr uci_load        ; the probe and the rest are module code: load uci.km first
         bcs @rr
         jsr @uci            ; (every way out of the code below is an rts)
         bcc @rr
