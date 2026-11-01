@@ -20,9 +20,9 @@ The `Boot` class, `test_keyboard` and `test_console` pick their backend with `ma
 
 ## The UCI simulator (py65)
 
-`tools/test_uci_sim.py` tests UCI v1 (`src/kernel/uci.s`, `docs/design/next/uci-v1.md`) without an Ultimate: it loads the **real kernel image** (`build/breadbin.prg`) into [py65](https://github.com/mnaberez/py65) (a 6502 emulator in Python, BSD licence), runs the boot stub and `kmain` up to the point where `/bin/init` would start, then calls syscalls through the jump table at `$CF00` as one process. `tools/uci_sim.py` has the harness and `FakeUCI`, a model of the Command Interface registers at `$DF1B-$DF1F` built from the measurements in `docs/hardware-notes.md` ("UCI as measured", on `hw-bench`) and the firmware's DOS target (`software/filemanager/dos.cc` in 1541ultimate), on a temporary host directory.
+`tools/test_uci_sim.py` tests UCI v1 (the module `src/mod/uci.s` and its resident stubs in `src/kernel/uci.s`, `docs/design/next/uci-v1.md`) without an Ultimate: it loads the **real kernel image** (`build/breadbin.prg`) into [py65](https://github.com/mnaberez/py65) (a 6502 emulator in Python, BSD licence), runs the boot stub and `kmain` up to the point where `/bin/init` would start, then calls syscalls through the jump table at `$CF00` as one process. `tools/uci_sim.py` has the harness and `FakeUCI`, a model of the Command Interface registers at `$DF1B-$DF1F` built from the measurements in `docs/hardware-notes.md` ("UCI as measured", on `hw-bench`) and the firmware's DOS target (`software/filemanager/dos.cc` in 1541ultimate), on a temporary host directory.
 
-py65 is a test dependency only, not vendored. Install it into a virtualenv of your own (not globally), then run `make test-host` or the file alone with that interpreter. Without py65, or before `make`, the 16 tests skip and `make test-host` stays green.
+py65 is a test dependency only, not vendored. Install it into a virtualenv of your own (not globally), then run `make test-host` or the file alone with that interpreter. Without py65, or before `make`, the 29 tests skip and `make test-host` stays green.
 
 ```sh
 python3 -m venv /path/to/venv && /path/to/venv/bin/pip install py65
@@ -31,7 +31,7 @@ make && /path/to/venv/bin/python -m unittest tools.test_uci_sim -v
 
 Faked, so not covered: the IEC bus (`iec_open`/`iec_read`/`iec_write` are trapped and served from `build/breadbin.d64` in memory), the REU (reported absent), interrupts (none are raised: the scheduler, the keyboard and the clock never run, so a spawned program is loaded and checked byte for byte but not started), and the Ultimate itself (the fake shares the documentation's gaps: timing, FAT case-insensitivity, the exact status of untried error cases). Running the whole system in py65 (init, the shell) would need the CIA timer interrupt, the keyboard matrix and a 1541 on the IEC bus; not attempted. The hardware check list is in the spec, section 7.
 
-Covered: Classic untouched (no access to `$DF1B-$DF1F` at boot or in file operations; `mount uci` with no interface reads `$DF1D` once and says "no such device"; open bus showing `$C9` fails the IDENTIFY), mount and `mount` listing, `ls` (including names over 14 characters), `cat`, `stat`, write and read back, `O_TRUNC`, `O_APPEND`, a 100 KB write, relative paths and the working directory, `..` out of the mount, `unlink`/`mkdir`/`rmdir`/`rename` and their errors, three open files on two host handles (eviction, reopen, seek), `EMFILE`, `umount` (busy, the page given back, remount), running a program from `/u` (absolute and relative, `ENOEXEC`, `ENOENT`), c64fs unchanged while `/u` is mounted. Every test also checks that the kernel never opened a file on a DOS target that still had one open, and never wrote command bytes while the interface was busy.
+Covered: Classic untouched (no access to `$DF1B-$DF1F` at boot or in file operations; `mount uci` with no interface reads `$DF1D` once and says "no such device"; open bus showing `$C9` fails the IDENTIFY), mount and `mount` listing, `ls` (including names over 14 characters), `cat`, `stat`, write and read back, `O_TRUNC`, `O_APPEND`, a 100 KB write, relative paths and the working directory, `..` out of the mount, `unlink`/`mkdir`/`rmdir`/`rename` and their errors, three open files on two host handles (eviction, reopen, seek), `EMFILE`, `umount` (busy, the page given back, remount), running a program from `/u` (absolute and relative, `ENOEXEC`, `ENOENT`), c64fs unchanged while `/u` is mounted, and `uci.km` itself: `mount uci` loads `/lib/km/uci` from the disk image through the kernel's own `mod_load` (nothing is faked for it), umount and a failed mount unload it, the pages come back, a Classic run never loads it, a hash mismatch is `ENOEXEC`, `mod load`/`mod unload` by hand are refused. Every test also checks that the kernel never opened a file on a DOS target that still had one open, and never wrote command bytes while the interface was busy.
 
 ## With other ROMs (JiffyDOS)
 
@@ -89,7 +89,7 @@ By test name; refine this as we learn what actually catches what.
 | Loader, `as`, `basic` (`exec.s`, `as.s`, `basic.s`) | `test_17`, `test_18`, `test_19` |
 | A single command in `src/bin/` | the test that uses it (`grep -n <name> tests/test_system.py`) |
 | Image tools, key tables (`tools/`) | `make test-host` |
-| UCI v1 (`uci.s`, the `bmi` sites in `file.s`, `fs.s`, `exec.s`, `cbm.s`) | `make test-host` with py65 (`tools/test_uci_sim.py`), plus `Drives`, `REU`, `Pool` and a smoke run in VICE |
+| UCI v1 (`src/mod/uci.s` = `/lib/km/uci`, the stubs in `src/kernel/uci.s`, the `bmi` sites in `file.s`, `fs.s`, `exec.s`, `cbm.s`) | `make test-host` with py65 (`tools/test_uci_sim.py`), plus `Drives`, `REU`, `Pool`, `Modules` and a smoke run in VICE |
 | Anything that adds or removes kernel code | `make size`, and quote the numbers in the commit message |
 
 Examples:
