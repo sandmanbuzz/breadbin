@@ -320,3 +320,14 @@ So the interface keeps up with the CPU and the figure to design with is about **
 - **Paths:** `CHANGE DIR /Temp` works (7.8 ms); `GET PATH` returns `/Temp/`; `OPEN` accepts an absolute path. **`FILE STAT` (`$08`) answered `82,FILE NOT FOUND` for every name I gave it, absolute or relative, while `OPEN` and `FILE INFO` of the same file work**; use `OPEN` + `FILE INFO` (4.9 ms, 22 bytes: size, date, time, extension, attributes, name) to get a size.
 - Not tried: the DMA bit (`$DF1C` bit 7), SAVE REU, writes at higher rates.
 
+### 2026-11-01, ATN frees a stalled drive (hardware session)
+
+`experiments/iec-stall/atnprobe.py`: boot the original stage-2 kernel by DMA on the physical 1541 (clean bus) until it stalls, then point the IRQ vector at a probe in free RAM (the hung kernel keeps taking timer interrupts), which calls the driver's own routines: `UNTALK` under ATN, then `TALK` device 8 secondary 2, then reads the drive's buffer byte by byte. Three stalls, three identical outcomes:
+
+- **Before:** CLK held low by the drive, DATA released (`$DD00 = $87`), `ST = $02`.
+- **After `UNTALK` under ATN:** CLK released (DATA reads low, the ATN acknowledge while the bus is in attention).
+- **A fresh `TALK` is answered** (`ST = 0`), and the drive sends the **rest of its buffer ending with a proper EOI and no timeout**: 61, 192 and 146 bytes. If it continued from its pointer, as it appears to, it had already sent 195, 64 and 110 bytes of that 256-byte block before the stall: the stall point is spread over the block, not fixed.
+- (Display bug in that run, fixed in the tool: the second stall was printed as "256, no EOI" because the probe's flag shared a byte with the first-bytes copy; the counts above are right.)
+
+**So the drive is healthy and recoverable: ATN is all it needs.** A recovery in the driver is: on any receive timeout, send `UNTALK` (ATN), then re-issue the whole `U1` (a fresh block, not the remainder), `TALK`, and read again; the unbounded wait in `bus_acptr`'s `@rdy` becomes a bounded one so a hang can no longer occur. Not yet tried in the driver: how often the retry itself stalls (about 1 in 40 block reads by the earlier rate), and whether a stalled receive can ever complete *silently* with wrong bytes; every recorded stall ended in a timeout.
+
