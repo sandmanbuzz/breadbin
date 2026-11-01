@@ -345,10 +345,24 @@ bus_acptr:
         pha
         ; the talker is ready when it lets go of CLK; a busy drive can take as
         ; long as it likes, so wait with interrupts enabled
+        ; (bounded, about 2 s: a drive that stalls mid-byte holds CLK low until
+        ; ATN, and no wait here may be forever)
         cli
+        lda #3
+        sta io_n
+        ldy #0
+        ldx #0
 @rdy:   bit PORT
-        bvc @rdy            ; CLK still low: the talker is not ready
+        bvs @go             ; CLK released: the talker is ready
+        dex
+        bne @rdy
+        dey
+        bne @rdy
+        dec io_n
+        bne @rdy
         sei
+        jmp @tmo
+@go:    sei
         lda io_out
         and #<~A_DAT        ; ready for data
         jsr io_set

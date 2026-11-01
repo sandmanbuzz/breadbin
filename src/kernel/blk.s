@@ -43,6 +43,7 @@ cur_drv: .res 1          ; drive number the IEC routines below talk to
 dev_drive: .res NDEV    ; drive number of each device (0 = the boot drive)
 cmdbuf:  .res 40
 cmdlen:  .res 1
+rd_try:  .res 1
 reu_tmp: .res 1
 
 .export bwrite, buf_idx_ptr
@@ -433,7 +434,22 @@ cmd_status:
 @bad:   sec
         rts
 
+; iec_read: read the block in cmdbuf's t/s into (bp). A talker that stalls
+; mid-byte (seen on the physical 1541) makes bus_acptr time out; UNTALK under
+; ATN frees the drive, so ask again, up to three times.
 iec_read:
+        lda #3
+        sta rd_try
+@try:   jsr iec_read1
+        bcc @ok
+        dec rd_try
+        bne @redo
+        sec
+@ok:    rts
+@redo:  jsr iec_in_end
+        jmp @try
+
+iec_read1:
         jsr blk_to_ts
         lda #'1'
         jsr cmd_us
@@ -448,11 +464,15 @@ iec_read:
         ldy #0
 @l:     jsr iec_in_byte
         sta (bp),y
+        lda ST
+        and #$02
+        bne @t              ; timed out: stop waiting byte by byte
         iny
         bne @l
         jsr iec_in_end
         clc
         rts
+@t:     jsr iec_in_end
 @e:     sec
         rts
 
