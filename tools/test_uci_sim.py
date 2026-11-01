@@ -105,6 +105,15 @@ class Mounted(unittest.TestCase):
         self.assertTrue(os.path.exists(self.h("v", "Temp", "f")))
         self.assertIsNone(s.errno(s.mount_uci(p[:31])))     # 31 characters still fit
 
+    def test_path_over_256_bytes(self):
+        """The parent-mode walk must not wrap Y and spin (review 2)."""
+        s = self.s
+        self.assertEqual(s.errno(s.sys("MKDIR", r0=s.cstr("/u/Temp/" + "A" * 300), limit=500_000)), "ENAMETOOLONG")
+        self.assertEqual(s.errno(s.sys("MKDIR", r0=s.cstr("/u/Temp/" + "./" * 150 + "x"), limit=500_000)),
+                         "ENAMETOOLONG")
+        self.assertEqual(s.errno(s.sys("OPEN", r0=s.cstr("/u/Temp/" + "./" * 150 + "hello.txt"), limit=500_000)),
+                         "ENAMETOOLONG")
+
     def test_no_delete_or_rename_under_an_open_file(self):
         s = self.s
         fd = s.check(s.open("/u/Temp/pattern.bin"), "open")
