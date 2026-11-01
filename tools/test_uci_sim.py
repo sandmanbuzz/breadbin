@@ -161,7 +161,7 @@ class Mounted(unittest.TestCase):
             f.truncate(0xFFFFF6)
         fd = s.check(s.open("/u/Temp/huge", O_WRONLY | O_APPEND), "open")
         self.assertEqual(s.write(fd, b"x" * 9), 9)                  # up to $FFFFFF: fine
-        self.assertEqual(s.errno(s.sys("WRITE", a=fd, r0=0x9100, r1=2)), "EFBIG")
+        self.assertEqual(s.errno(s.sys("WRITE", a=fd, r0=0x8100, r1=2)), "EFBIG")
         s.close(fd)
         with open(self.h("Temp", "huge"), "rb") as f:
             self.assertEqual(f.read(4), bytes(4))
@@ -211,7 +211,7 @@ class Mounted(unittest.TestCase):
         self.assertEqual(s.errno(s.stat("/u/Temp/missing")), "ENOENT")
         self.assertEqual(s.errno(s.open("/u/Temp/missing", O_WRONLY)), "ENOENT")
         fd = s.check(s.open("/u/Temp/hello.txt"), "open")
-        self.assertEqual(s.errno(s.sys("WRITE", a=fd, r0=0x9100, r1=1)), "EBADF")
+        self.assertEqual(s.errno(s.sys("WRITE", a=fd, r0=0x8100, r1=1)), "EBADF")
         s.close(fd)
 
     def test_write_and_read_back(self):
