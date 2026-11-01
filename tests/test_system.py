@@ -291,6 +291,9 @@ class REU(unittest.TestCase):
             self.assertEqual(v.run("pwd"), "/")
             self.assertIn("home", v.run("ls /tmp/..").split())
             self.assertIn("exists", v.run("mkdir /tmp/d"))
+            # an REU is not a Command Interface: $DF1D reads an unused register
+            self.assertIn("no such device", v.run("mount uci /mnt"))
+            self.assertNotIn("uci", v.run("mount"))
 
 
 def c1541_dir(img):
@@ -412,8 +415,14 @@ class Cache(unittest.TestCase):
             self.assertEqual(self.stat(v.run("cache"))[0], "none")
 
 
+def pool_end():
+    """First page the kernel owns (KSTART in src/kernel/k.inc): the user pool is $0800 up to it."""
+    with open(os.path.join(ROOT, "src", "kernel", "k.inc")) as f:
+        return int(re.search(r"^KSTART\s*=\s*\$([0-9A-Fa-f]+)", f.read(), re.M).group(1), 16) >> 8
+
+
 class Pool(unittest.TestCase):
-    """The user pool is $0800-$A0FF: pages above the old $8000 edge are usable."""
+    """The user pool is $0800 to KSTART-1: pages above the old $8000 edge are usable."""
 
     @staticmethod
     def label(name):
@@ -428,13 +437,14 @@ class Pool(unittest.TestCase):
         pg_used = self.label("pg_used")        # index = page - 8
         with Vice(IMAGE) as v:
             v.wait_shell()
-            self.assertIn("38", v.run("free"))                 # 153 pages = 38 K
+            npool = pool_end() - 8
+            self.assertIn(str(npool // 4), v.run("free"))      # e.g. 144 pages = 36 K
             # pretend pages $08-$7F are taken: the next process must live at $80 or above
             v._cmd("fill %04x %04x 01" % (pg_used, pg_used + 0x77))
             v._cmd("x")
             self.assertEqual(v.run("echo above the old edge"), "above the old edge")
             v.run("sleep 300 &")
-            top = v.mem(pg_used + 0x78, pg_used + 0x98)        # pages $80-$A0
+            top = v.mem(pg_used + 0x78, pg_used + npool - 1)   # pages $80 to the top
             self.assertTrue(any(top), "no page at or above $80 was allocated")
             self.assertIn("sleep", v.run("ps"))
             self.assertEqual(v.run("echo still fine | cat"), "still fine")
@@ -490,6 +500,12 @@ class Drives(unittest.TestCase):
             self.assertEqual(v.run("pwd"), "/")
             self.assertEqual(v.run("umount /mnt"), "")
             self.assertIn("no such device", v.run("mount 10 /mnt"))
+            # UCI v1: VICE has no Command Interface; the probe says so and changes nothing
+            self.assertIn("no such device", v.run("mount uci /mnt"))
+            self.assertIn("no such device", v.run("mount uci /nowhere"))
+            self.assertIn("invalid argument", v.run("mount ufoo /mnt"))       # exactly "uci"
+            self.assertNotIn("uci", v.run("mount"))
+            self.assertEqual(v.run("ls /mnt"), "")
         out = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "mkimage.py"),
                               "cat", img9, "/x/f"], capture_output=True, text=True)
         self.assertEqual(out.stdout, "hi\n")
