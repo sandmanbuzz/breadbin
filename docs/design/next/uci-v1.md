@@ -271,4 +271,20 @@ What the code does where it differs from sections 2-7, and why. Tested against t
 
 **Known gaps:** a process killed by a signal while in user mode closes its UCI handles from the IRQ handler (proc.s `@die` -> `proc_exit`), with interrupts off: about 1 ms per handle normally, up to ~10 s if the Ultimate stops answering (fix belongs in proc.s, another lane). Two write opens of one host file get two FatFs handles (last close wins). nothing run on hardware; timing, case-insensitivity and the UNVERIFIED items above are as documented, not measured. 24-bit positions (16 MB clamp). Directory listing is quadratic (every `read()` lists again and skips; `ls` reads 16 bytes at a time). A sixth UCI open file is `EMFILE`. `mount uci` maps host `/` only (Q8). No test drives the shell in the simulator.
 
+**Second review (fixed, one commit each, with a sim regression test):** mount points longer than `mt_path`'s 31 characters are refused (`ENAMETOOLONG`, every mount; a cut prefix sent files to the wrong host path); the parent-mode name walk stops at 256 bytes; `\` is refused in UCI paths (`EINVAL`: the firmware's `Path::cd` splits on it, so `x\..` bypassed the mount checks); FILE IS IN USE / DIRECTORY NOT EMPTY / DISK IS FULL map to `EBUSY` / `ENOTEMPTY` / `ENOSPC`; writes that would pass 16 MB are `EFBIG`; the receive, status and readdir drain loops are bounded (a stuck `$DF1C` bit gives EIO, `ENODEV` at mount); `mount` takes exactly `uci`; rename onto `new/.` is `EINVAL`. Cost of these: about 140 bytes; 54 left below `$CF00` (KSTART still `$9800`).
+
+**Known gaps: announce these wherever UCI v1 is mentioned**
+- *Errors that look like success.* The firmware's WRITE DATA ignores the transferred count, so a full disk can report success. A READ DATA read error arrives as an empty status, which looks like end of file, so `cp` from a failing card makes a truncated copy and exits 0. Bench check: fill `/Temp` with `cp` until it is full, and compare sizes.
+- *Close from the interrupt handler.* A process killed by a signal in user mode closes its handles from the IRQ handler (proc.s `@die` -> `proc_exit` -> `oft_unref`) with interrupts off. That is about 1 ms per handle; if the Ultimate stops answering, ~5 s per wait, ~20 s worst case. `hs_close` marks the slot free before CLOSE succeeds, so a CLOSE that times out can lose the tail of a written file. proc.s is another lane: cut-list item.
+- *Two write opens of one host file* get two FatFs handles; the last close wins. `O_APPEND` positions once at `open()`; an appended file of 16 MB or more wraps (24-bit `f_pos`).
+- *What the fake assumes (unverified), with the cheapest bench check for each:*
+  - (a) DATA_ACC changes the state at once; otherwise `ut_pkt` acks twice and skips a 512-byte packet. Check: `cat` a 2 KB pattern file and compare it.
+  - (b) The DIR attribute is at offset 11 of FILE INFO; otherwise a probe can take a file for a directory, and rmdir on a file DELETEs it. Check: dump FILE INFO of a known file with `uci.py`.
+  - (c) DELETE, RENAME and CREATE DIR take absolute names after a CHANGE DIR elsewhere. Check: CD `/Temp/sub`, then DELETE `/Temp/x`.
+  - (d) OPEN `$02` does not truncate. Check: `echo X > f` on a 1 KB file opened `O_WRONLY` without `O_TRUNC`, then the size.
+  - (e) A WRITE DATA of 4 + 512 bytes fits the command buffer (measured with `uci.s` op 7: yes, but not with the kernel's loop).
+  - (f) `\..` is resolved by the host (from the source; now refused anyway).
+  - READ DATA with length 0 answers an empty last packet.
+  - The fake runs on the host's file system: case-sensitive or not depending on the machine (macOS: not), while FAT is case-insensitive. `cp A a` truncating its source is not tested.
+
 **Next footprint pass, in order** (also in the header of `uci.s`): move all of `uci.s` into a loadable module (v2, section 6); until then: the IDENTIFY check (keep the `$C9` test), the readdir `~` mark, `O_APPEND`, the rmdir mapping, the probe-handle adoption, the text error map (-> EIO).
