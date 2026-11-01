@@ -1,0 +1,15 @@
+# Breadbin CI image: cc65 + VICE (x64sc) + xvfb + xdotool + python3, arm64 Debian.
+# No ROMs are baked in; tools/ci/run.sh mounts them at /roms and entrypoint.sh
+# copies them into VICE's data directory at container start.
+#   podman build -t breadbin-ci -f tools/ci/Containerfile tools/ci
+FROM mirror.gcr.io/library/debian:trixie-slim
+# VICE lives in "contrib" on Debian.
+RUN sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        cc65 vice xvfb xauth xdotool python3 make util-linux ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+COPY entrypoint.sh /usr/local/bin/breadbin-ci-entrypoint
+RUN chmod +x /usr/local/bin/breadbin-ci-entrypoint
+WORKDIR /work
+ENTRYPOINT ["/usr/local/bin/breadbin-ci-entrypoint"]
