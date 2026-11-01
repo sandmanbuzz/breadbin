@@ -82,3 +82,13 @@ Where the cloud session stands, so a fresh context can resume:
 **Next (planned, not started):** the M0-7 footprint pass: baseline `make size`, then `fs`, `cbm`, `blk` and the 1.2 KB of library per program; drive-module modularisation is the open design question (user in favour, tradeoffs first); illegal opcodes only where the byte count justifies them. Early next sprint: containerised VICE and Xvfb (`docs/roadmap.md`, "Keep the lights on").
 
 **Known gaps:** the cache covers the boot drive only; two disks of the same build written by other machines can still look alike (the label and the per-boot id make that unlikely, not impossible); the first write of a boot costs one extra superblock write.
+
+## Footprint pass state (2026-10-31, second co-agent; branch `footprint`, on top of `reu-cache`)
+
+**Done and pushed (tip 05eb474):** TPA 120 -> 153 pages ($0800-$A0FF, 38 KB; was 30 KB). Where it came from: the `INIT` segment (1,140 bytes of boot-only code, released to the pool), `cbm.s` running above the BSS (`CODEHI`, 1,902 bytes), the whole syscall entry in the $CF00 page (`jsr enter` plus 3-byte address records, constant cost, ABI addresses unchanged), a split `lib.s` (programs total 73.7 -> 54.7 KB; `clear` 1,229 -> 192 bytes), plus `cld` on syscall entry. An adversarial review found no live bug; its gaps (cbm.s code never run, no process above $8000, a CODEHI copy that could wrap, a `mem_init` loop that only worked below 128 pages) are fixed and have tests (`Pool`; `Drives` run).
+
+**Evidence:** `make test-host` 48; VICE (stock ROMs, `-console`): Pool, Drives, Persistence, Boot, Cache, REU and `test_console`, 48 pass. **Not run:** JiffyDOS ROMs, hardware, `test_keyboard`.
+
+**Policy:** `KSTART` (`k.inc`) and `KRAM` (`kernel.cfg`) are hand-set; raise `KSTART` whenever a page is freed, keep about a page of headroom (now 236 bytes below $CF00; 183 above BSS+CODEHI, and a link-time assert guards CODEHI). Kernel growth costs TPA page for page.
+
+**Next ideas (not started):** pg_used as an owner/class tag (breadbin-next's proposal), a lean `sys_return`, more INIT-style release of rarely used code, undocumented opcodes where they save bytes (stable set cleared on the Ultimate), driver modularisation (needs the S6 vtable first), a TPA-agnostic kernel (NTH).
