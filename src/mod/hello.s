@@ -1,16 +1,27 @@
-; hello: the smallest kernel module, a proof of the loader (mod_load/mod_unload).
-; Image: offset 0 jmp init, 3 jmp fini, 6 kernel hash, 8 class. Linked against build/kexp.s.
-.import con_puts_ax, KHASH
-.segment "CODE"
+; hello.km: the smallest kernel module. Proves link against the exported kernel API, the
+; relocator, the hash check, top-down loading and unloading (docs/design/next/modules-v1.md).
+.include "../../include/breadbin.inc"
+.include "kexp.inc"
+
+.segment "HEADER"
         jmp init
         jmp fini
-        .word KHASH
-        .byte 1                 ; class 1: test
-init:   lda #<msg
-        ldx #>msg
+        .word KAPI_HASH
+        .byte 0                 ; class 0: generic
+
+.segment "CODE"
+init:   lda #<s_hi
+        ldx #>s_hi
         jsr con_puts_ax
         clc
         rts
-fini:   clc
+
+fini:   lda #<s_bye
+        ldx #>s_bye
+        jsr con_puts_ax
+        clc
         rts
-msg:    .byte "hello from a module", 10, 0
+
+.segment "RODATA"
+s_hi:   .byte "hello from module", 10, 0
+s_bye:  .byte "bye from module", 10, 0
