@@ -1,0 +1,101 @@
+#!/bin/sh
+# Read-only report: is this clone, and the machine around it, in a state where it can be
+# stopped, copied or handed over? Changes nothing.
+#   tools/readiness            exit 0 = READY, 1 = NOT READY (blockers listed)
+# Blockers: tracked changes or a half-done merge/rebase/cherry-pick in any worktree, a
+# detached worktree whose commits sit on no branch, tag or remote branch (lost when the
+# worktree is pruned), a git fsck connectivity error, a held machine lock, a running VICE
+# or container. Info only: untracked files, stashes, ahead-of-origin, ref counts.
+# The RECORD block at the end (tips and a digest of every ref) is what to compare after a
+# copy: the same digest on the other side means the same refs.
+set -u
+bad=0
+blocker() { echo "  BLOCKER: $*"; bad=$((bad + 1)); }
+info() { echo "  info: $*"; }
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "readiness: not in a git clone" >&2; exit 2; }
+common=$(cd "$top" && cd "$(git rev-parse --git-common-dir)" && pwd)
+echo "== worktrees"
+check_wt() {
+    [ -n "$wt" ] || return 0
+    if [ ! -d "$wt" ]; then
+        blocker "worktree $wt: directory missing (git worktree prune would drop it)"
+        return 0
+    fi
+    n=$(git -C "$wt" status --porcelain 2>/dev/null | grep -vc '^??')
+    u=$(git -C "$wt" status --porcelain 2>/dev/null | grep -c '^??')
+    [ "$n" -gt 0 ] && blocker "$wt: $n tracked change(s) not committed"
+    [ "$u" -gt 0 ] && info "$wt: $u untracked file(s)"
+    gd=$(cd "$wt" && cd "$(git rev-parse --git-dir)" && pwd)
+    for s in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply BISECT_LOG index.lock; do
+        [ -e "$gd/$s" ] && blocker "$wt: $s present (an operation was interrupted)"
+    done
+    if [ "$det" = 1 ]; then
+        where=$(git for-each-ref --contains "$head" --count=1 --format='%(refname:short)' refs/heads refs/tags refs/remotes)
+        if [ -z "$where" ]; then
+            blocker "$wt: detached at $(echo "$head" | cut -c1-7), on no branch, tag or remote branch"
+        else
+            info "$wt: detached at $(echo "$head" | cut -c1-7), also on $where"
+        fi
+    fi
+    [ -n "$lockd" ] && info "$wt: locked worktree"
+}
+tmp=$(mktemp)
+git worktree list --porcelain > "$tmp"
+wt=; head=; det=0; lockd=
+while IFS= read -r line; do
+    case "$line" in
+        "worktree "*) check_wt; wt=${line#worktree }; head=; det=0; lockd= ;;
+        "HEAD "*) head=${line#HEAD } ;;
+        detached) det=1 ;;
+        locked*) lockd=1 ;;
+    esac
+done < "$tmp"
+check_wt
+nw=$(grep -c '^worktree ' "$tmp"); rm -f "$tmp"
+info "$nw worktree(s)"
+
+echo "== repository"
+ns=$(git stash list | wc -l | tr -d ' ')
+[ "$ns" -gt 0 ] && info "$ns stash entr$([ "$ns" -eq 1 ] && echo y || echo ies) (they live in .git: a whole-directory copy keeps them)"
+if git rev-parse --verify -q origin/main >/dev/null && git rev-parse --verify -q main >/dev/null; then
+    info "main is $(git rev-list --count origin/main..main) ahead of and $(git rev-list --count main..origin/main) behind origin/main"
+fi
+if ! git fsck --connectivity-only --no-dangling >/dev/null 2>&1; then
+    blocker "git fsck --connectivity-only reports errors"
+fi
+
+echo "== machine"
+dir=${BREADBIN_LOCKDIR:-/tmp/breadbin-locks}
+if [ -d "$dir" ] && command -v flock >/dev/null 2>&1; then
+    for lf in "$dir"/*.lock; do
+        [ -e "$lf" ] || continue
+        if ! flock -n "$lf" true 2>/dev/null; then
+            hf=${lf%.lock}.holder
+            blocker "lock $(basename "$lf") is held: $(cat "$hf" 2>/dev/null || echo unknown)"
+        fi
+    done
+elif [ -d "$dir" ]; then
+    info "flock not found: lock state not checked"
+fi
+if pgrep -f x64sc >/dev/null 2>&1; then
+    blocker "VICE is running ($(pgrep -f x64sc | wc -l | tr -d ' ') process(es))"
+fi
+if command -v podman >/dev/null 2>&1; then
+    c=$(podman ps --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')
+    [ -n "$c" ] && blocker "containers running: $c"
+fi
+
+echo "== RECORD (compare after a copy)"
+sum() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
+echo "  main    $(git rev-parse --verify -q main || echo none)"
+echo "  HEAD    $(git rev-parse HEAD)"
+echo "  refs    $(git for-each-ref | wc -l | tr -d ' ') ($(git for-each-ref --format='%(refname) %(objectname)' | sum | cut -c1-16) digest)"
+echo "  common  $(basename "$common") ($(git count-objects -v | awk '/^count|^in-pack/{s+=$2} END{print s}') objects)"
+
+if [ "$bad" -eq 0 ]; then
+    echo "READY"
+    exit 0
+fi
+echo "NOT READY: $bad blocker(s)"
+exit 1

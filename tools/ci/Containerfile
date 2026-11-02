@@ -2,12 +2,19 @@
 # No ROMs are baked in; tools/ci/run.sh mounts them at /roms and entrypoint.sh
 # copies them into VICE's data directory at container start.
 #   podman build -t breadbin-ci -f tools/ci/Containerfile tools/ci
+# The packages that decide what gets built and how it is run (the assembler and linker, the
+# emulator, key injection, the interpreter, make) are pinned: a rebuild that cannot find a
+# version fails loudly instead of drifting. The base image tag floats inside trixie-slim;
+# pin it by digest (podman manifest inspect) when a build must be reproducible to the byte.
+# A toolchain change is a deliberate edit here, checked with `make size` and the d64 hash
+# against the previous image (docs/runner-move.md).
 FROM mirror.gcr.io/library/debian:trixie-slim
 # VICE lives in "contrib" on Debian.
 RUN sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources \
  && apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        cc65 vice xvfb xauth xdotool python3 make util-linux ca-certificates \
+        cc65=2.19-2 vice=3.9+dfsg-1 xdotool=1:3.20160805.1-5.1 python3=3.13.5-1 make=4.4.1-2 \
+        xvfb xauth util-linux ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 COPY entrypoint.sh /usr/local/bin/breadbin-ci-entrypoint
 RUN chmod +x /usr/local/bin/breadbin-ci-entrypoint
