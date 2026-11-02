@@ -10,7 +10,7 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 | Targeted | `make test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `xvfb-run -a make test-console` | about 3 minutes: screen RAM, colour RAM and VIC registers read back |
 | Keyboard | `xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard` | about 1.5 minutes: real keystrokes through VICE's keyboard matrix |
-| Full | `make test` | about 50 minutes for 63 VICE tests (2,921 s on 3ff5715) |
+| Full | `make test` | about 42 minutes for 55 VICE tests (2,511 s on 4778b1a, the recorded run in `docs/wip.md`; the 63-test, 2,921 s figure on 3ff5715 is unverified: no record of that run) |
 
 The keyboard tests inject real X key events with `xdotool` (`apt install xdotool xvfb`). The other system tests type into VICE's key buffer with `keybuf`, which bypasses the matrix scan, so they cannot catch a bug in it. The system tests drive VICE (`x64sc`) through its monitor, so they need the C64 ROMs (`tools/setup-vice-roms.sh`) and, on a machine without a display, a virtual one: `xvfb-run -a make test-smoke`.
 
