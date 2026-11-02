@@ -130,6 +130,9 @@ copy:   lda #(s_u1a - strs) ; read the sector from the source
         inc idx
         bne @rd
         jsr CLRCHN
+.ifdef SRCONLY              ; timing variant (-D SRCONLY): only read the source
+        jmp @ok
+.endif
         lda #(s_bp - strs)  ; buffer pointer to 0 on the target
         ldx #14
         jsr sendstr
@@ -151,6 +154,9 @@ copy:   lda #(s_u1a - strs) ; read the sector from the source
         beq :+
         jmp @err
 :
+.ifdef NOVERIFY             ; timing variant (-D NOVERIFY): no read-back
+        jmp @ok
+.endif
         lda #(s_u1b - strs) ; read it back
         ldx #14
         jsr sendcmd
