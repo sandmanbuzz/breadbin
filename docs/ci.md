@@ -12,7 +12,7 @@ tools/ci/run.sh test-only T="tests.test_system.Boot.test_02_echo"
 
 `run.sh` builds the `breadbin-ci` image on first use (Debian trixie, cc65, VICE 3.9 `x64sc`, xvfb, xdotool, python3, make; arm64 native). The repo is mounted read-only and copied into the container, so every run has its own `build/` and its own VICE (monitor port included); concurrent runs do not collide. The exit code is make's. Results of a run are not kept (`BREADBIN_CI_*` below).
 
-ROMs are never baked into the image. They live in a host directory (`BREADBIN_CI_ROMS`, default `~/.cache/breadbin-ci/roms`), mounted read-only and copied into VICE's data directory at container start. If the directory has no C64 KERNAL, `run.sh` fills it with `tools/setup-vice-roms.sh` (needs network once). JiffyDOS ROMs: mount them yourself and pass `BREADBIN_VICE_ARGS` (not wired through `run.sh` yet).
+ROMs are never baked into the image. They live in a host directory (`BREADBIN_CI_ROMS`, default `~/.cache/breadbin-ci/roms`), mounted read-only and copied into VICE's data directory at container start. If the directory has no C64 KERNAL, `run.sh` fills it with `tools/setup-vice-roms.sh` (needs network once). JiffyDOS ROMs: `BREADBIN_CI_JIFFY=<dir>` (holding `JiffyDOS-C64.bin` and `JiffyDOS_1541-II.bin`) mounts them read-only and passes them to VICE as the KERNAL and the 1541 ROMs; `BREADBIN_VICE_ARGS` is passed through. Wired but not yet run against the real ROMs (`docs/runner-move.md`, step 0).
 
 Env: `BREADBIN_CI_IMAGE`, `BREADBIN_CI_ROMS`, `BREADBIN_CI_MEM` (container memory limit), `BREADBIN_BROKER` (passed in, `127.0.0.1` rewritten to `host.containers.internal`). Rebuild the image after editing the Containerfile or entrypoint: `podman build -t breadbin-ci -f tools/ci/Containerfile tools/ci`.
 
