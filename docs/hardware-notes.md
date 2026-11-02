@@ -456,8 +456,10 @@ Ran `tests.test_system.Exec`, `Modules` and `Persistence` against the Ultimate (
 
 ### 2026-11-02, tip `cac322d` under VICE 3.10 (bundled app, windowless `-console`, stock ROMs): Exec, Modules, Persistence (Agent A)
 
-`tests.test_system.Exec`, `Modules` and `Persistence` (the classes that the Ultimate run could not take): **7 of 7 OK, 342 s**, in a scratch HOME with the bundle's `share/vice` (recipe in `docs/testing.md`, "Windowless VICE on macOS"), under `tools/with-lock` (the `vice` lock was held by another session for a while first). The output has Python `ResourceWarning`s from tempfile cleanup in the harness, not from the system under test. Not run: `Drives`, `Cache`, `REU`, `Pool`, the JiffyDOS-ROM set, `test_keyboard`.
+`tests.test_system.Exec`, `Modules` and `Persistence` (the classes that the Ultimate run could not take): **7 of 7 OK, 342 s**\* , in a scratch HOME with the bundle's `share/vice` (recipe in `docs/testing.md`, "Windowless VICE on macOS"), under `tools/with-lock` (the `vice` lock was held by another session for a while first). The output has Python `ResourceWarning`s from tempfile cleanup in the harness, not from the system under test. Not run: `Drives`, `Cache`, `REU`, `Pool`, the JiffyDOS-ROM set, `test_keyboard`.
 
 ### 2026-11-02, tip `cac322d` under VICE 3.10, stock ROMs: Cache, REU, Pool (Agent A)
 
-`tests.test_system.Cache`, `REU` and `Pool` (VICE-only classes, as the Exec/Modules/Persistence entry above): **11 of 11 OK, 735 s**, windowless `-console`, scratch HOME, `tools/with-lock` (queued behind the gate-2 `vice` lock, then run). Not run: `Drives`, the JiffyDOS-ROM set, `test_keyboard`, the full suite.
+`tests.test_system.Cache`, `REU` and `Pool` (VICE-only classes, as the Exec/Modules/Persistence entry above): **11 of 11 OK, 735 s**\* , windowless `-console`, scratch HOME, `tools/with-lock` (queued behind the gate-2 `vice` lock, then run). Not run: `Drives`, the JiffyDOS-ROM set, `test_keyboard`, the full suite.
+
+\* Unexclusive: host VICE under a plain `vice` slot, with other VICE runs possible during it. The wall-clock figure is a run duration, not a measured benchmark; the load underneath was described as light but not measured, so the error bar is unknown. Pass/fail results are not affected by the choice of run.
