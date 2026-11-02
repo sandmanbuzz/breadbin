@@ -3,7 +3,7 @@
 # each other's timing-sensitive runs (VICE, the Ultimate and the drives).
 #   tools/with-lock [-r ultimate|vice] [-x] [-t SECONDS] -- command args...
 # Locks live in $BREADBIN_LOCKDIR (default /tmp/breadbin-locks). Resources:
-#   vice      a pool of $BREADBIN_VICE_SLOTS slots (default 4): a plain run takes any one
+#   vice      a pool of $BREADBIN_VICE_SLOTS slots (default 3): a plain run takes any one
 #             slot, so up to that many VICE runs go at once; -x takes every slot, for runs
 #             whose wall-clock data matters (nothing else VICE runs meanwhile).
 #   ultimate  one holder at a time (the hardware session); -x is implied.
@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
 done
 [ $# -gt 0 ] || { echo "usage: with-lock [-r vice|ultimate] [-x] [-t secs] -- cmd..." >&2; exit 2; }
 n=1
-[ "$res" = vice ] && n=${BREADBIN_VICE_SLOTS:-4}
+[ "$res" = vice ] && n=${BREADBIN_VICE_SLOTS:-3}
 case $n in ''|*[!0-9]*|0) echo "with-lock: bad BREADBIN_VICE_SLOTS '$n'" >&2; exit 2 ;; esac
 [ "$n" -eq 1 ] && excl=1
 want=s; [ $excl = 1 ] && want=x
