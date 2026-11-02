@@ -443,3 +443,9 @@ Ultimate firmware 1.1.0; physical 1541 powered on by hand (device 8), its disk t
 - **Not run:** the hardware test list beyond the Boot and Console runs (below), the physical smoke test of the coalesced branches beyond this login, and any boot series.
 
 Same session, under VICE-free hardware runs with drive A on bus 8 (physical off), restored to 9 after each: `Boot` 4 tests (`test_02_echo`, `test_07_directories`, `test_10_mv_cp`, `test_13_ctrl_c_blocked_reader`) **all OK, 160.7 s**; `Console` 6 tests **all OK, 137.5 s**. Tip built in a detached worktree from `main`.
+
+### 2026-11-02, tip `cac322d` on the physical 1541: five-boot series (hardware owner, Agent A)
+
+Same configuration as the single boot above (stock KERNAL, Software IEC off, root on device 8, `plainboot.py build/breadbin.prg`, `physseries.sh` scratch script), one configuration setup for all five: **5 of 5 reached login, 22 s each**. The 22 s is the common time in the notes (no visible retry wait); the one-boot 32 s run above was the first boot after the write. Config restored afterwards (JiffyDOS KERNAL, Software IEC on, drive A bus 9 confirmed).
+
+Not run: the boot-time comparison against the pre-fork tree on the same drive, the coalesced-branch smoke beyond login (the `Exec`, `Modules`, `Drives` and `Persistence` classes on the Ultimate), and a sector compare of the disk.
