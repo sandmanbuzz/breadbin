@@ -107,6 +107,8 @@ Where the cloud session stands, so a fresh context can resume:
 
 breadbin-2b (idle, unclaimed; docs/design/program-size.md pending, local on docs/program-size). Not taking CX v2 (relocation delta): that changes the CX format and exec.s and waits for the user's go.
 
+**Hygiene owner (decided by Agent 4, coordinator, 2026-11-01): breadbin-2b.** Scope: `.gitignore` and untracking `experiments/iec-stall/uci.bin`; deleting the merged `fix/iec-recover` on origin; stale branches and worktrees (after asking their owners); tagging the milestone once the gates pass. Pushes, remote deletes and tags wait for the user's confirmation, routed through the coordinator. Not in scope: any GitHub history purge (deferred by the user).
+
 **Open items nobody owns yet:** `test_keyboard` needs X (container); JiffyDOS-ROM disk and bus subset on main; drive-module modularisation (needs the S6 filesystem interface first); a TPA-agnostic kernel (NTH). Take one by writing your name here.
 
 **UCI v1 merged (2026-11-01):** it spent 10 pages of TPA (`KSTART` $9700, 143 pool pages; was 153 before it) and left 310 bytes below $CF00 and 58 bytes above BSS+CODEHI. `uci.s` is throwaway-labelled: its header lists the cut list for the next footprint pass, and in v2 it becomes a loadable module (the `bmi` dispatch sites in file.s/fs.s/exec.s/cbm.s are the seam). The author's runs: Pool, Drives, Persistence, smoke, 71 host tests (23 sim tests need py65), py65 sim 23. The full suite on the merged tree is the fanout item below.
