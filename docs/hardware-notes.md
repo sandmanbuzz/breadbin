@@ -414,3 +414,46 @@ Which resets take a software-renumbered 1541 back to device 8, measured with the
 ### 2026-11-02, our own c64fs image through the nibbler, onto the usual disk (hardware session)
 
 `nibcopy.py` now takes a local image (it uploads it). Main at `71ac25f` (build of that tree, 174,848 bytes) onto the user's usual disk with the nibbler, hands-free: the physical drive back at 8 afterwards, `LOAD"$",8` lists `"breadbin" prg 59` with "0 blocks free" (the image has no CBM BAM, so DOS counts nothing free), and **3 of 3 boots of Breadbin from that disk reached login (32, 22, 22 s)**. That settles the c64fs half of the open caveat: the nibbler copies an image that is not a CBM DOS disk correctly enough to boot and run from. Not run: a sector-by-sector compare of the whole disk against the image (the boot reads only what the boot needs; a full compare needs a reader like `mcdup` in reverse).
+
+### 2026-11-02, hardware owner takeover: what had to be found out (Agent A)
+
+Learned by trying on the machine, recorded so the next reader does not repeat it.
+
+- **Drive bus ID is a configuration item, not a drive call.** `GET /v1/configs/drive%20a*/*bus*` returns `Drive A Settings / Drive Bus ID` with `current`, `min` 8, `max` 11, `default` 8 (it read 9 on the takeover). Set it with `PUT /v1/configs/drive%20a*/*bus*?value=N` (the example in the API documentation, `api/api_calls.rst` around line 238, in the 1541u-documentation repository). `tools/ultimate.py` has no method for it yet; use `call("PUT", ...)` with `params={"value": N}`.
+- **The Boot class needs the boot disk on device 8.** `Boot` types `LOAD"*",8,1` at the BASIC prompt, so a kernel loaded from drive A on bus 9 with the physical 1541 off answers `?device not present error`. The fix used for the run: drive A to bus 8 for the duration (the physical drive is off, so there is no collision), restore to 9 afterwards with a `trap` on exit. The notes' "Normal config" (drive A on 9) is right for the `ucirun.sh` path (DMA load mimics ID) and wrong for the `Boot` path.
+- **Test names in the task list were not the real ones.** The short numbers used in the work package are not the unittest names. In `tests/test_system.py` the `Boot` class has `test_02_echo`, `test_07_directories`, `test_10_mv_cp` and `test_13_ctrl_c_blocked_reader`; `test_13_pipe`, `test_07_ctrl_c` and `test_10_shell` do not exist. Run by full name (`tests.test_system.Boot.test_02_echo`).
+- **Shell cwd gotcha.** The tests and `make` need the tree they test. Build and test a commit in its own worktree (`git worktree add --detach <scratch>/tip main`), not in the shared checkout, which another session may switch.
+
+### 2026-11-02, informal timings from the takeover runs (unofficial, from unittest and job logs; not a benchmark)
+
+Wall-clock as reported by `unittest` for the whole run, so setup (boot, mount, login wait) is included. Tip `cac322d` built in a detached worktree; Ultimate on firmware 1.1.0; drive A on bus 8 for the runs, physical 1541 off.
+
+- `Boot`, 4 tests (`test_02_echo`, `test_07_directories`, `test_10_mv_cp`, `test_13_ctrl_c_blocked_reader`): **160.7 s**, all OK. That is about 40 s a test, and `Boot` boots once per class, so this is mostly one boot plus four short shell sessions.
+- `Console`, 6 tests: **137.5 s**, all OK. About 23 s a test.
+- A failed attempt (wrong drive bus, `LOAD"*",8,1` to an absent device): **94.7 s** to a `wait_shell` timeout. A wrong setup costs about a minute and a half before it shows; check the bus first.
+- Earlier, from the notes: physical 1541 boots to login 22 to 52 s (stock KERNAL, 22 s in the normal case, 32 s the first boot after a write); the physical image write (`mcdup`) about 25 to 27 min; the nibbler copy 2 to 3 min.
+
+### 2026-11-02, tip `cac322d` on the physical 1541 (hardware owner, Agent A; first run of the new owner's session)
+
+Ultimate firmware 1.1.0; physical 1541 powered on by hand (device 8), its disk the usual media (the user confirmed it may be overwritten). Scripts were scratch-only (not in the repository): `image_physical.sh` (stock KERNAL, Software IEC off, then `experiments/iec-stall/nibcopy.py`, then `nibsetup.sh down` on exit) and `physboot.sh` (the same configuration, then `plainboot.py build/breadbin.prg`, then restore on exit). Both under `tools/with-lock -r ultimate`.
+
+- **Imaging:** `nibcopy.py build/breadbin.d64` with the nibbler from the Ultimate's scratch: "copy complete" after **50 s**; the physical drive renumbered to 9 in software and back to 8 (its `UI` reset); `LOAD"$",8` lists `"breadbin" prg 59`, `0 blocks free`. Not checked: a sector-by-sector compare of the disk against the image.
+- **Boot from the physical 1541:** `plainboot.py`, stock KERNAL, Software IEC off, root on device 8: **login after 32 s**, one boot. One boot proves little; the series is still to run.
+- **Restore:** drive A bus 9 and JiffyDOS KERNAL confirmed afterwards.
+- **Not run:** the hardware test list beyond the Boot and Console runs (below), the physical smoke test of the coalesced branches beyond this login, and any boot series.
+
+Same session, under VICE-free hardware runs with drive A on bus 8 (physical off), restored to 9 after each: `Boot` 4 tests (`test_02_echo`, `test_07_directories`, `test_10_mv_cp`, `test_13_ctrl_c_blocked_reader`) **all OK, 160.7 s**; `Console` 6 tests **all OK, 137.5 s**. Tip built in a detached worktree from `main`.
+
+### 2026-11-02, tip `cac322d` on the physical 1541: five-boot series (hardware owner, Agent A)
+
+Same configuration as the single boot above (stock KERNAL, Software IEC off, root on device 8, `plainboot.py build/breadbin.prg`, `physseries.sh` scratch script), one configuration setup for all five: **5 of 5 reached login, 22 s each**. The 22 s is the common time in the notes (no visible retry wait); the one-boot 32 s run above was the first boot after the write. Config restored afterwards (JiffyDOS KERNAL, Software IEC on, drive A bus 9 confirmed).
+
+Not run: the boot-time comparison against the pre-fork tree on the same drive, the coalesced-branch smoke beyond login (the `Exec`, `Modules`, `Drives` and `Persistence` classes on the Ultimate), and a sector compare of the disk.
+
+### 2026-11-02, a wrong-target run (lesson, Agent A)
+
+Ran `tests.test_system.Exec`, `Modules` and `Persistence` against the Ultimate (`BREADBIN_TARGET=ultimate`): **all 7 errored** with `could not connect to VICE monitor`, in about 140 s, and touched nothing on the machine (drive A set to bus 8 and restored to 9 as usual). Those classes build their target with `Vice(IMAGE)`, so they are VICE-only; the Ultimate backend covers the `Boot`, keyboard and console classes that are built with `make_target`. Check a class's target (`grep -n "Vice(\|make_target" tests/test_system.py`) before a hardware run. The same classes are the VICE-side check for the coalesced branches (exec, modules, persistence), still to run under VICE with stock ROMs.
+
+### 2026-11-02, tip `cac322d` under VICE 3.10 (bundled app, windowless `-console`, stock ROMs): Exec, Modules, Persistence (Agent A)
+
+`tests.test_system.Exec`, `Modules` and `Persistence` (the classes that the Ultimate run could not take): **7 of 7 OK, 342 s**, in a scratch HOME with the bundle's `share/vice` (recipe in `docs/testing.md`, "Windowless VICE on macOS"), under `tools/with-lock` (the `vice` lock was held by another session for a while first). The output has Python `ResourceWarning`s from tempfile cleanup in the harness, not from the system under test. Not run: `Drives`, `Cache`, `REU`, `Pool`, the JiffyDOS-ROM set, `test_keyboard`.
