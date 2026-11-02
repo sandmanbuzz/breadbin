@@ -10,7 +10,7 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 | Targeted | `make test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `xvfb-run -a make test-console` | about 3 minutes: screen RAM, colour RAM and VIC registers read back |
 | Keyboard | `xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard` | about 1.5 minutes: real keystrokes through VICE's keyboard matrix |
-| Full | `make test` | about 32 minutes for 31 tests |
+| Full | `make test` | about 50 minutes for 63 VICE tests (2,921 s on 3ff5715) |
 
 The keyboard tests inject real X key events with `xdotool` (`apt install xdotool xvfb`). The other system tests type into VICE's key buffer with `keybuf`, which bypasses the matrix scan, so they cannot catch a bug in it. The system tests drive VICE (`x64sc`) through its monitor, so they need the C64 ROMs (`tools/setup-vice-roms.sh`) and, on a machine without a display, a virtual one: `xvfb-run -a make test-smoke`.
 
@@ -71,7 +71,7 @@ This runs the monitor-driven tests (`Boot`, `test_console`) with no X server. `t
 `tools/ci/run.sh` runs the same tests in a disposable container with its own VICE (3.9), Xvfb and `xdotool`, so the keyboard and console tests run on a Mac and parallel runs do not collide (`docs/ci.md`: the image, the lease broker). It copies the repo at start, so edit freely while it runs.
 
 ```sh
-tools/with-lock -- tools/ci/run.sh test        # whole suite: host tests + every VICE class, ~45 minutes
+tools/with-lock -- tools/ci/run.sh test        # whole suite: host tests + every VICE class, about 50 minutes
 tools/ci/run.sh test-keyboard                  # 7 tests, ~4 minutes
 tools/ci/run.sh test-only T="tests.test_system.Exec tests.test_system.Modules"
 ```

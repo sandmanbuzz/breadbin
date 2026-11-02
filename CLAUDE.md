@@ -12,15 +12,15 @@ xvfb-run -a make test-smoke       # boot, echo, pipe, Ctrl-C: about 2 minutes
 xvfb-run -a make test-only T="tests.test_system.Boot.test_24_editor"
 xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard   # real keystrokes (xdotool)
 xvfb-run -a -s "-screen 0 1280x1024x24" make test-console
-tools/ci/run.sh test            # the whole suite in a container (podman; works on a Mac; ~45 minutes)
+tools/ci/run.sh test            # the whole suite in a container (podman; works on a Mac; about 50 minutes)
 tools/ci/run.sh test-keyboard   # or test-smoke, test-console, test-only T="..."; docs/ci.md
 ```
 
-The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 32 minutes) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive. Wrap VICE and hardware runs in `tools/with-lock` (see `docs/process.md`).
+The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 50 minutes: 2,921 s for 63 VICE tests on 3ff5715) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive. Wrap VICE and hardware runs in `tools/with-lock` (see `docs/process.md`).
 
 ## Test policy
 
-Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 40 minutes under VICE, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
+Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 50 minutes under VICE in a container, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
 
 - **During a story:** `make test-host`, the targeted tests for what you changed (the table in `docs/testing.md`), and `make test-smoke` before committing. No full suite.
 - **At a milestone** (the end of an M group, or any change to the interrupt path, the bus, the memory map or the linker layout): the full suite with stock ROMs, the disk and bus tests again with the JiffyDOS ROMs (`BREADBIN_VICE_ARGS`, see `docs/testing.md`), and a hardware run of the list in `docs/hardware-notes.md`.
@@ -45,7 +45,7 @@ Physical 1541: the root-mount stall that predates all of this is **mitigated, no
 
 ## Hardware and external references
 
-- An Ultimate 64 is being set up. A REST client (`tools/ultimate.py`), a fake server for tests (`tools/fake_ultimate.py`) and a test backend with the same interface as `tools/vicetest.py` (`tools/ultimatetest.py`) exist but have never run on hardware. Run tests on the real machine with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (tests built with `make_target`: the `Boot` class, the keyboard and the console tests). Docs: <https://github.com/GideonZ/1541u-documentation> (`uci/`, `api/api_calls.rst`).
+- The Ultimate 64 runs Breadbin (see `docs/hardware-notes.md`). A REST client (`tools/ultimate.py`), a fake server for tests (`tools/fake_ultimate.py`) and a test backend with the same interface as `tools/vicetest.py` (`tools/ultimatetest.py`) exist; hardware runs go through the `ultimate` lock. Run tests on the real machine with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (tests built with `make_target`: the `Boot` class, the keyboard and the console tests). Docs: <https://github.com/GideonZ/1541u-documentation> (`uci/`, `api/api_calls.rst`).
 - A real 1541 is available for validating the IEC driver. A 1581 is too, but see "non-1541 devices" above.
 - `mist64/fastboot1541` (credit Michael Steil if adapted) is the basis for the fast boot and fast read story M0-8.
 - The hardware is a C64 Ultimate (firmware 1.1.0, 2 MB REU, UCI enabled) with a JiffyDOS KERNAL and JiffyDOS ROMs in every drive on the bus; it has no REST key injection. See `docs/hardware-notes.md` for what has been verified.
