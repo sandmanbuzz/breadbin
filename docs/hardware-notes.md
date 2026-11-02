@@ -414,3 +414,13 @@ Which resets take a software-renumbered 1541 back to device 8, measured with the
 ### 2026-11-02, our own c64fs image through the nibbler, onto the usual disk (hardware session)
 
 `nibcopy.py` now takes a local image (it uploads it). Main at `71ac25f` (build of that tree, 174,848 bytes) onto the user's usual disk with the nibbler, hands-free: the physical drive back at 8 afterwards, `LOAD"$",8` lists `"breadbin" prg 59` with "0 blocks free" (the image has no CBM BAM, so DOS counts nothing free), and **3 of 3 boots of Breadbin from that disk reached login (32, 22, 22 s)**. That settles the c64fs half of the open caveat: the nibbler copies an image that is not a CBM DOS disk correctly enough to boot and run from. Not run: a sector-by-sector compare of the whole disk against the image (the boot reads only what the boot needs; a full compare needs a reader like `mcdup` in reverse).
+
+### 2026-11-02, milestone gates on main 9693358 (emulation only, no hardware)
+
+Gate 1, full suite with stock ROMs: `tools/ci/run.sh test` (container, warp, under `tools/with-lock`). Host tests `make test-host`: 94 run, OK, 35 skipped (py65 not installed). VICE: 63 run, OK, 2917.2 s, `EXIT=0`. Started 09:33:15, ended 10:22:08. The run's 63 tests are as the container reports them; keyboard and console classes were not checked separately.
+
+Gate 2, JiffyDOS subset: `tools/with-lock -- python3 -m unittest tests.test_system.Cache tests.test_system.REU tests.test_system.Boot tests.test_system.Drives tests.test_system.Pool -v` with `BREADBIN_VICE_ARGS` set to the JiffyDOS C64 KERNAL and 1541-II ROM images (macOS VICE 3.10, windowless, warp). 43 run, OK, 2221.2 s, `EXIT=0`. Started 10:54:46, ended 11:37:18.
+
+Not counted: two earlier gate 2 attempts. The first (10:22) errored 17 tests because the results worktree had no `build/` directory (setup, not a kernel result); `make` fixed it. The second (10:24) was killed by a 30-minute background limit at `Drives.test_breadbin_disk` with no verdict; 27 tests passed and none failed before the kill.
+
+Both runs on main tip 9693358. Results only; nothing built or changed in the tree.
