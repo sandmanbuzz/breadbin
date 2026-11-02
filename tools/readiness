@@ -5,7 +5,8 @@
 # Blockers: tracked changes or a half-done merge/rebase/cherry-pick in any worktree, a
 # detached worktree whose commits sit on no branch, tag or remote branch (lost when the
 # worktree is pruned), a git fsck connectivity error, a held machine lock, a running VICE
-# or container. Info only: untracked files, stashes, ahead-of-origin, ref counts.
+# or container. Info only: untracked files, stashes, reflog-only commits, ahead-of-origin,
+# and the out-of-repo places that hold state (memory, transcripts, scratchpads, ROM cache).
 # The RECORD block at the end (tips and a digest of every ref) is what to compare after a
 # copy: the same digest on the other side means the same refs.
 set -u
@@ -64,6 +65,27 @@ fi
 if ! git fsck --connectivity-only --no-dangling >/dev/null 2>&1; then
     blocker "git fsck --connectivity-only reports errors"
 fi
+
+ro=$(git log --reflog --not --branches --tags --remotes --glob=refs/stash --oneline 2>/dev/null)
+if [ -n "$ro" ]; then
+    info "$(echo "$ro" | wc -l | tr -d ' ') commit(s) reachable only from a reflog (first: $(echo "$ro" | head -1 | cut -c1-60)); a whole-directory copy keeps them, a clone does not"
+fi
+
+echo "== out of repo (candidates to pack; sizes in KB)"
+primary=$(dirname "$common")
+key=$(printf %s "$primary" | tr '/.' '--')
+uid=$(id -u)
+empty=0
+for d in "$HOME/.claude/projects/$key" "$HOME/.claude/projects/$key/memory" \
+         /tmp/claude-$uid/$key/*/scratchpad \
+         "${BREADBIN_CI_ROMS:-$HOME/.cache/breadbin-ci/roms}" "${BREADBIN_LOCKDIR:-/tmp/breadbin-locks}"; do
+    [ -d "$d" ] || continue
+    kb=$(du -sk "$d" 2>/dev/null | cut -f1)
+    if [ "${kb:-0}" -eq 0 ]; then empty=$((empty + 1)); else info "$kb KB  $d"; fi
+done
+[ "$empty" -gt 0 ] && info "$empty more place(s) above are empty"
+vl=$(ls "${TMPDIR:-/tmp}"/vice*.log 2>/dev/null | wc -l | tr -d ' ')
+[ "$vl" -gt 0 ] && info "$vl VICE log file(s) in ${TMPDIR:-/tmp} (vicetest keeps them)"
 
 echo "== machine"
 dir=${BREADBIN_LOCKDIR:-/tmp/breadbin-locks}
