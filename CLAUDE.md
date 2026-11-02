@@ -16,7 +16,7 @@ tools/ci/run.sh test            # the whole suite in a container (podman; works 
 tools/ci/run.sh test-keyboard   # or test-smoke, test-console, test-only T="..."; docs/ci.md
 ```
 
-The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 50 minutes: 2,921 s for 63 VICE tests on 3ff5715) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive. Wrap VICE and hardware runs in `tools/with-lock` (see `docs/process.md`).
+The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 42 minutes: 55 ok in 2,511 s on 4778b1a) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive. Wrap VICE and hardware runs in `tools/with-lock` (see `docs/process.md`).
 
 ## Test policy
 
