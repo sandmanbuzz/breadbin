@@ -4,7 +4,7 @@ given bus 8 and the image, the nibbler runs its default copy (8 to 9), and after
 drive, which reads its switches again and is back at 8. Run under tools/with-lock -r ultimate, on the stock KERNAL
 host with Software IEC off (nibcopy.sh does the configuration and restores it).
 
-    BREADBIN_ULTIMATE=host NIBBLER=path/to/keym.d.nibbler.prg python3 nibcopy.py IMAGE_PATH_ON_THE_ULTIMATE
+    BREADBIN_ULTIMATE=host NIBBLER=path/to/keym.d.nibbler.prg python3 nibcopy.py IMAGE (a path on the Ultimate, or a local file that is uploaded)
 
 The physical disk is OVERWRITTEN. Checks the directory of the result with LOAD"$",8 at the end (screen text printed).
 """
@@ -39,7 +39,7 @@ step('load"$",9\n', 8)
 print("physical drive answers as 9:", "device not present" not in screen(), flush=True)
 # 2. the emulated drive A becomes device 8 with the image
 put("/v1/configs/Drive%20A%20Settings/Drive%20Bus%20ID?value=8")
-u.mount("a", image, type="d64", mode="readonly")
+u.mount("a", open(image, "rb").read() if os.path.exists(image) else image, type="d64", mode="readonly", name=os.path.basename(image))
 put("/v1/drives/a:on")
 time.sleep(4)
 step("print chr$(147)\n", 2)
