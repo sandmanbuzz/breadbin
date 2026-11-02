@@ -432,3 +432,14 @@ Wall-clock as reported by `unittest` for the whole run, so setup (boot, mount, l
 - `Console`, 6 tests: **137.5 s**, all OK. About 23 s a test.
 - A failed attempt (wrong drive bus, `LOAD"*",8,1` to an absent device): **94.7 s** to a `wait_shell` timeout. A wrong setup costs about a minute and a half before it shows; check the bus first.
 - Earlier, from the notes: physical 1541 boots to login 22 to 52 s (stock KERNAL, 22 s in the normal case, 32 s the first boot after a write); the physical image write (`mcdup`) about 25 to 27 min; the nibbler copy 2 to 3 min.
+
+### 2026-11-02, tip `cac322d` on the physical 1541 (hardware owner, Agent A; first run of the new owner's session)
+
+Ultimate firmware 1.1.0; physical 1541 powered on by hand (device 8), its disk the usual media (the user confirmed it may be overwritten). Scripts were scratch-only (not in the repository): `image_physical.sh` (stock KERNAL, Software IEC off, then `experiments/iec-stall/nibcopy.py`, then `nibsetup.sh down` on exit) and `physboot.sh` (the same configuration, then `plainboot.py build/breadbin.prg`, then restore on exit). Both under `tools/with-lock -r ultimate`.
+
+- **Imaging:** `nibcopy.py build/breadbin.d64` with the nibbler from the Ultimate's scratch: "copy complete" after **50 s**; the physical drive renumbered to 9 in software and back to 8 (its `UI` reset); `LOAD"$",8` lists `"breadbin" prg 59`, `0 blocks free`. Not checked: a sector-by-sector compare of the disk against the image.
+- **Boot from the physical 1541:** `plainboot.py`, stock KERNAL, Software IEC off, root on device 8: **login after 32 s**, one boot. One boot proves little; the series is still to run.
+- **Restore:** drive A bus 9 and JiffyDOS KERNAL confirmed afterwards.
+- **Not run:** the hardware test list beyond the Boot and Console runs (below), the physical smoke test of the coalesced branches beyond this login, and any boot series.
+
+Same session, under VICE-free hardware runs with drive A on bus 8 (physical off), restored to 9 after each: `Boot` 4 tests (`test_02_echo`, `test_07_directories`, `test_10_mv_cp`, `test_13_ctrl_c_blocked_reader`) **all OK, 160.7 s**; `Console` 6 tests **all OK, 137.5 s**. Tip built in a detached worktree from `main`.
