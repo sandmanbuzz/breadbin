@@ -463,3 +463,5 @@ Ran `tests.test_system.Exec`, `Modules` and `Persistence` against the Ultimate (
 `tests.test_system.Cache`, `REU` and `Pool` (VICE-only classes, as the Exec/Modules/Persistence entry above): **11 of 11 OK, 735 s**\* , windowless `-console`, scratch HOME, `tools/with-lock` (queued behind the gate-2 `vice` lock, then run). Not run: `Drives`, the JiffyDOS-ROM set, `test_keyboard`, the full suite.
 
 \* Unexclusive: host VICE under a plain `vice` slot, with other VICE runs possible during it. The wall-clock figure is a run duration, not a measured benchmark; the load underneath was described as light but not measured, so the error bar is unknown. Pass/fail results are not affected by the choice of run.
+
+Load snapshot for the footnote above (host, 2026-11-02, from `uptime`, one sample, not during the runs): 8 CPUs, load averages 3.08 / 3.52 / 3.32, seven user sessions. So the machine was about 40% busy across everyone, not idle; the VICE runs were not measured against that load. The error bar is that load, unmeasured per run.
