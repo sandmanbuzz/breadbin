@@ -2,7 +2,7 @@
 
 Status: soft prep. No date is set; the user calls the all-stop when the world is quiet. This is the plan for the pack, the copy and the unpack, and the tools that exist for it. Nothing here is verified on the runner yet: every "check" below is a thing to run there, not a thing that has passed.
 
-Decided by the user: the whole operation moves, authoritative clone included; the old clone is retired (copied byte for byte to different disk, never shared inodes, the archive kept); sessions do not carry over (new, empty sessions unpack from the repo and the luggage); containers are the only toolchain; the fleet gets one CCD of the runner. The runner is on the same LAN as the Ultimate, so hardware moves with it. No host names, addresses or user names go in this repo: write `$RUNNER` and `~/`.
+Decided by the user: the whole operation moves, authoritative clone included; the workspace goes as one tarball of everything on disk (cruft and dotfiles included), quiesced to zero and hash-matched on unpack, then the old tree is archived read-only once forgotten items are retrieved (never shared inodes); sessions do not carry over (new, empty sessions unpack from the repo and the luggage); containers are the only toolchain; the fleet gets one CCD of the runner. The runner is on the same LAN as the Ultimate, so hardware moves with it. No host names, addresses or user names go in this repo: write `$RUNNER` and `~/`.
 
 ## Tools (landed ahead of the move)
 
@@ -26,12 +26,35 @@ The user, not the agents, packs what is secret or machine-level: `gh` auth for t
 
 Go/no-go for the all-stop (the "bad point in time" test): `tools/readiness` is READY in the primary clone and every worktree; no full-suite or JiffyDOS gate in flight (about 42 minutes; a half run tells nothing); no hardware write in flight (the 1541 image write is about 25 minutes and holds the `ultimate` lock; stopping it half-way leaves a half-written disk); nobody is mid-merge; the last gate result is recorded in `docs/wip.md`; every lane has said "packed".
 
+## Luggage: the out-of-repo state
+
+The tarball (next section) reaches the clone directory and everything in it: `.git` with its reflogs and stashes, `.claude/worktrees`, `build/`, dotfiles, cruft. It does not reach the places below, so each is named here with an owner, how to pack it and how to check it afterwards. `tools/readiness` lists the ones that exist on this machine, with sizes. Add the places to the tarball as their own top-level folders (`scratch/<session>/`, `claude-project/`, `roms/`, ...). If the user means only the clone directory by "the workspace", each owner copies their items in by hand from this table.
+
+| item | where | owner | pack | check after the unpack |
+|---|---|---|---|---|
+| Scratchpad worktrees | `<tmp>/claude-<uid>/<project-key>/<session>/scratchpad/<name>`, registered in `.git/worktrees` (`git worktree list` shows them; the session id in the path says whose) | the session that made it | commit on a branch first (a detached HEAD gets `wip/<name>`); the directory itself rides in the tarball | each kept worktree repaired with `git worktree repair <new path>`; every commit reachable from a branch |
+| Scratchpad files and logs | the same scratchpads: outputs, maps, timing logs, scripts, a private VICE home; `vice*.log` in the temp dir (vicetest keeps them) | the session | list the ones that answer a question you would otherwise re-ask; delete nothing now, the tarball is the archive | manifest matches |
+| Uncommitted work | dirty worktrees | the session | commit it, red is fine; `tools/readiness` shows no tracked changes before the tarball | none left |
+| Reflog-only commits | `.git` reflogs (the fleet-store reset left `8ecb83e`); `tools/readiness` counts them | the author's session; unowned goes to Facilitator Jr. | they ride in `.git`. Optional, before the RECORD: `git branch rescue/<sha7> <sha>` for any worth keeping. No `git gc`, `prune` or `reflog expire` until the unpack is verified | the reflog-only count that `tools/readiness` prints equals the old one |
+| Stashes | `refs/stash` | the session | commit to a branch, or leave them; they ride in `.git` | `git stash list` count equal |
+| Memory | `~/.claude/projects/<key>/memory/` (`MEMORY.md` and one file per entry); shared by every session of the project | Facilitator Jr. merges; agents put proposed changes in their handoff instead of editing | copy under the new key (the repo path with `/` and `.` turned into `-`; the same path gives the same key) | read every entry against the new house; fix the stale ones (step 0.9) |
+| Transcripts | `~/.claude/projects/<key>/*.jsonl` | each session's own | read-only reference: a compaction summary cites its transcript and a replacement cannot rebuild it | present, opens as text |
+| ROM setup | stock ROMs in `~/.cache/breadbin-ci/roms/{C64,DRIVES}` (refetch with `tools/setup-vice-roms.sh`, which needs the network); the JiffyDOS ROMs (`JiffyDOS-C64.bin`, `JiffyDOS_1541-II.bin`), today in a session scratchpad; any private VICE home and the args recipe | whoever holds them (the session that ran the JiffyDOS gate); else Facilitator Jr. | luggage, as a secret: encrypted in transit, never in the repo. Add a text file with the exact args recipe and the sha256 of every ROM file (the ROM version is part of what a result means) | sha256 equal; a `BREADBIN_CI_JIFFY` run passes (step 0.4) |
+| Hardware config | a saved copy of the Ultimate's configuration made to restore after experiments; the Ultimate's address and how it is reached (private) | the hardware session | luggage, as a secret. Do not all-stop while the Ultimate is in an experimental configuration: restore, read it back, say so in the handoff | restored and read back on the runner |
+| Running things | crons, monitors, background loops, scheduled tasks and triggers bound to a session (a durable one outlives it and fires into nothing) | the session | list each in the handoff (what, schedule, what it should do), then stop it | re-created from the list on the new side; the old ones disabled |
+| Held by the user | `gh` auth for the public identity, the signing key, the global git config, the global `CLAUDE.md`, settings and the permission allowlist, the editor's own state | the user | encrypted luggage; the user decides about the signing key (carry it or mint a new one: a new one changes the public identity) | step 0.1 |
+| Not luggage | the lock directory, the sockets, containers and images (rebuilt from the Containerfile), REU test images, `build/` (in the tarball, but rebuilt) | nobody | nothing | recreated by step 0 |
+
+Items with no owner: every manifest line names an owner. An item nobody claims, or whose session is gone for good (a former session's scratchpad, an unmapped worktree), is not deleted and not guessed at. The full tarball already holds it; the replacement for the facilitator ("Facilitator Jr.") comes up first and owns every unowned item until someone claims it, the user archives it, or the user says delete. Deleting waits for the fleet to be green, a week to pass, and the user's go.
+
 ## The copy (the user)
 
-1. Record on the old side, from `tools/readiness`: tip of main, the refs digest. Also build main's tip in the container and record `make size` and the sha256 of `build/breadbin.d64` (they move with main, so record them at the all-stop).
-2. Copy the whole directory, `.git` included (the reflog and stashes live there), to the runner's own disk with `rsync -aH` or `tar`, excluding `build/`, `.DS_Store`, `._*`. Never `git clone --local`, `--shared` or `cp -l`: they share inodes. Copy to a fresh path; keep the old tree untouched until the archive is verified, then retire it (rename and make read-only, so no one commits there by mistake).
-3. Verify: `tools/readiness` on the runner prints the same refs digest and tip; `git fsck --full` is clean; a sha256 manifest of the working files matches; the archive extracts to scratch and its checksum is recorded.
-4. On the runner: `git update-index --refresh` (the index caches inode numbers), `git worktree prune -n` then prune; recreate only the worktrees anyone still needs. Set `gc.auto 0` and `gc.pruneExpire never` until the fleet has been green for a week (old reflog entries, like `8ecb83e`, stay reachable).
+1. **Quiesce to zero.** Every session is stopped (a session keeps writing its transcript until it ends); no VICE, no container; every lock released; `lsof +D` on each directory to be packed shows nothing open; `tools/readiness` is READY (run last, since it reads the repo).
+2. **Record on the old side:** tip of main, the refs digest and the reflog-only count from `tools/readiness`; a manifest of every regular file in each tree (sha256, mode, and the target of each symlink); main's tip built in the container (`make size`, the sha256 of `build/breadbin.d64`).
+3. **One tarball, no exclusions:** the clone directory with everything in it, plus the luggage folders above, plus the manifests. On macOS use `COPYFILE_DISABLE=1 tar`, which leaves out AppleDouble (`._*`) and so does not carry extended attributes; say so in the record. Write it to a disk that is not the source, and record the tarball's own sha256. Never `git clone --local`, `--shared` or `cp -l`: they share inodes.
+4. **Unpack on the runner** to a fresh path and verify: regenerate the manifests and diff them (content, mode and symlink targets; timestamps and inode numbers are not compared), the same refs digest, tip and reflog-only count, and `git fsck --full` clean.
+5. **Then:** `git update-index --refresh` (the index caches inode numbers); `git worktree repair` for the worktrees kept, `git worktree prune` for the rest; `gc.auto 0` and `gc.pruneExpire never` until the fleet has been green for a week.
+6. **Forgotten items:** the old tree and the tarball stay as they are. Anyone who finds something missing appends it to `missing.md` on `fleet-store`; the user fetches it from the old tree. When the fleet has been green for a day and the list is empty (or the user closes it), the old tree is made read-only (`chmod -R a-w`, renamed so no one commits there) and kept with the tarball. Removing it is the user's call, after a week.
 
 ## Unpack: step 0 in the new house
 
@@ -53,7 +76,7 @@ Principles: the repo is the memory and sessions are disposable; a replacement ve
 
 Waves:
 
-0. The user and the facilitator. The facilitator publishes a roster on `fleet-store` (`fleet/roster.md`: lane, new session name, address) and updates the table in `docs/wip.md`. Every address from the old fleet is dead; messages sent to one fail quietly.
+0. The user and the facilitator's replacement (Facilitator Jr.), first, before any other session: it owns the unowned luggage, reads the manifests, and publishes a roster on `fleet-store` (`fleet/roster.md`: lane, new session name, address) and updates the table in `docs/wip.md`. Every address from the old fleet is dead; messages sent to one fail quietly.
 1. Hygiene (C): runs step 0, the idiot check below, and says "house green" with the tip and the numbers (size, d64 sha, smoke, baseline time).
 2. Hardware (A): after the read-only Ultimate check.
 3. Kernel and the rest, one at a time.
