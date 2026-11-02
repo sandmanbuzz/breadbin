@@ -25,6 +25,8 @@ ap.add_argument("--dst", type=int, default=10, choices=(8, 10))
 ap.add_argument("--image", default=os.path.join(here, "..", "..", "build", "breadbin.d64"))
 ap.add_argument("--base", help="the image that is already on the target disk: copy only the sectors that differ "
                 "(trust it: if the disk holds something else the result is wrong; the read-back still checks what is written)")
+ap.add_argument("--limit", type=int, help="copy only the first N sectors of the list")
+ap.add_argument("--variant", choices=("srconly", "noverify"), help="timing variants: only read the source, or write without the read-back (the total time of a run says what each phase costs)")
 ap.add_argument("--label", help="up to 16 characters written into the disk's BAM name (track 18 sector 0, $90): "
                 "what is on the media. The two-character disk ID is never changed: the drive checks it against "
                 "every sector header")
@@ -40,7 +42,7 @@ def cfg(category, item, value):
 
 
 obj, binf = os.path.join(work, "mcdup.o"), os.path.join(work, "mcdup.bin")
-subprocess.run(["ca65", os.path.join(here, "mcdup.s"), "-o", obj], check=True)
+subprocess.run(["ca65", *(["-D", args.variant.upper()] if args.variant else []), os.path.join(here, "mcdup.s"), "-o", obj], check=True)
 subprocess.run(["ld65", "-t", "none", "-S", "0xC000", "-o", binf, obj], check=True)
 code = open(binf, "rb").read()
 image = open(args.image, "rb").read()
@@ -61,6 +63,8 @@ if args.base:
     assert len(base) == len(image)
     pairs = [(t, sec) for t, sec in pairs
              if image[(start[t - 1] + sec) * 256:][:256] != base[(start[t - 1] + sec) * 256:][:256]]
+if args.limit:
+    pairs = pairs[:args.limit]
 print(f"{len(pairs)} sectors to copy" + (f" (differing from {os.path.basename(args.base)})" if args.base else ""), flush=True)
 u.mount("a", image, type="d64", mode="readonly", name=os.path.basename(args.image))
 if args.dst == 10:
@@ -83,7 +87,7 @@ t0 = time.time()
 last, lastt = -1, time.time()
 ok = False
 while time.time() - t0 < 3600:
-    time.sleep(20)
+    time.sleep(5 if args.limit else 20)
     p = u.readmem(0xC7F0, 9)
     n = p[1] | p[2] << 8
     print(f"{time.time() - t0:5.0f}s  {n} of {total} sectors, drive errors {p[3]}, mismatches {p[4]}", flush=True)
