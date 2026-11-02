@@ -2,7 +2,7 @@
 .include "../../include/breadbin.inc"
 .include "lib.inc"
 .import eprint, eputc, argn
-.export perr, errstr, open_or_die
+.export perr, open_or_die
 
 .segment "CODE"
 ; open_or_die: A/X = path, Y = flags -> A = fd; on error prints and exits 1
@@ -42,106 +42,130 @@ perr:
         lda #<s_colon
         ldx #>s_colon
         jsr eprint
-@m:     lda lt3
-        jsr errstr
-        jsr eprint
+@m:     jsr errmsg
         lda #10
         jmp eputc
 
-; errstr: A = errno -> A/X = message
-errstr:
+; errmsg: lt3 = errno -> its message on stderr (no newline).
+; The commonest three are built in, so they print even when the disk cannot be read (and
+; ENOENT costs no block read). The rest are looked up in /etc/errors, lines "NN text", streamed
+; a byte at a time: no buffer, and nothing here may call perr. Not found or unreadable: "error N".
+errmsg:
         ldx #0
-@l:     ldy errtab,x
-        beq @unk
-        cmp errtab,x
-        beq @f
+@b:     lda btab,x
+        beq @file
+        cmp lt3
+        beq @bi
         inx
         inx
         inx
-        bne @l
-@f:     lda errtab+2,x
+        bne @b
+@bi:    lda btab+1,x
         pha
-        lda errtab+1,x
-        tay
-        pla
+        lda btab+2,x
         tax
-        tya
+        pla
+        jmp eprint
+@file:  lda #<s_file
+        sta r0
+        lda #>s_file
+        sta r0+1
+        lda #O_RDONLY
+        jsr SYS_OPEN
+        bcs @fall
+        sta lt2
+@line:  lda #0
+        sta lt1
+@num:   jsr rdb
+        bcs @nf
+        cmp #' '
+        beq @have
+        cmp #10
+        beq @line               ; an empty line
+        sec
+        sbc #'0'
+        cmp #10
+        bcs @skip               ; not a number: ignore the line
+        sta lt0
+        lda lt1
+        asl a
+        asl a
+        adc lt1                 ; x5 (no carry: lt1 < 26)
+        asl a                   ; x10
+        adc lt0
+        sta lt1
+        jmp @num
+@have:  lda lt1
+        cmp lt3
+        beq @show
+@skip:  jsr rdb
+        bcs @nf
+        cmp #10
+        bne @skip
+        beq @line
+@show:  jsr rdb
+        bcs @done
+        cmp #10
+        beq @done
+        jsr eputc
+        jmp @show
+@done:  jsr cls
         rts
-@unk:   lda #<e_unk
-        ldx #>e_unk
+@nf:    jsr cls
+@fall:  lda #<s_err
+        ldx #>s_err
+        jsr eprint
+        lda lt3                 ; errno as decimal (below 100)
+        ldx #'0'
+@t:     cmp #10
+        bcc @u
+        sbc #10
+        inx
+        bne @t
+@u:     pha
+        txa
+        cmp #'0'
+        beq @o
+        jsr eputc
+@o:     pla
+        clc
+        adc #'0'
+        jmp eputc
+
+; rdb: next byte of the file (lt2) -> A; carry set at the end or on an error
+rdb:    lda #<lval
+        sta r0
+        lda #0
+        sta r0+1
+        lda #1
+        sta r1
+        lda #0
+        sta r1+1
+        lda lt2
+        jsr SYS_READ
+        bcs @e
+        lda r1
+        beq @e
+        lda lval
+        clc
         rts
+@e:     sec
+        rts
+
+cls:    lda lt2
+        jmp SYS_CLOSE
 
 .segment "RODATA"
 s_colon: .byte ": ", 0
-errtab:
-        .byte EPERM
-        .word e_perm
+s_file:  .byte "/etc/errors", 0
+s_err:   .byte "error ", 0
+btab:   .byte EIO
+        .word e_io
         .byte ENOENT
         .word e_noent
-        .byte ESRCH
-        .word e_srch
-        .byte EIO
-        .word e_io
-        .byte E2BIG
-        .word e_2big
-        .byte ENOEXEC
-        .word e_noexec
-        .byte EBADF
-        .word e_badf
-        .byte ECHILD
-        .word e_child
-        .byte EAGAIN
-        .word e_again
-        .byte ENOMEM
-        .word e_nomem
-        .byte EBUSY
-        .word e_busy
-        .byte EEXIST
-        .word e_exist
         .byte ENODEV
         .word e_nodev
-        .byte EXDEV
-        .word e_xdev
-        .byte ENOTDIR
-        .word e_notdir
-        .byte EISDIR
-        .word e_isdir
-        .byte EINVAL
-        .word e_inval
-        .byte EMFILE
-        .word e_mfile
-        .byte EFBIG
-        .word e_fbig
-        .byte ENOSPC
-        .word e_nospc
-        .byte EPIPE
-        .word e_pipe
-        .byte ENAMETOOLONG
-        .word e_long
-        .byte ENOTEMPTY
-        .word e_notempty
         .byte 0
-e_perm:   .byte "operation not permitted", 0
-e_noent:  .byte "no such file or directory", 0
-e_srch:   .byte "no such process", 0
-e_io:     .byte "i/o error", 0
-e_2big:   .byte "argument list too long", 0
-e_noexec: .byte "exec format error", 0
-e_badf:   .byte "bad file descriptor", 0
-e_child:  .byte "no child processes", 0
-e_again:  .byte "too many processes", 0
-e_nomem:  .byte "out of memory", 0
-e_exist:  .byte "file exists", 0
-e_busy:   .byte "device busy", 0
-e_nodev:  .byte "no such device or no disk", 0
-e_xdev:   .byte "cross-device link", 0
-e_notdir: .byte "not a directory", 0
-e_isdir:  .byte "is a directory", 0
-e_inval:  .byte "invalid argument", 0
-e_mfile:  .byte "too many open files", 0
-e_fbig:   .byte "file too large", 0
-e_nospc:  .byte "no space left on device", 0
-e_pipe:   .byte "broken pipe", 0
-e_long:   .byte "file name too long", 0
-e_notempty: .byte "directory not empty", 0
-e_unk:    .byte "error", 0
+e_io:    .byte "i/o error", 0
+e_noent: .byte "no such file or directory", 0
+e_nodev: .byte "no such device or no disk", 0
