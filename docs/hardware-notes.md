@@ -449,3 +449,7 @@ Same session, under VICE-free hardware runs with drive A on bus 8 (physical off)
 Same configuration as the single boot above (stock KERNAL, Software IEC off, root on device 8, `plainboot.py build/breadbin.prg`, `physseries.sh` scratch script), one configuration setup for all five: **5 of 5 reached login, 22 s each**. The 22 s is the common time in the notes (no visible retry wait); the one-boot 32 s run above was the first boot after the write. Config restored afterwards (JiffyDOS KERNAL, Software IEC on, drive A bus 9 confirmed).
 
 Not run: the boot-time comparison against the pre-fork tree on the same drive, the coalesced-branch smoke beyond login (the `Exec`, `Modules`, `Drives` and `Persistence` classes on the Ultimate), and a sector compare of the disk.
+
+### 2026-11-02, a wrong-target run (lesson, Agent A)
+
+Ran `tests.test_system.Exec`, `Modules` and `Persistence` against the Ultimate (`BREADBIN_TARGET=ultimate`): **all 7 errored** with `could not connect to VICE monitor`, in about 140 s, and touched nothing on the machine (drive A set to bus 8 and restored to 9 as usual). Those classes build their target with `Vice(IMAGE)`, so they are VICE-only; the Ultimate backend covers the `Boot`, keyboard and console classes that are built with `make_target`. Check a class's target (`grep -n "Vice(\|make_target" tests/test_system.py`) before a hardware run. The same classes are the VICE-side check for the coalesced branches (exec, modules, persistence), still to run under VICE with stock ROMs.
