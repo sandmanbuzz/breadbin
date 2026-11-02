@@ -66,6 +66,18 @@ python3 -m unittest tests.test_system.Boot.test_02_echo
 
 This runs the monitor-driven tests (`Boot`, `test_console`) with no X server. `test_keyboard` needs `xdotool` and an X display, which macOS does not have. A VICE window appears on the desktop while a test runs. On 2026-10-31 this ran `test_07`, `test_10`, `test_13`, `test_14`, `test_24` and `test_console` (11 tests, about 7.5 minutes) green on the stage-2 kernel.
 
+## In a container (any host, including a Mac)
+
+`tools/ci/run.sh` runs the same tests in a disposable container with its own VICE (3.9), Xvfb and `xdotool`, so the keyboard and console tests run on a Mac and parallel runs do not collide (`docs/ci.md`: the image, the lease broker). It copies the repo at start, so edit freely while it runs.
+
+```sh
+tools/with-lock -- tools/ci/run.sh test        # whole suite: host tests + every VICE class, ~45 minutes
+tools/ci/run.sh test-keyboard                  # 7 tests, ~4 minutes
+tools/ci/run.sh test-only T="tests.test_system.Exec tests.test_system.Modules"
+```
+
+Classes in `tests/test_system.py`: `Boot` (26), `Persistence`, `REU`, `Cache` (9: warm boot, new disk or label discards, write-through, pristine image after writes), `Pool`, `Modules`, `Exec`, `Drives` (mount and format CBM disks, the module-is-not-a-program case). Take the lock for VICE runs: two at once disturb each other's timing.
+
 ## Windowless VICE on macOS
 
 `-console` (VICE's console mode) starts without a window, so a test run no longer steals focus,
