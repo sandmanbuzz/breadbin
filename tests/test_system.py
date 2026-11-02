@@ -528,6 +528,29 @@ class Exec(unittest.TestCase):
 class Drives(unittest.TestCase):
     """mount: normal C64 disks and Breadbin disks on drive 9."""
 
+    def test_cbm_module_is_not_a_program(self):
+        """The module file is a CX image like any program. Running it (spawn or exec) must not
+        repoint the filesystem vectors at the process's own pages, which are freed on exit."""
+        cbm = os.path.join(ROOT, "build", "t_cbm9b.d64")
+        if os.path.exists(cbm):
+            os.unlink(cbm)
+        subprocess.run(["c1541", "-format", "cbmdisk,cb", "d64", cbm,
+                        "-write", os.path.join(ROOT, "rootfs", "etc", "motd"), "motd,s",
+                        "-write", os.path.join(ROOT, "rootfs", "home", "readme"), "readme,s"],
+                       capture_output=True, check=True)
+        with Vice(IMAGE, extra=["-drive9type", "1541", "-9", cbm]) as v:
+            v.wait_shell()
+            self.assertEqual(v.run("mount 9 /mnt"), "")
+            v.run("/lib/km/cbm")                              # as a program
+            v.run("exec /lib/km/cbm")                         # and through exec
+            self.assertEqual(v.run("ls /mnt").split(), ["motd", "readme"])   # vectors still good
+            self.assertIn("welcome to breadbin.", v.run("cat /mnt/motd"))
+            ls = v.run("mod ls")                              # one copy, loaded by the mount
+            self.assertEqual(len(re.findall(r"class 1", ls)), 1, ls)
+            v.run("mod load /lib/km/cbm")                     # a second copy is refused
+            ls = v.run("mod ls")
+            self.assertEqual(len(re.findall(r"class 1", ls)), 1, ls)
+
     def test_cbm_disk(self):
         cbm = os.path.join(ROOT, "build", "t_cbm9.d64")
         if os.path.exists(cbm):
