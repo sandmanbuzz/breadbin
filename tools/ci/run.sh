@@ -32,7 +32,7 @@ broker=${BREADBIN_BROKER:-}
 case $broker in
     127.0.0.1:*|localhost:*) broker=host.containers.internal:${broker#*:} ;;
 esac
-# The run takes its own VICE slot (tools/with-lock: up to 4 at once, BREADBIN_VICE_SLOTS);
+# The run takes its own VICE slot (tools/with-lock: up to 3 at once, BREADBIN_VICE_SLOTS);
 # BREADBIN_CI_EXCLUSIVE=1 takes them all, for runs whose wall-clock data matters. A caller
 # that already holds the lock passes straight through.
 excl=
