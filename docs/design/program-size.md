@@ -14,6 +14,19 @@ Re-measured on `main` at `ba3b6d0` (43 programs, including `turbo`). An earlier 
 | of the image: library modules | 23,377 | 46% of all bytes |
 | block rounding (202 x 254 - 51,136) | 172 | under 1 block |
 
+## Kernel modules (not in the program table)
+
+Measured by breadbin-f7 on `main` `ba3b6d0` (CX header read, not relinked). They are loaded by the kernel from `/lib/km`, not exec'd: no argv, no process slot. They count toward root disk use, and toward pool pages only while loaded.
+
+| module | on disk | blocks | pool pages while loaded |
+|---|---|---|---|
+| `uci.km` | 3,086 | 14 (13 data + 1 indirect) | 11 (10 image, 1 path slots), only while `/u` is mounted |
+| `cbm.km` | 1,578 | 7 | 6, stays loaded after the first CBM mount |
+| `hello.km` | 80 | 1 | 1 (loader regression test) |
+| **total** | **4,744** | **about 21** | |
+
+The 51,136-byte program total above does not include these.
+
 ## Top five
 
 | program | bytes | blocks | own | library | relocs |
