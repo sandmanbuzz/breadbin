@@ -15,10 +15,16 @@ Roles are specialisations, not walls. Anyone may fix a real bug anywhere; keep t
 ## Branches and commits
 
 - Kernel session: `claude/brave-wright-km3nrm` (or whatever its session gives it). Hardware session: `hw-bench`, rebased on the kernel branch before each work package. Fixes: `fix/<topic>` branches (for example `iec-bit-waits`), merged by whoever owns the file.
-- Push every time something is worth another session reading. An unpushed result does not exist for the others.
+- Commit where the others can see it: the branches of the shared clone are the mailbox, and origin is only a mirror of them (next section). A result that is not committed on a branch in the shared clone does not exist for the others.
 - Every commit message says **what was run and what was not**, and quotes `make size` when the kernel changed. A pull request is opened only when the user asks.
 - Keep ROMs, JiffyDOS images and anything derived from them out of the repo.
 - Code we adopt keeps its author's notice in the file header, with the source URL; the evidence (licence text, reuse) goes in `docs/design/fast-io.md` (licence policy in `CLAUDE.md`: nothing GPL or LGPL).
+
+## Origin (policy declared by the user, 2026-11-01)
+
+Origin is a distribution channel, not authoritative. The local repository is ground truth. We choose what origin shows by force-pushing from local at will; origin is mutable and nobody relies on its history. Hygiene follows from that: cruft is deleted, or archived on a local-only branch, and the repository is kept tidy enough to force-push to origin. The audience is small, so only privacy cleanliness is required, not polish for GitHub.
+
+In practice: do not build on origin's history or on a hash that exists only there; expect that a branch or tag on origin may be rewritten; anything that reaches origin must be free of machine- and identity-specific details (home paths, hostnames, addresses, other identities). A push, a remote delete or a tag still waits for the user's confirmation, routed through the coordinator. Entering the next milestone requires the open decisions of the last one to be resolved (the Keymaster run and the own-routine decision do not block a milestone's exit, they block entry to the next).
 
 ## The machine lock
 
