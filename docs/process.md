@@ -28,15 +28,19 @@ In practice: do not build on origin's history or on a hash that exists only ther
 
 ## The machine lock
 
-One VICE at a time, and one session on the Ultimate and the drives at a time: the tests are timing-sensitive and two emulators (or an emulator and a hardware run) disturb each other. Wrap anything that runs VICE or touches the hardware:
+The tests are timing-sensitive, so sessions share the machine through `tools/with-lock`. The `vice` resource is a pool of 4 slots (`BREADBIN_VICE_SLOTS`, a stake in the ground, not a measurement): a plain run takes any one, so up to four VICE runs go at once. A run whose wall-clock data matters (timing, performance, anything you will quote a number from) takes the whole pool with `-x`, and nothing else VICE runs meanwhile. `ultimate` (the hardware) is one holder at a time.
+
+VICE runs in the container: `tools/ci/run.sh` takes its own slot (`BREADBIN_CI_EXCLUSIVE=1` takes them all), so the one obvious way to run the emulator is `tools/ci/run.sh <make target>`. Host VICE is a stopgap for what the container cannot do yet; if you hit such a gap, write it down in `docs/wip.md` so it can be closed.
 
 ```sh
-tools/with-lock -- xvfb-run -a make test-smoke                  # resource "vice" (default)
-tools/with-lock -r ultimate -- python3 tools/ultimate.py ...    # resource "ultimate"
-tools/with-lock -r ultimate -- tools/with-lock -- ...           # both, for a hardware run that also uses VICE
+tools/ci/run.sh test-smoke                                      # takes one vice slot itself
+BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test-only T="..."       # every slot: wall-clock measurements
+tools/with-lock -x -- <cmd>                                     # the same for a host command
+tools/with-lock -r ultimate -- python3 tools/ultimate.py ...    # the hardware
+tools/with-lock -r ultimate -- tools/with-lock -x -- ...        # hardware run that also uses VICE
 ```
 
-The lock directory is `$BREADBIN_LOCKDIR` (default `/tmp/breadbin-locks`). When sessions run in separate containers, point it at a directory they share (a bind mount of the same host path). `with-lock` prints who holds the lock and waits (default an hour); a stale `*.holder` file is only informational, since the kernel releases the `flock` when the process dies. Do not hold the lock while thinking: take it for the command, release it.
+The lock directory is `$BREADBIN_LOCKDIR` (default `/tmp/breadbin-locks`); sessions in separate containers share it by bind-mounting the same host path. `with-lock` prints the holders and waits (default an hour, exit 75 on timeout); a stale `*.holder` file is informational only, the kernel releases the `flock` when the process dies. A command already under `with-lock` for that resource passes straight through, so wrapping `run.sh` in `with-lock` still works; asking for `-x` while holding a plain slot is an error. An `-x` request closes the queue behind it, so it is not starved by new plain runs. Do not hold a lock while thinking: take it for the command, release it.
 
 ## Notes between sessions
 
