@@ -453,3 +453,7 @@ Not run: the boot-time comparison against the pre-fork tree on the same drive, t
 ### 2026-11-02, a wrong-target run (lesson, Agent A)
 
 Ran `tests.test_system.Exec`, `Modules` and `Persistence` against the Ultimate (`BREADBIN_TARGET=ultimate`): **all 7 errored** with `could not connect to VICE monitor`, in about 140 s, and touched nothing on the machine (drive A set to bus 8 and restored to 9 as usual). Those classes build their target with `Vice(IMAGE)`, so they are VICE-only; the Ultimate backend covers the `Boot`, keyboard and console classes that are built with `make_target`. Check a class's target (`grep -n "Vice(\|make_target" tests/test_system.py`) before a hardware run. The same classes are the VICE-side check for the coalesced branches (exec, modules, persistence), still to run under VICE with stock ROMs.
+
+### 2026-11-02, tip `cac322d` under VICE 3.10 (bundled app, windowless `-console`, stock ROMs): Exec, Modules, Persistence (Agent A)
+
+`tests.test_system.Exec`, `Modules` and `Persistence` (the classes that the Ultimate run could not take): **7 of 7 OK, 342 s**, in a scratch HOME with the bundle's `share/vice` (recipe in `docs/testing.md`, "Windowless VICE on macOS"), under `tools/with-lock` (the `vice` lock was held by another session for a while first). The output has Python `ResourceWarning`s from tempfile cleanup in the harness, not from the system under test. Not run: `Drives`, `Cache`, `REU`, `Pool`, the JiffyDOS-ROM set, `test_keyboard`.
