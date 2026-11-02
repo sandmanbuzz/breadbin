@@ -423,3 +423,12 @@ Learned by trying on the machine, recorded so the next reader does not repeat it
 - **The Boot class needs the boot disk on device 8.** `Boot` types `LOAD"*",8,1` at the BASIC prompt, so a kernel loaded from drive A on bus 9 with the physical 1541 off answers `?device not present error`. The fix used for the run: drive A to bus 8 for the duration (the physical drive is off, so there is no collision), restore to 9 afterwards with a `trap` on exit. The notes' "Normal config" (drive A on 9) is right for the `ucirun.sh` path (DMA load mimics ID) and wrong for the `Boot` path.
 - **Test names in the task list were not the real ones.** The short numbers used in the work package are not the unittest names. In `tests/test_system.py` the `Boot` class has `test_02_echo`, `test_07_directories`, `test_10_mv_cp` and `test_13_ctrl_c_blocked_reader`; `test_13_pipe`, `test_07_ctrl_c` and `test_10_shell` do not exist. Run by full name (`tests.test_system.Boot.test_02_echo`).
 - **Shell cwd gotcha.** The tests and `make` need the tree they test. Build and test a commit in its own worktree (`git worktree add --detach <scratch>/tip main`), not in the shared checkout, which another session may switch.
+
+### 2026-11-02, informal timings from the takeover runs (unofficial, from unittest and job logs; not a benchmark)
+
+Wall-clock as reported by `unittest` for the whole run, so setup (boot, mount, login wait) is included. Tip `cac322d` built in a detached worktree; Ultimate on firmware 1.1.0; drive A on bus 8 for the runs, physical 1541 off.
+
+- `Boot`, 4 tests (`test_02_echo`, `test_07_directories`, `test_10_mv_cp`, `test_13_ctrl_c_blocked_reader`): **160.7 s**, all OK. That is about 40 s a test, and `Boot` boots once per class, so this is mostly one boot plus four short shell sessions.
+- `Console`, 6 tests: **137.5 s**, all OK. About 23 s a test.
+- A failed attempt (wrong drive bus, `LOAD"*",8,1` to an absent device): **94.7 s** to a `wait_shell` timeout. A wrong setup costs about a minute and a half before it shows; check the bus first.
+- Earlier, from the notes: physical 1541 boots to login 22 to 52 s (stock KERNAL, 22 s in the normal case, 32 s the first boot after a write); the physical image write (`mcdup`) about 25 to 27 min; the nibbler copy 2 to 3 min.
