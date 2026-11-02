@@ -12,6 +12,8 @@ xvfb-run -a make test-smoke       # boot, echo, pipe, Ctrl-C: about 2 minutes
 xvfb-run -a make test-only T="tests.test_system.Boot.test_24_editor"
 xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard   # real keystrokes (xdotool)
 xvfb-run -a -s "-screen 0 1280x1024x24" make test-console
+tools/ci/run.sh test            # the whole suite in a container (podman; works on a Mac; ~45 minutes)
+tools/ci/run.sh test-keyboard   # or test-smoke, test-console, test-only T="..."; docs/ci.md
 ```
 
 The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 32 minutes) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive. Wrap VICE and hardware runs in `tools/with-lock` (see `docs/process.md`).
@@ -37,7 +39,9 @@ Targeted tests inside a story, the full regression at milestones. Tests are slow
 
 ## Status
 
-M0 (taking over the KERNAL): M0-1 shadow KERNAL and own vectors, M0-2 keyboard (`kbd.s`), M0-3 screen (`con.s`) and M0-4 (own IEC bus and channels in `iec.s`, root from the boot drive) are done under VICE (stock ROMs and JiffyDOS 6.01 ROMs); M0-4 runs on the real Ultimate (boot 75.5 s against 46.5 s for the ROM-bus stage 1, since JiffyDOS fast load is no longer used; physical 1541 and the full test list still to report; see `docs/hardware-notes.md`). M0-5 is unblocked: the KERNAL ROM region is provably unused. M0-5 is done: the kernel's BSS now lives at `$E000–$F771` (the KERNAL ROM region is unused), so there are **6,079 bytes of room for code** below `$CF00` and 2,184 for BSS below `$FFFA` (`make size`). The REU block cache (boot drive, `cache` command, `make CACHE=0|1|2`) is done on branch `reu-cache`; code room is now 5,295 bytes. The user pool is still `$0800–$7FFF`; moving its upper edge is one constant (`KSTART` in `k.inc` and `KRAM` in `kernel.cfg`) and is decided last.
+M0 (taking over the KERNAL) is done under VICE (stock and JiffyDOS ROMs) and runs on the real Ultimate: own interrupt entry, keyboard, screen, serial bus and channels; the KERNAL ROM is not used. Since then (2026-10/11): the **REU block cache** for the boot drive (`cache` command, `make CACHE=0|1|2`, keyed by a build id the first write of each boot changes, plus the disk label); a **footprint pass** (boot-only `INIT` code released to the pool, cold code above the BSS in `CODEHI`, the syscall entry in the `$CF00` page, a split user library); **kernel modules** (a CX image loaded top-down in the pool, `mod` command, root-only syscall ops) with the **CBM DOS filesystem** (`/lib/km/cbm`) and **UCI v1** for the Ultimate's file API (`/lib/km/uci`, `mount uci /u`) as modules; **`exec`** (`SP_EXEC`; `login` execs into `sh`); `turbo`. The user pool is **154 pages (`$0800-$A1FF`, 39,424 bytes)**, above a stock C64's 38,911 BASIC bytes; `KSTART` (`k.inc`) and `KRAM` (`kernel.cfg`) move together, a page at a time. Room: 354 bytes below `$CF00`, only **14 bytes above the BSS and `CODEHI`** (a link-time assert guards it; see `docs/wip.md`).
+
+Physical 1541: the root-mount stall that predates all of this is **mitigated, not root-caused**: a bounded wait in `bus_acptr` and three retries with UNTALK in `iec_read` took it from about 1 boot in 4 to 13 of 13 (`docs/hardware-notes.md`). The JiffyDOS-drive series and the JiffyDOS-ROM test subset on the final tip are the open milestone gates.
 
 ## Hardware and external references
 
