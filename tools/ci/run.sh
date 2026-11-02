@@ -8,6 +8,7 @@
 #      BREADBIN_CI_IMAGE  image name (default breadbin-ci; built if missing)
 #      BREADBIN_CI_MEM    optional container memory limit, e.g. 1500m
 #      BREADBIN_BROKER    passed through (host.containers.internal rewrite for localhost)
+#      BREADBIN_CI_EXCLUSIVE  set to 1 to hold every VICE slot (wall-clock measurements)
 # The repo is mounted read-only and copied inside, so concurrent runs do not collide.
 # Exit code is make's. Set BREADBIN_CI_KEEP_BUILD=<dir> to copy build/ out afterwards.
 set -eu
@@ -31,8 +32,13 @@ broker=${BREADBIN_BROKER:-}
 case $broker in
     127.0.0.1:*|localhost:*) broker=host.containers.internal:${broker#*:} ;;
 esac
+# The run takes its own VICE slot (tools/with-lock: up to 4 at once, BREADBIN_VICE_SLOTS);
+# BREADBIN_CI_EXCLUSIVE=1 takes them all, for runs whose wall-clock data matters. A caller
+# that already holds the lock passes straight through.
+excl=
+[ -n "${BREADBIN_CI_EXCLUSIVE:-}" ] && excl=-x
 # shellcheck disable=SC2086
-exec podman run --rm --init --name "breadbin-ci-run-$$" $mem \
+exec "$repo/tools/with-lock" $excl -- podman run --rm --init --name "breadbin-ci-run-$$" $mem \
     -v "$repo:/src:ro" -v "$roms:/roms:ro" \
     ${broker:+-e "BREADBIN_BROKER=$broker"} \
     "$img" "$@"

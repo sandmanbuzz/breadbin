@@ -18,6 +18,14 @@ import time
 X64 = os.environ.get("X64SC", "x64sc")
 
 
+def _free_port():
+    """A TCP port nothing listens on now, for the VICE monitor (a fixed or pid-derived
+    port can land on another run's emulator, and the harness would drive that one)."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def screen_to_text(codes):
     out = []
     for c in codes:
@@ -141,7 +149,7 @@ class Target:
 class Vice(Target):
     def __init__(self, image, reu=False, port=None, warp=True, extra=(), boot_device=8, reu_image=None):
         self.image = image
-        self.port = port or (6510 + os.getpid() % 500)
+        self.port = port or _free_port()
         args = [X64, "-default", "+sound", "-minimized",
                 "-remotemonitor", "-remotemonitoraddress", f"ip4://127.0.0.1:{self.port}"]
         if warp:
