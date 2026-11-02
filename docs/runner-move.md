@@ -2,7 +2,7 @@
 
 Status: soft prep. No date is set; the user calls the all-stop when the world is quiet. This is the plan for the pack, the copy and the unpack, and the tools that exist for it. Nothing here is verified on the runner yet: every "check" below is a thing to run there, not a thing that has passed.
 
-Decided by the user: the whole operation moves, authoritative clone included; the workspace goes as one tarball of everything on disk (cruft and dotfiles included), quiesced to zero and hash-matched on unpack, then the old tree is archived read-only once forgotten items are retrieved (never shared inodes); sessions do not carry over (new, empty sessions unpack from the repo and the luggage); containers are the only toolchain; the fleet gets one CCD of the runner. The runner is on the same LAN as the Ultimate, so hardware moves with it. No host names, addresses or user names go in this repo: write `$RUNNER` and `~/`.
+Decided by the user: the whole operation moves, authoritative clone included; the workspace goes as one tarball of everything on disk (cruft and dotfiles included), quiesced to zero and hash-matched on unpack, then the old tree is archived read-only once forgotten items are retrieved (never shared inodes); sessions do not carry over (new, empty sessions unpack from the repo and the luggage); containers are the only toolchain; the fleet gets one CCD of the runner; the replacement `claude rc` comes up in worktree mode (each session in its own worktree) instead of the current share mode, which should end the shared-checkout collisions at the price of some disruption from the change. Division of labour: the user owns the parent-directory question, the secrets, and every environment gap flagged during standup or blocking the call to all-start; the facilitator holds loose items only from all-stop to all-start; the hygiene agent runs step 0. The runner is on the same LAN as the Ultimate, so hardware moves with it. No host names, addresses or user names go in this repo: write `$RUNNER` and `~/`.
 
 ## Tools (landed ahead of the move)
 
@@ -89,6 +89,16 @@ First message of a replacement, to its peers: "replacement for <lane>, no memory
 Kickoff text for a new session (the facilitator pastes it): "You are the replacement for <lane>. Read CLAUDE.md, docs/wip.md, docs/process.md, then your handoff on fleet-store and docs/runner-move.md. You have no memory of the old session: check everything against git. Run tools/readiness first and report. Do not push. Say 'green' only when the list in docs/runner-move.md says so."
 
 The user is an honorary member: log in on the runner, `gh` login for the public identity, decide the signing key, place the ROMs and the Ultimate address, answer the first-run permission prompts once (copy the settings allowlist with paths rewritten), start the sessions in wave order, and re-give any approval the old sessions held and the manifests list.
+
+### Worktree mode
+
+What changes for the fleet, and what to check in step 0:
+
+- **A branch is checked out in one place.** Two sessions can no longer collide in one checkout, but "branch already checked out" errors replace the collisions, and main is checked out in whichever worktree holds it. Landing on local main means a temporary worktree of main (`git worktree add <dir> main`, merge, `git worktree remove`) and nobody keeping main checked out long-term; two landings at once would race, so take a lock around it (`tools/with-lock -r land -- ...`; any resource name is a single lock).
+- **Each worktree has its own project key**, derived from its path (`<repo>--claude-worktrees-<name>` style), so a session there may not see the project memory that lives under the clone's key. Check in step 0 that a worktree session loads the `MEMORY.md` index; if it does not, point each worktree's project directory at the same `memory/`. `tools/workspace.py` already packs every key that starts with the clone's key.
+- **Where the worktrees live** decides what the tarball reaches: under the clone (`.claude/worktrees/`) they ride in the `repo` package, under a scratch directory in `scratch`. Either way `git worktree list` must show only worktrees someone owns, and a worktree's `.git` file holds an absolute path: `git worktree repair` after the unpack.
+- **Cross-session mail** is unchanged: addresses are per session, so the roster still has to be republished.
+- **First day:** expect rough edges from the mode change. The readiness report, the packer and the lock tool all work from any worktree (they use the repository's common directory), but a tool or habit that assumes "the primary clone" will need a look.
 
 ## Recovering from loss
 
