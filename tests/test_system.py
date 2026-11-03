@@ -739,5 +739,6 @@ class Touch(unittest.TestCase):
 
     def test_existing_file_is_left_as_it_is(self):
         self.v.run("echo keep > /home/tch2")
-        self.v.run("touch /home/tch2")
+        # a path that cannot be made: touch must report it, which proves touch ran at all
+        self.assertIn("touch:", self.v.run("touch /home/tch2 /nodir/zz"))
         self.assertIn("keep", self.v.run("cat /home/tch2"))
