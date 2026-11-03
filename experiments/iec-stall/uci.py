@@ -148,6 +148,9 @@ GROUPS = {
                 ("READ DIR, chunks kept", cmd_sink(1, 0x14))]),
     "rdlong": ([("CHANGE DIR /SD", cmd(1, 0x11, *b"/SD")), ("OPEN DIR (current directory)", cmd(1, 0x13)),
                 ("READ DIR, chunks kept (names longer than 12)", cmd_sink(1, 0x14))]),
+    "abortmid": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("ABORT after 1 chunk: set", bytes([12, 1])),
+                  ("READ DIR, aborted after chunk 1", cmd_sink(1, 0x14)), ("ABORT off: set", bytes([12, 255])),
+                  ("OPEN DIR again (recovery)", cmd(1, 0x13)), ("READ DIR after the abort, full listing", cmd_sink(1, 0x14))]),
     "net": ([("target 3 identify", cmd(3, 0x01)), ("target 4 identify", cmd(4, 0x01))]),
     # Q2, Q4, Q5 of docs/design/next/uci-v1.md: directory commands (absolute and relative names after CHANGE DIR,
     # FILE STAT by name), the error cases, READ DIR packets. Creates and removes /Temp/bdir and /Temp/bdir/sub.
@@ -191,6 +194,7 @@ def run(name, ops):
     u.writemem(0xC000, code)
     u.writemem(0x4000, script)
     u.writemem(0xC7F0, bytes(2))
+    u.writemem(0xC79D, b"\xff")          # op 12 ABORT count: never, until a script sets it
     u.resume()
     feed("sys49152\n")
     t0 = time.time()
@@ -232,10 +236,10 @@ for g in sys.argv[1:]:
     run(g, GROUPS[g])
     if g == "rdchunks":
         chunk_log()
-    if g in ("rdsink", "rdlong"):
+    if g in ("rdsink", "rdlong", "abortmid"):
         chunk_log()
         total = struct.unpack("<H", bytes(u.readmem(0xC710, 2)))[0]
-        data = bytes(u.readmem(0x5000, total))
+        data = bytes(u.readmem(0x5000, total)) if total else b""
         starts = [struct.unpack("<H", bytes(u.readmem(0xC7A0 + 2 * i, 2)))[0] for i in range(min(u.readmem(0xC79E, 1)[0], 32))]
         for i, st in enumerate(starts):
             end = starts[i + 1] if i + 1 < len(starts) else total
