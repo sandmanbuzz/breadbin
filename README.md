@@ -26,7 +26,7 @@ It is a real kernel, not a shell that prints canned output:
 | [cc65](https://cc65.github.io/) (`ca65`, `ld65`, `ar65`) | assembling and linking the kernel and programs | 2.19 |
 | Python 3 (standard library only) | the disk image builder and relocation tool | 3.15 (3.8 or newer should work) |
 | GNU make | the build | 3.81 |
-| [VICE](https://vice-emu.sourceforge.io/) (`x64sc`, `c1541`) | running it and the automated tests | 3.10 |
+| [VICE](https://vice-emu.sourceforge.io/) (`x64sc`, `c1541`) | running it and the automated tests | 3.9 (the CI container), 3.10 earlier |
 
 VICE is only needed to run Breadbin and its tests. Building the disk image needs just cc65, Python and make.
 
@@ -73,7 +73,7 @@ x64sc -drive9type 1541 -9 other.d64 -autostart build/breadbin.d64   # with a dri
 
 Or attach `build/breadbin.d64` to drive 8 yourself and type `LOAD"*",8,1` and then `RUN`.
 
-**Real hardware.** Breadbin has only been tested in VICE so far. It needs a drive that understands the 1541's sector commands (`U1`, `U2`, `B-P`): a real 1541 or 1571, or a 1541 emulation such as the Ultimate 64's. To make a real floppy, write the `.d64` with a tool such as OpenCBM's `d64copy`.
+**Real hardware.** Breadbin runs in VICE and on a C64 Ultimate (with its emulated 1541, and with a physical 1541; `docs/hardware-notes.md`). It needs a drive that understands the 1541's sector commands (`U1`, `U2`, `B-P`): a real 1541 or 1571, or a 1541 emulation such as the Ultimate 64's. To make a real floppy, write the `.d64` with a tool such as OpenCBM's `d64copy`.
 
 ## Try it
 
@@ -140,7 +140,7 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 
 ```sh
 make test-host   # image builder and relocation tool (fast, no VICE needed)
-make test        # boots VICE and drives the shell (slow, ~25 min)
+make test        # boots VICE and drives the shell (slow: about 47 minutes for 63 VICE tests, one run in a container with every VICE slot taken; `docs/testing.md`)
 ```
 
 The system tests start `x64sc` (windows open minimized), type commands through VICE's remote monitor, and read the screen back. They need `x64sc` and `c1541` on your `PATH` (or set `X64SC=/path/to/x64sc`). Don't run other VICE instances at the same time: the tests are timing-sensitive under heavy CPU load.
