@@ -45,10 +45,11 @@ class ShardList(unittest.TestCase):
             if any(s.startswith(("tests.test_console", "tests.test_keyboard")) for s in specs):
                 self.assertTrue(all(s.startswith(("tests.test_console", "tests.test_keyboard")) for s in specs), n)
         # Boot: if split, into contiguous halves, each in Boot's own (alphabetical) order
-        boot = [(n, [s for s in specs if ".Boot" in s]) for n, specs in sl.items()]
+        boot = [(n, [s for s in specs if s.startswith("tests.test_system.Boot.")]) for n, specs in sl.items()]
         boot = [(n, s) for n, s in boot if s]
         flat = [m for _, ms in boot for m in ms]
         self.assertEqual(flat, sorted(flat))
+        self.assertLessEqual(len(boot), 2)   # two halves at most: each extra half is another cold boot
         for n, ms in boot:
             self.assertEqual(ms, sorted(ms), n)
 
