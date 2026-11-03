@@ -497,3 +497,11 @@ Not run: the module's own `ls` on the Ultimate after these (the bench does not r
 - Measurement trap, now fixed in the group: a second LOAD on the same open file reads at end of file and loads 0 bytes. Each load in the group reopens the file.
 
 Consequence for a fast path: the caller must bound `REU address + length` itself. Do not rely on the firmware to refuse an overrun.
+
+### 2026-11-02, disksum: first run of the read-only whole-disk compare STALLED before the first sector (Agent A)
+
+Setup: `experiments/iec-stall/disksum/disksum.py build/breadbin.d64` on the physical 1541 (device 8, fresh power cycle earlier, image written 2026-11-02): stock KERNAL, Software IEC off, reader loaded at `$C000` and started with `SYS 49152`. Under `tools/with-lock -r ultimate`. Polls (1-byte reads every 30 s): `sectors 0/683`, state `00`, for 150 s; the watch stopped the run at 180 s (no change in the count for 150 s), state reported as stalled, and the configuration was restored by the trap (JiffyDOS KERNAL, Software IEC on). `ERRCH` stayed zero, so **no status byte from the drive came back** for the first `U1:2 0 01 00`, or the reader never got past the command. Not known: whether the code started (not read back), where it stopped. Not retried, per the stop rule.
+
+Host-only tests of the checksum definition, the d64 layout and the comparer: 8 of 8 OK (`python3 -m unittest experiments/iec-stall/disksum/test_disksum.py`). The 6502 code is 414 bytes, assembled with ca65, never run before this.
+
+Next, before any second run: read back `$C000` and `$F7/$F8` after a stall (diagnose without retrying), and try one `U1` by hand from BASIC on the same drive, which separates a reader bug from a drive that does not answer channel 15.
