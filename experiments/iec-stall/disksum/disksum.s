@@ -27,16 +27,19 @@ COUNT  = $C7F0
 ERRCH  = $C7F2
 STATE  = $C7F4
 
-TMPX   = $F1        ; X saved across KERNAL calls that may clobber it
-TP     = $F2        ; pointer into TABLE, $F2/$F3
-XS     = $F5        ; running XOR
-TMP    = $F6
-TRK    = $F7
-SECT    = $F8
-IDX    = $F9        ; sectors done, $F9/$FA
-SPT    = $FB        ; sectors on the current track
-SUML   = $FD        ; running sum, $FD/$FE
-SUMH   = $FE
+; state lives in ordinary RAM: the stock KERNAL writes zero page ($F1-$FE) on the serial path (seen in the
+; stall dump: the table pointer moved from $5000 to $1800). $FB/$FC is used only for the one indirect store.
+TMPX   = $C7EB      ; X saved across KERNAL calls
+TPL    = $C7E4      ; pointer into TABLE, TPL/TPH
+TPH    = $C7E5
+XS     = $C7E9      ; running XOR
+TMP    = $C7EA
+TRK    = $C7E0
+SECT   = $C7E1
+IDX    = $C7E2      ; sectors done, IDX/IDX+1
+SPT    = $C7E6      ; sectors on the current track
+SUML   = $C7E7      ; running sum, SUML/SUMH
+SUMH   = $C7E8
 
 start:
         lda #0
@@ -72,9 +75,9 @@ start:
         jmp open_fail
 @o2:
         lda #<TABLE
-        sta TP
+        sta TPL
         lda #>TABLE
-        sta TP+1
+        sta TPH
         lda #1
         sta TRK
         lda #0
@@ -135,7 +138,7 @@ sector:
         bne @rd
         jsr CLRCHN
 
-        ; sum (16 bit) and XOR of the sector, stored at TP
+        ; sum (16 bit) and XOR of the sector, stored at the table entry
         lda #0
         sta SUML
         sta SUMH
@@ -154,21 +157,25 @@ sector:
         sta XS
         inx
         bne @cs
+        lda TPL
+        sta $FB
+        lda TPH
+        sta $FC
         ldy #0
         lda SUML
-        sta (TP),y
+        sta ($FB),y
         iny
         lda SUMH
-        sta (TP),y
+        sta ($FB),y
         iny
         lda XS
-        sta (TP),y
-        lda TP
+        sta ($FB),y
+        lda TPL
         clc
         adc #3
-        sta TP
+        sta TPL
         bcc @tn
-        inc TP+1
+        inc TPH
 @tn:
 
         ; count it
