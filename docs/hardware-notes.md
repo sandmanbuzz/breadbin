@@ -505,3 +505,23 @@ Setup: `experiments/iec-stall/disksum/disksum.py build/breadbin.d64` on the phys
 Host-only tests of the checksum definition, the d64 layout and the comparer: 8 of 8 OK (`python3 -m unittest experiments/iec-stall/disksum/test_disksum.py`). The 6502 code is 414 bytes, assembled with ca65, never run before this.
 
 Next, before any second run: read back `$C000` and `$F7/$F8` after a stall (diagnose without retrying), and try one `U1` by hand from BASIC on the same drive, which separates a reader bug from a drive that does not answer channel 15.
+
+### 2026-11-02, disksum reader: four stalls, what was ruled out, what was not (Agent A; read this before repeating)
+
+Reader `experiments/iec-stall/disksum/disksum.s` (builds 414 to 467 bytes), run with `disksum.py` on the physical 1541 (device 8), stock KERNAL, Software IEC off. Every run stopped the same way: `state 00`, sector count 0/683, no status byte from the drive, stopped by the 180 s watch, configuration restored.
+
+Stalls: (1) reader 3a04045, polled every 30 s; (2) reader 3a04045, control mode (one read at 180 s); (3) reader 96beb75 (state moved out of zero page), dump at 180 s; (4) reader 597cc3c (no leading zero in the track and sector), watch at 180 s.
+
+Ruled out, with evidence:
+- **Code corruption:** the code at `$C000` read back identical to the assembled bytes in all four dumps.
+- **Zero-page corruption as the stall cause:** the stock KERNAL serial path writes `$F1`-`$FE` (the table pointer at `$F2/$F3` moved from `$5000` to `$1800` in run 3). Moving the state to RAM (96beb75) fixed that, and the stall stayed.
+- **Leading zeros in the command:** the hand test of `U1:2 0 01 00` hung once (the next memory read timed out). The reader's `U1:2 0 1 0` (597cc3c) stalled the same way, so zeros are not the cause.
+- **CR at the end of the command:** a hand U1 with no CR returned `00, OK`.
+- **Polling during the run:** the control run with one read at 180 s stalled the same way.
+- **A wedged drive:** a UI reset (`73 JIFFYDOS 5.0 1541`), then a directory load (`"breadbin" 59 blocks`) and a hand U1 (`u1 status 0 ok 0 0`) all worked on the same physical drive.
+- **The bus-9 theory:** the reader opens device 8 in both places.
+- **The configuration:** the reader ran under stock KERNAL with Software IEC off (the JiffyDOS readbacks are from after the restore).
+
+Not ruled out: the call order of the reader against BASIC's `PRINT#15`/`INPUT#15` (the reader does `CHKOUT`, `CHROUT` per character, `CLRCHN`, `CHKIN 15`, `CHRIN`; the hand test does the same through BASIC), and any BASIC-set state that a raw KERNAL sequence doesn't set.
+
+Next time: check the hand path first (UI, then a directory load, then a hand U1 with a status read in a program), and read `$C000`, the zero page and the device state before a reader run, not after.
