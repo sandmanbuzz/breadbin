@@ -137,6 +137,24 @@ GROUPS = {
              ("load the same, again", cmd(1, 0x21, *struct.pack("<I", 0x20000), *struct.pack("<I", 32768))),
              ("close", close())]),
     "net": ([("target 3 identify", cmd(3, 0x01)), ("target 4 identify", cmd(4, 0x01))]),
+    # Q2, Q4, Q5 of docs/design/next/uci-v1.md: directory commands (absolute and relative names after CHANGE DIR,
+    # FILE STAT by name), the error cases, READ DIR packets. Creates and removes /Temp/bdir and /Temp/bdir/sub.
+    "dirs": ([("mkdir /Temp/bdir", cmd(1, 0x16, *b"/Temp/bdir")), ("mkdir again (exists)", cmd(1, 0x16, *b"/Temp/bdir")),
+              ("mkdir /Temp/bdir/sub", cmd(1, 0x16, *b"/Temp/bdir/sub")),
+              ("CHANGE DIR /Temp/bdir (absolute)", cmd(1, 0x11, *b"/Temp/bdir")), ("GET PATH", cmd(1, 0x12)),
+              ("FILE STAT relative 'sub' (dir)", cmd(1, 0x08, *b"sub")),
+              ("FILE STAT absolute /Temp/bdir/sub", cmd(1, 0x08, *b"/Temp/bdir/sub")),
+              ("CHANGE DIR /Temp (absolute)", cmd(1, 0x11, *b"/Temp")), ("GET PATH", cmd(1, 0x12)),
+              ("FILE STAT relative 'bdir' (after CD /Temp)", cmd(1, 0x08, *b"bdir")),
+              ("OPEN DIR /Temp/bdir", cmd(1, 0x13, *b"/Temp/bdir")), ("READ DIR 1", cmd(1, 0x14)), ("READ DIR 2", cmd(1, 0x14)),
+              ("READ DIR 3", cmd(1, 0x14)), ("READ DIR 4 (end?)", cmd(1, 0x14)),
+              ("DELETE non-empty dir /Temp/bdir", cmd(1, 0x09, *b"/Temp/bdir")),
+              ("DELETE /Temp/bdir/sub", cmd(1, 0x09, *b"/Temp/bdir/sub")), ("DELETE /Temp/bdir", cmd(1, 0x09, *b"/Temp/bdir")),
+              ("FILE STAT /Temp/bdir (gone)", cmd(1, 0x08, *b"/Temp/bdir")), ("CHANGE DIR /", cmd(1, 0x11, *b"/"))]),
+    # READ DIR follow-up: the dirs group got the same 85-byte packet four times. Open /Temp (which has entries) and read.
+    "readdir": ([("OPEN DIR /Temp", cmd(1, 0x13, *b"/Temp")), ("READ DIR 1", cmd(1, 0x14)), ("READ DIR 2", cmd(1, 0x14)),
+                 ("READ DIR 3", cmd(1, 0x14)), ("OPEN DIR /Temp/bdir again", cmd(1, 0x13, *b"/Temp/bdir")),
+                 ("READ DIR after reopen", cmd(1, 0x14))]),
 }
 
 
