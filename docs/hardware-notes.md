@@ -571,3 +571,13 @@ Bench op 12 sets how many chunks to read before the bench writes ABORT (`$04` to
 - Earlier runs of this group stopped after one operation because of a layout bug in the new op 12 (it read its value from the length byte and did not advance the script pointer). Fixed in the bench.
 
 Not measured: the drive's or UCI's status after an ABORT, and an ABORT on an open file (not asked).
+
+### 2026-11-02, Q4: RENAME onto an existing name (Agent A; `uci.py renameonto`, a scratch directory on the Ultimate's RAM disk, cleaned up)
+
+`/Temp/bqscratch`: created a.txt and b.txt (8 bytes each), `RENAME a.txt` onto `b.txt`, read b.txt, deleted everything, removed the directory (verified over FTP: gone).
+
+- **RENAME onto an existing name answers `FILE EXISTS`.** It does not overwrite.
+- **The source survives:** `DELETE a.txt` afterwards answers `00,OK`.
+- **The target survives:** b.txt reads back `BBBBBB`.
+- Caveat: the READ asked for 8 bytes and returned 6, and `FILE STAT` answered `82,FILE NOT FOUND` for both files (already known to fail on just-written files), so neither the 8-byte content nor the STAT result is trusted. The short read may be the bench's write length, not the firmware; not checked.
+- Not measured: disk full (skipped on the owner's instruction).
