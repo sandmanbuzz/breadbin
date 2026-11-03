@@ -525,3 +525,14 @@ Ruled out, with evidence:
 Not ruled out: the call order of the reader against BASIC's `PRINT#15`/`INPUT#15` (the reader does `CHKOUT`, `CHROUT` per character, `CLRCHN`, `CHKIN 15`, `CHRIN`; the hand test does the same through BASIC), and any BASIC-set state that a raw KERNAL sequence doesn't set.
 
 Next time: check the hand path first (UI, then a directory load, then a hand U1 with a status read in a program), and read `$C000`, the zero page and the device state before a reader run, not after.
+
+### 2026-11-02, correction to the UCI directory entry above (Agent A, follow-up)
+
+The entry above says "READ DIR returns the whole listing of the current directory in one packet". That is wrong as stated. The bench's `resp` count is the total of **every Data More chunk of one command** (`experiments/iec-stall/uci.s`, `finish` loops on `$30` and `rlen` accumulates across chunks). The 14 and 85 bytes are therefore whole responses, built from several chunks; the chunk boundaries were not recorded.
+
+What stands:
+- **OPEN DIR ignores its path argument** and lists the current directory (`OPEN DIR /Temp` with the current directory at `/` returned the root). The module changes directory first, so this does not affect it.
+- **Each READ DIR call returns the whole listing again** from the first entry (four calls and one reopen gave identical bytes). That matches the module's design: `src/mod/uci.s` `uci_readdir` re-lists on every call and skips the entries an earlier call delivered.
+- The design note's "one packet per entry" is **not contradicted** by these measurements. It is still unmeasured, because the chunk boundaries were not logged.
+
+Open for a follow-up: log each chunk's length in `uci.s` for `READ DIR`, to confirm one entry per chunk and to see the end-of-listing status.
