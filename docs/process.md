@@ -6,7 +6,7 @@ One process for every session, so nobody has to invent it. `CLAUDE.md` holds the
 
 | Role | Where | Owns | Does not touch |
 |---|---|---|---|
-| **Kernel session** | wherever it runs (cloud container, or a local container) | `src/kernel/`, `src/lib/`, `include/`, `kernel.cfg`, `k.inc`, the docs under `docs/design/` | `tools/ultimate*`, `docs/hardware-notes.md` |
+| **Kernel session** | a session on the runner, in its own git worktree (the toolchain is the container, `tools/ci/run.sh`) | `src/kernel/`, `src/lib/`, `include/`, `kernel.cfg`, `k.inc`, the docs under `docs/design/` | `tools/ultimate*`, `docs/hardware-notes.md` |
 | **Hardware session** | next to the Ultimate and the drives | `tools/ultimate*`, `tools/fake_ultimate.py`, new commands in `src/bin/`, `experiments/`, `docs/hardware-notes.md`; kernel *bug fixes* on their own branches | the kernel's design, other sessions' branches |
 | **Research helpers** | short-lived sub-agents (Haiku or Opus) | nothing in the repo; they write to the scratchpad and report | everything in the repo |
 
@@ -14,7 +14,7 @@ Roles are specialisations, not walls. Anyone may fix a real bug anywhere; keep t
 
 ## Branches and commits
 
-- Kernel session: `claude/brave-wright-km3nrm` (or whatever its session gives it). Hardware session: `hw-bench`, rebased on the kernel branch before each work package. Fixes: `fix/<topic>` branches (for example `iec-bit-waits`), merged by whoever owns the file.
+- Each session works on a short-lived branch (`fix/<topic>`, `feat/<topic>`, `tools/<topic>`, `docs/<topic>`) in its own worktree, cut from local `main` (not `origin/main`, a stale mirror), and merges back into local main. `claude/brave-wright-km3nrm` and `hw-bench` are archived (`archive/*`).
 - Commit where the others can see it: the branches of the shared clone are the mailbox, and origin is only a mirror of them (next section). A result that is not committed on a branch in the shared clone does not exist for the others.
 - Every commit message says **what was run and what was not**, and quotes `make size` when the kernel changed. A pull request is opened only when the user asks.
 - Keep ROMs, JiffyDOS images and anything derived from them out of the repo.
@@ -50,20 +50,20 @@ The repository is the mailbox. Results and requests go in:
 - `docs/wip.md`: who is doing what, the work packages, and the "state" block a fresh context needs. Update it when the plan changes, not for every step.
 - A request to another session: a short entry in the other's file ("Request from <role>, <date>: what, why, the smallest version"). Answer it in the same place.
 
-Faster IPC is allowed if it earns its keep (a shared directory with one file per message, a pipe between containers). Until then, `git pull` before you start and after the other side says it pushed.
+Sessions message each other at the addresses on the roster (`fleet/roster.md` on the `fleet-store` branch: `git show fleet-store:fleet/roster.md`); the address of a parked session is dead and a message to it fails quietly. All worktrees share one set of refs, so before you start `git log --oneline -15 main` shows what the others did. Do not `git pull` from origin: it is a stale mirror.
 
 ## Kickoff procedure (a new or replacement session)
 
 1. Read, in order: `CLAUDE.md`, `docs/wip.md` (including the state block at the end), `docs/process.md` (this file), then only what the task needs (`docs/roadmap.md`, `docs/design/fast-io.md`, `docs/hardware-notes.md`, `docs/testing.md`).
-2. Check out: `git fetch origin && git checkout <your branch> && git merge origin/claude/brave-wright-km3nrm` (hardware session: rebase). `git log --oneline -15` shows what changed since the last note.
+2. Check out: a new worktree is cut from `origin/main`, which is far behind local main. Check `git status` is clean, then `git switch -c <topic> main` (or `git reset --hard main` in a fresh worktree that has nothing to lose). `git log --oneline -15` shows what changed since the last note.
 3. Toolchain: `make` needs cc65 (`ca65`, `ld65`); VICE tests need `x64sc`, `c1541`, xvfb and the ROMs from `tools/setup-vice-roms.sh`. JiffyDOS images go **outside** the repo; point `BREADBIN_VICE_ARGS` at them (see `docs/testing.md`). Run `make test-host` once to prove the environment.
-4. Scratchpad: use one directory per session outside the repo (the session's scratchpad if it has one; otherwise `~/scratch/<role>`). Put in it: downloaded sources (each archive in its own new, empty directory, never executed), ROM images, logs, throw-away scripts. Anything another session needs, or you will want after a restart, gets committed: reports to `docs/design/research/`, experiment scripts to `experiments/<topic>/` with a README.
+4. Scratchpad: use one directory per session outside the repo (the session's scratchpad under `/tmp/claude-<uid>/`, which is tmpfs and lost at reboot). Put in it: downloaded sources (each archive in its own new, empty directory, never executed), ROM images, logs, throw-away scripts. Anything another session needs, or you will want after a restart, gets committed: reports to `docs/design/research/`, experiment scripts to `experiments/<topic>/` with a README.
 5. Containers: a local container only needs the toolchain above, the repo checked out, and the shared lock directory. Record the recipe (image, packages, mounts) in `docs/testing.md` the first time it works, so the next session can reproduce it.
-6. Say hello in `docs/wip.md`: the role, the branch, the time, and what you are about to do.
+6. Say hello to the facilitator at its roster address (the role, the branch, what you are about to do) and add your lane to the board in `docs/wip.md` when it changes.
 
 ## Tests
 
-As in `CLAUDE.md`: targeted tests inside a story (`make test-host`, the table in `docs/testing.md`, `make test-smoke` before committing); the full suite and the JiffyDOS-ROM subset at milestones; hardware for what only hardware can answer. All VICE and hardware runs go through `tools/with-lock`.
+As in `CLAUDE.md`: targeted tests inside a story (`make test-host`, the table in `docs/testing.md`, `make test-smoke` before committing); the full suite and the JiffyDOS-ROM subset at milestones; hardware for what only hardware can answer. VICE runs go through `tools/ci/run.sh` (it takes its own slot) and hardware runs through `tools/with-lock -r ultimate`.
 
 ## Research helpers
 
@@ -76,3 +76,5 @@ Small, specific questions with an empty context are the sweet spot: one question
 ## Handoff
 
 Before you stop: commit where the others can see it (the shared clone's branches are the mailbox; origin is a mirror, pushed only with the user's go); update the state block in `docs/wip.md` (done, not done, facts the next reader needs, where the scratch material is); record open questions in the file of whoever must answer them. A parked session can be resumed, but assume it will not be: the repo has to be enough.
+
+Commits are signed (`commit.gpgsign` is on). If signing fails because the passphrase is not cached, stop and ask the human; never commit with `--no-gpg-sign` or `-c commit.gpgsign=false`.
