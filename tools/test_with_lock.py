@@ -69,6 +69,57 @@ class WithLock(unittest.TestCase):
         held.wait()
         self.assertEqual([f for f in os.listdir(self.dir.name) if f.endswith(".holder")], [])
 
+    def test_lock_dir_with_spaces_and_a_neighbouring_file_survive(self):
+        # the holder list used to be split on spaces: "<dir>/my locks" made -x write over
+        # and then delete an unrelated file named "<dir>/my"
+        base = tempfile.mkdtemp(dir=self.dir.name)
+        neighbour = os.path.join(base, "my")
+        open(neighbour, "w").write("keep")
+        env = dict(self.env, BREADBIN_LOCKDIR=os.path.join(base, "my locks"))
+        self.assertEqual(self.run_lock("-x", "--", "true", env=env).returncode, 0)
+        self.assertEqual(open(neighbour).read(), "keep")
+
+    def test_exclusive_wait_is_bounded_by_t(self):
+        held = [self.start("--", "sleep", "4") for _ in range(2)]
+        time.sleep(0.5)
+        t0 = time.time()
+        self.assertEqual(self.run_lock("-x", "-t", "2", "--", "true").returncode, 75)
+        self.assertLess(time.time() - t0, 3.5)
+        for p in held:
+            p.wait()
+
+    def test_plain_wait_is_bounded_by_t(self):
+        held = [self.start("--", "sleep", "4") for _ in range(3)]
+        time.sleep(0.5)
+        t0 = time.time()
+        self.assertEqual(self.run_lock("-t", "1", "--", "true").returncode, 75)
+        self.assertLess(time.time() - t0, 2.5)
+        for p in held:
+            p.wait()
+
+    def test_exclusive_covers_slot_files_beyond_its_own_cap(self):
+        # a session whose environment says 3 slots must still exclude a holder of slot 5
+        lf = os.path.join(self.dir.name, "vice.5.lock")
+        holder = subprocess.Popen(["flock", lf, "sleep", "3"])
+        time.sleep(0.5)
+        self.assertEqual(self.run_lock("-x", "-t", "1", "--", "true").returncode, 75)
+        holder.wait()
+
+    def test_stale_holder_file_is_not_reported_as_busy(self):
+        open(os.path.join(self.dir.name, "vice.holder"), "w").write("someone dead\n")
+        r = self.run_lock("-x", "--", "true")
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("busy", r.stderr)
+
+    def test_internal_variables_do_not_leak_into_the_command(self):
+        r = self.run_lock("-x", "--", "sh", "-c", "env | grep -c '^WITH_LOCK_' || true")
+        self.assertEqual(r.stdout.strip(), "0")
+
+    def test_non_integer_timeout_is_refused(self):
+        r = self.run_lock("-t", "0.5", "--", "true")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("whole seconds", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
