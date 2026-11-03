@@ -545,3 +545,14 @@ Read only, Ultimate firmware 1.1.0: `CHANGE DIR /Temp`, `OPEN DIR` (no name, the
 - Lengths: chunk 0 is 13 bytes, chunks 1 to 19 are 9 bytes, chunk 20 is 13, chunk 21 is 11. The lengths vary with the name, which fits one directory entry per chunk. Not checked against the bytes: that each chunk holds exactly one entry, and what the names are.
 - A second `READ DIR` on the same open directory returns the same listing again (the earlier finding), so the end of the listing is marked by the Data Last status of the last chunk, not by an empty read.
 - The earlier "one packet" wording is withdrawn (see the correction above).
+
+### 2026-11-02, READ DIR: one entry per chunk, confirmed (Agent A; `uci.py rdsink`, bench op 9 keeps every chunk in the sink)
+
+Read only, `/Temp` on the Ultimate (RAM disk): `CHANGE DIR /Temp`, `OPEN DIR` (no name), `READ DIR` once.
+
+- **23 chunks, 217 bytes**; chunks 0 to 21 end with `$30` (Data More), chunk 22 ends with `$20` (Data Last).
+- **Each chunk is one entry:** one attribute byte (`$20`, a file) followed by the name, with no terminator. Chunk length is 1 plus the name length (13 for `breadbin.d64`, 9 for `temp0004`).
+- **The names equal an independent FTP listing of `/Temp`, in the same order:** `breadbin.d64`, `prog.prg`, `temp0004`, `temp0011`, `temp0013` to `temp0022`, `test.d64`, `test_con.d64`, `uci32k.bin`. Bench entries and FTP entries: 23 and 23, identical (checked by script).
+- So the module's design ("one entry per packet, re-list on every call, skip the entries already delivered") matches the bytes on the wire. The earlier "one packet" note is replaced by this one.
+
+Not measured: a directory with a name longer than 12 characters; a listing that spans more than the 16 KB of the sink (the sink wraps).
