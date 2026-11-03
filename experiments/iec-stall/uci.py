@@ -136,6 +136,8 @@ GROUPS = {
              ("open the file again", open_read()),
              ("load the same, again", cmd(1, 0x21, *struct.pack("<I", 0x20000), *struct.pack("<I", 32768))),
              ("close", close())]),
+    "rdchunks": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("OPEN DIR (current directory)", cmd(1, 0x13)),
+                  ("READ DIR, one listing", cmd(1, 0x14))]),
     "net": ([("target 3 identify", cmd(3, 0x01)), ("target 4 identify", cmd(4, 0x01))]),
     # Q2, Q4, Q5 of docs/design/next/uci-v1.md: directory commands (absolute and relative names after CHANGE DIR,
     # FILE STAT by name), the error cases, READ DIR packets. Creates and removes /Temp/bdir and /Temp/bdir/sub.
@@ -202,6 +204,21 @@ def run(name, ops):
               f"{' TIMEOUT' if res else ''}  regs {e[1]:02X}/{idr:02X}  {show[:48]}")
 
 
+def chunk_log():
+    """After a run: where each Data More chunk of the last command started (cumulative bytes) and its status."""
+    n = u.readmem(0xC79E, 1)[0]
+    starts = [struct.unpack("<H", bytes(u.readmem(0xC7A0 + 2 * i, 2)))[0] for i in range(min(n, 32))]
+    stats = [bytes(u.readmem(0xC760 + i, 1))[0] for i in range(min(n, 32))]
+    total = struct.unpack("<H", bytes(u.readmem(0xC710, 2)))[0]
+    print(f"== chunks of the last command: {n}, total response {total} bytes")
+    for i in range(min(n, 32)):
+        end = starts[i + 1] if i + 1 < n else total
+        print(f"  chunk {i:2d}: starts at {starts[i]:4d}, length {end - starts[i]:3d}, ends with status ${stats[i]:02X}"
+              f"{' (Data Last)' if stats[i] & 0xF0 == 0x20 else ' (Data More)' if stats[i] & 0xF0 == 0x30 else ''}")
+
+
 work = os.environ.get("SCRATCH", ".")
 for g in sys.argv[1:]:
     run(g, GROUPS[g])
+    if g == "rdchunks":
+        chunk_log()
