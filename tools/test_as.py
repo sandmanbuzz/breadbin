@@ -114,6 +114,22 @@ class AsOutput(unittest.TestCase):
         r = self.asm("frobnicate\n", expect_exit=1)
         self.assertNotIn("/o", r.files)
 
+    def test_bigbuf_assembles_small_and_runs(self):
+        with open(os.path.join(ROOT, "rootfs", "home", "bigbuf.s"), "rb") as f:
+            src = f.read()
+        r = asim.run("as", ["/s", "/o"], {"/s": src})
+        self.assertEqual(r.exit, 0, r.err)
+        b = r.files["/o"]
+        h = head(b)
+        self.assertEqual(h["bss"], 12000)
+        self.assertLess(len(b), 200)                      # the old assembler: refused (over 8 KB) or 12 KB on disk
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".cx") as f:
+            f.write(b)
+            f.flush()
+            run = asim.run("bigbuf", [], path=f.name)
+        self.assertEqual((run.exit, run.out), (0, b"bss ok\n"))
+
 
 if __name__ == "__main__":
     unittest.main()
