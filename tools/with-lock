@@ -3,14 +3,38 @@
 # each other's timing-sensitive runs (VICE, the Ultimate and the drives).
 #   tools/with-lock [-r ultimate|vice] [-x] [-t SECONDS] -- command args...
 # Locks live in $BREADBIN_LOCKDIR (default /tmp/breadbin-locks). Resources:
-#   vice      a pool of $BREADBIN_VICE_SLOTS slots (default 3): a plain run takes any one
+#   vice      a pool of $BREADBIN_VICE_SLOTS slots (default 6): a plain run takes any one
 #             slot, so up to that many VICE runs go at once; -x takes every slot, for runs
-#             whose wall-clock data matters (nothing else VICE runs meanwhile).
+#             whose wall-clock data matters (nothing else VICE runs meanwhile). -x also
+#             takes every slot file that exists, so a session with a smaller cap in its
+#             environment still excludes the others; every session should use one cap.
 #   ultimate  one holder at a time (the hardware session); -x is implied.
 # Slot 0 is the old single-lock file ($res.lock), the others are $res.N.lock.
-# A command that already runs under with-lock for the same resource (tools/ci/run.sh
-# takes its own slot) passes straight through; asking for -x under a shared slot is an
-# error. While waiting the holders are printed. Needs flock(1).
+# -t is a limit in whole seconds on the whole wait (exit 75 on timeout; a command that
+# itself exits 75 looks the same). A command that already runs under with-lock for the same
+# resource (tools/ci/run.sh takes its own slot) passes straight through; asking for -x under
+# a shared slot is an error. While waiting the holders are printed. Needs flock(1).
+# The command inherits the lock descriptors: a child that outlives it keeps the slot (the
+# point: an orphaned VICE still counts). Holder files are informational; the kernel frees
+# the locks when every process holding them is gone.
+
+lockf() { if [ "$1" -eq 0 ]; then echo "$dir/$res.lock"; else echo "$dir/$res.$1.lock"; fi; }
+holdf() { if [ "$1" -eq 0 ]; then echo "$dir/$res.holder"; else echo "$dir/$res.$1.holder"; fi; }
+
+# Inner half of an exclusive run (below): every slot and the gate are already held by the
+# flock processes that exec'd us, so only record the holders, run, and clean up. The
+# directory, resource and slot count come in the environment, not as a split-up list.
+if [ -n "${WITH_LOCK_INNER:-}" ]; then
+    dir=$WITH_LOCK_DIR res=$WITH_LOCK_RES nx=$WITH_LOCK_N
+    unset WITH_LOCK_INNER WITH_LOCK_DIR WITH_LOCK_RES WITH_LOCK_N
+    label="$(id -un)@$(hostname) pid $$ $(date -u +%FT%TZ) mode x $*"
+    k=0; while [ $k -lt "$nx" ]; do echo "$label" > "$(holdf $k)"; k=$((k + 1)); done
+    "$@"
+    rc=$?
+    k=0; while [ $k -lt "$nx" ]; do rm -f "$(holdf $k)"; k=$((k + 1)); done
+    exit $rc
+fi
+self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
 res=vice; wait=3600; excl=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -22,8 +46,9 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ $# -gt 0 ] || { echo "usage: with-lock [-r vice|ultimate] [-x] [-t secs] -- cmd..." >&2; exit 2; }
+case $wait in ''|*[!0-9]*) echo "with-lock: -t takes whole seconds, not '$wait'" >&2; exit 2 ;; esac
 n=1
-[ "$res" = vice ] && n=${BREADBIN_VICE_SLOTS:-3}
+[ "$res" = vice ] && n=${BREADBIN_VICE_SLOTS:-6}
 case $n in ''|*[!0-9]*|0) echo "with-lock: bad BREADBIN_VICE_SLOTS '$n'" >&2; exit 2 ;; esac
 [ "$n" -eq 1 ] && excl=1
 want=s; [ $excl = 1 ] && want=x
@@ -36,12 +61,19 @@ case " ${BREADBIN_LOCK_HELD:-} " in
 esac
 dir=${BREADBIN_LOCKDIR:-/tmp/breadbin-locks}
 mkdir -p "$dir"
-lockf() { if [ "$1" -eq 0 ]; then echo "$dir/$res.lock"; else echo "$dir/$res.$1.lock"; fi; }
-holdf() { if [ "$1" -eq 0 ]; then echo "$dir/$res.holder"; else echo "$dir/$res.$1.holder"; fi; }
+# every slot that exists, for -x and for the holder listing (a larger cap elsewhere counts)
+nx=$n
+for f in "$dir/$res".[0-9]*.lock; do
+    [ -e "$f" ] || continue
+    i=${f##*/}; i=${i#"$res".}; i=${i%.lock}
+    case $i in ''|*[!0-9]*) continue ;; esac
+    i=$((i + 1)); [ $i -gt $nx ] && nx=$i
+done
 holders() {
     k=0
-    while [ $k -lt $n ]; do
-        [ -f "$(holdf $k)" ] && cat "$(holdf $k)"
+    while [ $k -lt $nx ]; do
+        # only a slot that is locked right now has a holder worth naming
+        if [ -f "$(holdf $k)" ] && ! flock -n "$(lockf $k)" true 2>/dev/null; then cat "$(holdf $k)"; fi
         k=$((k + 1))
     done
 }
@@ -51,43 +83,29 @@ timeout() { echo "with-lock: timeout waiting for '$res'" >&2; exit 75; }
 busy() { echo "with-lock: '$res' is busy, holders: $(holders | tr '\n' ';'); waiting up to ${wait}s" >&2; }
 
 # The gate keeps -x from starving: a shared run holds it (shared) only while it claims a
-# slot, a -x run holds it (exclusive) from its request until it has every slot, so new
+# slot, a -x run holds it (exclusive) from its request until the run is over, so new
 # shared runs queue behind it while it collects slots as the running ones finish.
 gate="$dir/$res.gate"
 if [ $excl = 1 ]; then
-    exec 8>>"$gate"
-    flock -w $wait 8 || timeout
-    have=" "; told=0
-    while :; do
-        k=0
-        while [ $k -lt $n ]; do
-            case "$have" in
-                *" $k "*) ;;
-                *)  fd=$((9 + k)); lf=$(lockf $k)
-                    eval "exec $fd>>\"\$lf\""
-                    if flock -n $fd; then have="$have$k "; else eval "exec $fd>&-"; fi ;;
-            esac
-            k=$((k + 1))
-        done
-        k=0; all=1
-        while [ $k -lt $n ]; do
-            case "$have" in *" $k "*) ;; *) all=0 ;; esac
-            k=$((k + 1))
-        done
-        [ $all = 1 ] && break
-        [ $told = 0 ] && { busy; told=1; }
-        [ "$(now)" -lt $deadline ] || timeout
-        sleep 1
-    done
-    exec 8>&-
-    slots=$(seq 0 $((n - 1)))
+    # One flock per slot, nested, then ourselves: the kernel holds each lock for as long as
+    # the process below it lives, and no file descriptor above 9 is needed (dash has none).
+    # The wait is split over the locks so the whole wait stays within -t. A timeout exits 75
+    # silently (flock -E).
+    h=$(holders); [ -n "$h" ] && busy
+    w=$((wait / (nx + 1))); [ $w -ge 1 ] || w=1
+    export BREADBIN_LOCK_HELD="${BREADBIN_LOCK_HELD:-} $res=x" WITH_LOCK_INNER=1 \
+        WITH_LOCK_DIR="$dir" WITH_LOCK_RES="$res" WITH_LOCK_N="$nx"
+    set -- "$self" "$@"
+    k=$((nx - 1))
+    while [ $k -ge 0 ]; do set -- flock -w "$w" -E 75 "$(lockf $k)" "$@"; k=$((k - 1)); done
+    exec flock -w "$w" -E 75 "$gate" "$@"
 else
     told=0; got=
     while :; do
         exec 8>>"$gate"
-        if flock -s -w 5 8; then
+        if flock -s -w 1 8; then
             k=0
-            while [ $k -lt $n ]; do
+            while [ $k -lt "$n" ]; do
                 lf=$(lockf $k)
                 exec 9>>"$lf"
                 if flock -n 9; then got=$k; break; fi
@@ -101,13 +119,12 @@ else
         [ "$(now)" -lt $deadline ] || timeout
         sleep 1
     done
-    slots=$got
 fi
-label="$(id -un)@$(hostname) pid $$ $(date -u +%FT%TZ) mode $want $*"
-for k in $slots; do echo "$label" > "$(holdf $k)"; done
-BREADBIN_LOCK_HELD="${BREADBIN_LOCK_HELD:-} $res=$want"
+label="$(id -un)@$(hostname) pid $$ $(date -u +%FT%TZ) mode s $*"
+echo "$label" > "$(holdf $got)"
+BREADBIN_LOCK_HELD="${BREADBIN_LOCK_HELD:-} $res=s"
 export BREADBIN_LOCK_HELD
 "$@"
 rc=$?
-for k in $slots; do rm -f "$(holdf $k)"; done
+rm -f "$(holdf $got)"
 exit $rc
