@@ -151,6 +151,13 @@ GROUPS = {
               ("DELETE non-empty dir /Temp/bdir", cmd(1, 0x09, *b"/Temp/bdir")),
               ("DELETE /Temp/bdir/sub", cmd(1, 0x09, *b"/Temp/bdir/sub")), ("DELETE /Temp/bdir", cmd(1, 0x09, *b"/Temp/bdir")),
               ("FILE STAT /Temp/bdir (gone)", cmd(1, 0x08, *b"/Temp/bdir")), ("CHANGE DIR /", cmd(1, 0x11, *b"/"))]),
+    # Q7: LOAD REU near the end of a 2 MB REU (needs /Temp/uci32k.bin from the write group, and the REU in the config).
+    # Each load reopens the file: a LOAD reads from the open file's position, so a second load after the first
+    # reads at end of file and loads 0 bytes.
+    "reuend": ([("open 32 KB file", open_read()), ("LOAD REU 32 KB at $1F8000 (ends at 2 MB)", cmd(1, 0x21, *struct.pack("<I", 0x1F8000), *struct.pack("<I", 32768))),
+                ("close", close()), ("open", open_read()), ("LOAD REU 256 at $1FFF00 (ends at 2 MB)", cmd(1, 0x21, *struct.pack("<I", 0x1FFF00), *struct.pack("<I", 256))),
+                ("close", close()), ("open", open_read()), ("LOAD REU 512 at $1FFF00, crossing 2 MB", cmd(1, 0x21, *struct.pack("<I", 0x1FFF00), *struct.pack("<I", 512))),
+                ("close", close())]),
     # READ DIR follow-up: the dirs group got the same 85-byte packet four times. Open /Temp (which has entries) and read.
     "readdir": ([("OPEN DIR /Temp", cmd(1, 0x13, *b"/Temp")), ("READ DIR 1", cmd(1, 0x14)), ("READ DIR 2", cmd(1, 0x14)),
                  ("READ DIR 3", cmd(1, 0x14)), ("OPEN DIR /Temp/bdir again", cmd(1, 0x13, *b"/Temp/bdir")),
