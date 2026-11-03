@@ -703,6 +703,14 @@ class Pipes(unittest.TestCase):
         self.v.run("echo c >> /home/tl")
         self.assertEqual(self.v.run("tail -1 /home/tl").strip(), "c")
 
+    def test_sort_empty_file(self):
+        self.v.run("cat /dev/null > /home/se")
+        self.assertEqual(self.v.run("sort /home/se").strip(), "")
+
+    def test_tee_more_than_four_files_is_an_error(self):
+        out = self.v.run("echo x | tee /home/t1 /home/t2 /home/t3 /home/t4 /home/t5")
+        self.assertIn("too many files", out)
+
     def test_tail_more_than_the_ring(self):
         # six copies of /etc/help: 2448 bytes, over the 2 KB ring, so the wrap is exercised
         self.v.run("cat /etc/help > /home/big")
