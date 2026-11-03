@@ -8,7 +8,7 @@
 ;   COUNT ($C7F0, 2 bytes)  sectors done
 ;   ERRCH ($C7F2, 2 bytes)  the status of the failing command (for example "74" on a drive error)
 ;   STATE ($C7F4)           0 running, 1 done, $EE block error (see ERRCH), $EF could not open the channels
-; The track and sector in progress are at TRK ($F7) and SECT ($F8).
+; The track and sector in progress are at TRK and SECT (ordinary RAM, see below).
 
 SETNAM = $FFBD
 SETLFS = $FFBA
