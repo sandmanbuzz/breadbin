@@ -54,10 +54,10 @@ first = $2e
         bcs @end
         ldy #0
         sta (p),y
-        inc p
-        bne @rd
+        inc p               ; the end test runs on every byte: the ring's end is not page aligned
+        bne @c
         inc p+1
-        lda p+1
+@c:     lda p+1
         cmp #>(ring+RING)
         bne @rd
         lda p
@@ -197,17 +197,18 @@ setlen: lda avail
         sta len+1
         rts
 
-qdec:   lda q
+qdec:   lda q               ; q - 1, and back to the ring's end when q goes below the ring's start
         bne @d
         dec q+1
 @d:     dec q
         lda q+1
         cmp #>ring
+        bcc @wrap
         bne @r
         lda q
         cmp #<ring
         bcs @r
-        lda #<(ring+RING-1)
+@wrap:  lda #<(ring+RING-1)
         sta q
         lda #>(ring+RING-1)
         sta q+1

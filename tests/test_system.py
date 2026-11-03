@@ -694,6 +694,13 @@ class Pipes(unittest.TestCase):
         self.v.run("echo c >> /home/tl")
         self.assertEqual(self.v.run("tail -1 /home/tl").strip(), "c")
 
+    def test_tail_more_than_the_ring(self):
+        # six copies of /etc/help: 2448 bytes, over the 2 KB ring, so the wrap is exercised
+        self.v.run("cat /etc/help > /home/big")
+        for _ in range(5):
+            self.v.run("cat /etc/help >> /home/big")
+        self.assertEqual(self.v.run("tail -1 /home/big").strip(), "run/stop interrupts a command")
+
     def test_sort_lines(self):
         self.v.run("echo pear > /home/so")
         self.v.run("echo apple >> /home/so")
