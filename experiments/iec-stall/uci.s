@@ -47,6 +47,7 @@ opn    = $C71E
 tcnt   = $C720              ; 3 byte timeout counter
 done   = $C7F0
 nops   = $C7F1
+abortat = $C79D              ; op 12: ABORT the command after this many chunks ($FF: never)
 chunkn = $C79E              ; READ DIR chunk log: count here, cumulative start (16 bits) at $C7A0, last status at $C760 (32 chunks)
 
         .segment "CODE"
@@ -79,8 +80,9 @@ start:  lda #$FF            ; the 32-bit microsecond clock: CIA2 timer A (phi2) 
         jsr wait_idle
 @op:    ldy #0
         lda (sp),y
-        beq @end
-        sta opn
+        bne @more
+        jmp @end
+@more:  sta opn
         jsr log_begin
         lda opn
         cmp #1
@@ -112,8 +114,17 @@ start:  lda #$FF            ; the 32-bit microsecond clock: CIA2 timer A (phi2) 
         jsr op_setpush
         jmp @next
 @n9:    cmp #9
-        bne @end
+        bne @n12
         jsr op_cmd
+        jmp @next
+@n12:   cmp #12
+        beq @op12
+        jmp @end
+@op12:  ldy #1
+        lda (sp),y
+        sta abortat
+        lda #2              ; op 12 is [12, value]: advance past it
+        jsr adv
         jmp @next
 @rl:    jsr op_rdloop
 @next:  jsr log_end
@@ -256,7 +267,17 @@ wait_idle: jsr settimeout   ; STATE = 00; clear a stuck error flag on the way
 ; ---- one command: bytes already queued with push; read everything and accept ------
 ; mode 0: keep the first bytes in the log; mode 1: put the data into the sink
 finish: jsr settimeout
-        ldx chunkn          ; log where this chunk starts (cumulative response length)
+        lda abortat         ; op 12: this many chunks were read, so stop here (ABORT, then the command is over)
+        cmp #$FF
+        beq @go0
+        cmp chunkn
+        bne @go0
+        lda #$04
+        sta UCI_CTL
+        lda #2
+        sta result
+        rts
+@go0:  ldx chunkn          ; log where this chunk starts (cumulative response length)
         cpx #32
         bcs @nolog1
         txa
