@@ -556,3 +556,7 @@ Read only, `/Temp` on the Ultimate (RAM disk): `CHANGE DIR /Temp`, `OPEN DIR` (n
 - So the module's design ("one entry per packet, re-list on every call, skip the entries already delivered") matches the bytes on the wire. The earlier "one packet" note is replaced by this one.
 
 Not measured: a directory with a name longer than 12 characters; a listing that spans more than the 16 KB of the sink (the sink wraps).
+
+### 2026-11-02, READ DIR with a name longer than 12 characters (Agent A; `uci.py rdlong`, read only)
+
+`CHANGE DIR /SD`, `OPEN DIR`, `READ DIR` once. 13 chunks, 103 bytes, the last ends with `$20` (Data Last). Each chunk is an attribute byte and the name: **`The Very Second` (15 characters) comes back in full** (chunk 10, attribute `$10` for a directory, 16 bytes). The other names are whole as well (`collections`, 11 characters, and the rest). No truncation to 12 was seen. The name was found read only over FTP, and nothing was created. Not measured: a 16-character name (the DOS limit), which the card does not hold.
