@@ -342,9 +342,9 @@ rt_puts_done:
 
 DATA = """\
 ; --- data ---
+cc_ptr = $2b           ; zero page: (zp),y in rt_puts needs a zero-page pointer (program ZP is $23-$2f)
 acc:    .res 2
 tmp:    .res 2
-cc_ptr: .res 2
 cc_y:   .res 1
 cc_ch:  .res 1
 cc_sp:  .res 1

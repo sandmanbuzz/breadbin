@@ -37,11 +37,15 @@ Not yet: `char`, arrays, pointers, `for`, `* /`, parameters, globals, `#include`
 - `as` holds at most 220 symbols (`NSYM`); a large program will hit that before it hits the code
   size. The count is not checked yet.
 - The software stack is 32 levels; deeper expressions are refused.
-- Zero page: nothing is in zero page yet, except what `as` and the kernel's `sys_write` use
-  (`r0`, `r1`) and the `(zp),y` pointer `cc_ptr`. The roadmap's "a few bytes of zero page" is
-  still to be measured.
-- Not run on the C64: the output is checked for structure (labels, branch targets, the string
-  bytes, the routines per operator), not by executing it. Running it is the next step.
+- Size on `as` (findings for S13): hello assembles to 390 bytes with 71 relocations, from 153
+  emitted lines and 24 labels (about 28 names with the system names). The loop program has 194
+  lines and 27 labels. Both are far under the 220-symbol table; the count is not checked yet.
+- Zero page: one pair, `cc_ptr = $2b` (the string pointer for `(zp),y` in `rt_puts`). `as`
+  accepted `(zp),y` with a non-zero-page pointer and emitted a silent wrong address (found on the
+  machine: the string read as empty). The data area was the first placement and it was wrong.
+- Run on the C64: `tests/test_compiled.py` compiles hello and a five-pass loop on the host,
+  puts the `.s` on a copy of the test disk, runs `as` on the machine, runs the result and checks
+  the output. Both pass.
 
 ## Open for S17
 

@@ -50,6 +50,12 @@ class Hello(unittest.TestCase):
         self.assertIn("        lda (cc_ptr),y\n", out)
         self.assertIn("        jsr sys_write\n", out)
 
+    def test_string_pointer_is_zero_page(self):
+        # (zp),y needs a zero-page pointer; `as` does not check it (the machine run found the bug)
+        out = compile_src(HELLO)
+        self.assertIn("cc_ptr = $2b", out)
+        self.assertNotIn("cc_ptr: .res", out)
+
     def test_every_branch_target_is_defined_once(self):
         out = compile_src(HELLO)
         labels = defined_labels(out)
