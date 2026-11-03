@@ -1,0 +1,12 @@
+# name|unittest specs (classes or methods), in run order. One shard = one container = one vice slot.
+# tools/ci/sharded.sh runs these; tools/test_shards.py (host-only) checks that every VICE test is in
+# exactly one shard. Design and reasons: docs/ci.md, "Sharded suite".
+# Rules: Boot stays whole (state carries between its tests; one wall-clock assertion). Cache is
+# split by method (each test is independent). Cache never runs after Drives in a shard (Drives
+# writes the master image the others boot from). Console and Keyboard are alone in their shard.
+s1-boot|tests.test_system.Boot
+s2-cacheA-exec|tests.test_system.Cache.test_no_reu tests.test_system.Cache.test_pristine_disk_after_writes tests.test_system.Cache.test_warm_boot_hits tests.test_system.Cache.test_write_through tests.test_system.Exec
+s3-cacheB-persist-pool|tests.test_system.Cache.test_cache0_kernel_has_no_cache tests.test_system.Cache.test_new_disk_discards tests.test_system.Cache.test_new_label_discards tests.test_system.Cache.test_off_and_flush tests.test_system.Cache.test_small_reu tests.test_system.Persistence tests.test_system.Pool
+s4-drives-modules-reu|tests.test_system.Drives tests.test_system.Modules tests.test_system.REU
+s5-console|tests.test_console
+s6-keyboard|tests.test_keyboard

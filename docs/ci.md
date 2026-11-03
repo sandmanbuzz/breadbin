@@ -18,6 +18,12 @@ Env: `BREADBIN_CI_IMAGE`, `BREADBIN_CI_ROMS`, `BREADBIN_CI_MEM` (container memor
 
 Always wrap manual experiments in `timeout`; `run.sh` uses `--rm --init`.
 
+## Sharded suite
+
+`tools/ci/sharded.sh` runs the VICE suite as six containers at once (`tools/ci/shards.txt`: Boot whole; Cache split by method; Console and Keyboard alone), under one `with-lock -x`, so the only load is its own six VICEs. It builds and runs the host tests first, snapshots the commit with `git archive` so every shard sees one tree, then prints a table per shard and writes `merged.log` (failures first) and load samples. It fails on any non-zero shard, a shard with no `Ran` line, any skip, or a total that differs from the discovered test count. `tools/ci/sharded.sh --check` (and `tools/test_shards.py`, in `make test-host`) checks without VICE that every test is in exactly one shard, so a new test cannot fall out of it: add it to `shards.txt`. No retry: a red shard stays red until its cause is known. The serial run (`BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test`) stays the reference gate until three sharded runs in a row give the same pass/fail set.
+
+Cap check on the runner (2026-11-03, `tools/with-lock -x`, 6 slots, VICE 3.9, x86_64): `Boot.test_26` alone 70 s, 3 at once 72 s, 6 at once 73 s; the `Cache` class (9 tests, about 17 boots) 486 s alone, 489 s with five `Boot.test_26` copies beside it, and 489 s with six `Cache` runs at once. No failures in any of it. So six concurrent runs cost under 1 % here; the knee, if there is one, is above six (not measured).
+
 ## Lease broker
 
 `tools/ci/broker.py` is a stdlib-only lease broker: named resources (`vice`, `ultimate`, anything), FIFO queue, holder label, lease dies when the client's connection drops. `tools/ci/lease` is the client, same shape as `tools/with-lock`:
