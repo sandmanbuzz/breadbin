@@ -14,7 +14,7 @@ Where this fork is heading, and the first stories. Written 2026-10-30 after a fi
 | Limit | Where | Why it matters |
 |---|---|---|
 | ~30 KB total process memory; programs get a fixed image + BSS at spawn and cannot grow | `mem.s`, `exec.s` | A compiler needs symbol tables that scale with the source. |
-| `as` caps output at 8 KB and 220 symbols | `src/bin/as.s` (`OBMAX`, `NSYM`) | Compiler output is label-heavy, so this is hit early. |
+| `as` caps stored output at 8 KB (a trailing `.res` is BSS and does not count) and 220 symbols | `src/bin/as.s` (`OBMAX`, `NSYM`) | Compiler output is label-heavy, so the symbol limit is hit early. |
 | Free zero page for a program is about 13 bytes (`$23–$2F`); hardware stack slice is 130 bytes | `include/breadbin.inc`, `kernel.cfg` | Compiled code needs a software stack and a small, fixed runtime footprint. |
 | Files max 35,840 bytes; 127 files per disk; 14-character names | c64fs (`fs.s`) | Multi-file projects and long sources do not fit. |
 | Disk reads run at about one block per second and stall every process | `blk.s`, KERNAL serial path | The edit, compile, run loop is painful at that speed. |

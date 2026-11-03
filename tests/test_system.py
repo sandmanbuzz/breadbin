@@ -268,6 +268,15 @@ class Boot(unittest.TestCase):
         self.assertEqual(self.run_("whoami"), "root")
         self.assertIn("root:", self.run_("cat /etc/passwd"))
 
+    def test_27_assembler_trailing_res_is_bss(self):
+        """A .res at the end of the source is BSS (S12a): 12,000 bytes of buffer that are not in the
+        file, are zero at load, and are writable. The old assembler refused anything over 8 KB."""
+        out = self.run_("as /home/bigbuf.s /home/bigbuf")
+        self.assertIn("bytes", out)
+        self.assertEqual(self.run_("/home/bigbuf"), "bss ok")
+        # the first run left 42 in its BSS; the program checks it is zero again at the start
+        self.assertEqual(self.run_("/home/bigbuf"), "bss ok")
+
 
 class Persistence(unittest.TestCase):
     """Files written by Breadbin survive a reboot and are readable on the host."""
