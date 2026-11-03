@@ -592,3 +592,11 @@ Scratch copy of `build/breadbin.d64` at `/Temp/bqwb/wb.d64`. Drive B: bus set to
 - Scratch file and directory removed (checked over FTP).
 
 This repeats the earlier drive-A result (no write-back observed). The write-back question stays open: the file did not change during or after the unmount, so the emulator's write path to the image is not reached by a block write. Not tried: a drive reset after the U2, a longer wait, the SD card as the image's home.
+
+### 2026-11-02, Q6 variants: a 5-minute wait, and a drive reset after the U2 (Agent A; `writeback_b.py`, one at a time, same scratch setup)
+
+- **5-minute wait after the U2** (`u2:2 0 1 1` status `00, OK`): the probe block was **not** in the image file at 300 s, and not after the unmount.
+- **Drive B reset after the U2, before the unmount** (status `00, OK`): the block was **not** in the file after the reset, and not after the unmount.
+- Config restored after each run; the readback equals the baseline. Scratch file and directory removed.
+
+Under these conditions (a block write by U2 from BASIC, drive B, a 512-byte image copy on the RAM disk), the drive-written block did not reach the image file, in any of the three variants: 45 s, 300 s, or a drive reset. Q6 is closed as: no write-back of drive-modified images under these conditions. Not tried: an SD-card image (skipped by the facilitator), a different write (a full track, a directory entry), or a different host path.
