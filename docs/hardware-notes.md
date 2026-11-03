@@ -465,3 +465,7 @@ Ran `tests.test_system.Exec`, `Modules` and `Persistence` against the Ultimate (
 \* Unexclusive: host VICE under a plain `vice` slot, with other VICE runs possible during it. The wall-clock figure is a run duration, not a measured benchmark; the load underneath was described as light but not measured, so the error bar is unknown. Pass/fail results are not affected by the choice of run.
 
 Load snapshot for the footnote above (host, 2026-11-02, from `uptime`, one sample, not during the runs): 8 CPUs, load averages 3.08 / 3.52 / 3.32, seven user sessions. So the machine was about 40% busy across everyone, not idle; the VICE runs were not measured against that load. The error bar is that load, unmeasured per run.
+
+### 2026-11-02, new runner: JiffyDOS-ROM drive set in the container, VICE 3.x (Agent A)
+
+Tip `939a83f` (main), `tools/ci/run.sh test-only` with `BREADBIN_CI_JIFFY` (JiffyDOS C64 KERNAL and 1541-II ROM from the CI cache, not in the repo), under `tools/with-lock` (VICE slot). `Boot.test_02_echo` and `Drives` (6 tests including `test_cbm_disk`, `test_breadbin_disk`, `test_format`): **6 of 6 OK, 550 s**. Not run: `Boot` (rest), `Cache`, `Pool` with JiffyDOS, `test_keyboard`, the full suite, the physical 1541.
