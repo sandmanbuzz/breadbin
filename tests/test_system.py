@@ -669,3 +669,50 @@ class Drives(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Pipes(unittest.TestCase):
+    """tee, tail and sort (ported from upstream commit 04f3a47): one VICE session."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.img = os.path.join(ROOT, "build", "test_pipes.d64")
+        with open(IMAGE, "rb") as f, open(cls.img, "wb") as g:
+            g.write(f.read())
+        cls.v = make_target(cls.img)
+        cls.v.wait_shell()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.v.close()
+
+    def test_tee_copies_to_stdout_and_a_file(self):
+        out = self.v.run("echo teed | tee /home/tee1")
+        self.assertIn("teed", out)
+        self.assertIn("teed", self.v.run("cat /home/tee1"))
+
+    def test_tee_append(self):
+        self.v.run("echo one | tee /home/tee2")
+        self.v.run("echo two | tee -a /home/tee2")
+        self.assertIn("one", self.v.run("cat /home/tee2"))
+        self.assertIn("two", self.v.run("cat /home/tee2"))
+
+    def test_tail_last_lines(self):
+        self.v.run("echo a > /home/tl")
+        self.v.run("echo b >> /home/tl")
+        self.v.run("echo c >> /home/tl")
+        self.assertEqual(self.v.run("tail -1 /home/tl").strip(), "c")
+
+    def test_tail_more_than_the_ring(self):
+        # six copies of /etc/help: 2448 bytes, over the 2 KB ring, so the wrap is exercised
+        self.v.run("cat /etc/help > /home/big")
+        for _ in range(5):
+            self.v.run("cat /etc/help >> /home/big")
+        self.assertEqual(self.v.run("tail -1 /home/big").strip(), "run/stop interrupts a command")
+
+    def test_sort_lines(self):
+        self.v.run("echo pear > /home/so")
+        self.v.run("echo apple >> /home/so")
+        self.v.run("echo fig >> /home/so")
+        lines = [l.strip() for l in self.v.run("sort /home/so").splitlines() if l.strip()]
+        self.assertEqual(lines[:3], ["apple", "fig", "pear"])
