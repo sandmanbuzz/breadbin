@@ -54,6 +54,16 @@ class ShardList(unittest.TestCase):
             self.assertEqual(ms, sorted(ms), n)
 
 
+    def test_drives_is_split_by_method(self):
+        # Drives is the long pole: each of its methods in exactly one shard, never the whole class
+        ids = [i for i in shards.discovered() if i.startswith("tests.test_system.Drives.")]
+        self.assertEqual(len(ids), 5, ids)
+        specs = [s for _, ss in shards.shards() for s in ss if s.startswith("tests.test_system.Drives")]
+        self.assertTrue(all(s.rsplit(".", 1)[1].startswith("test_") for s in specs), specs)
+        self.assertEqual(sorted(specs), sorted(ids))
+        drives = [(n, ss) for n, ss in shards.shards() if any(s.startswith("tests.test_system.Drives") for s in ss)]
+        self.assertEqual(shards.problems(drives, ids, len(drives)), [])
+
 class Driver(unittest.TestCase):
     def test_script_parses_and_check_mode_runs(self):
         script = os.path.join(ROOT, "tools", "ci", "sharded.sh")
