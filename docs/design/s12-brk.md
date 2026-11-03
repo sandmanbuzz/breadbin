@@ -11,8 +11,10 @@ through `make size`). Whether this starts before the space pass is the owner's c
 - Programs are relocated at load, so a live process cannot be moved. The only ways to give it more
   memory are to extend its run in place, or to reserve the room at exec.
 - `exec` already allocates `image + bss + args` pages and zeroes the BSS from the header's BSS
-  size (`exec.s`: `npages` near line 195, `zero_bss` near 321). `as` always writes that header
-  field as 0 (`as.s`, near 156-175), so every `.res` in assembled output is stored in the file.
+  size (`exec.s`: `npages` near line 195, `zero_bss` near 321). `as` used to write that
+  header field as 0, so every `.res` in assembled output was stored in the file; S12a (below) is
+  implemented: a trailing `.res` is now the header's BSS size (host tests `tools/test_as.py`,
+  VICE `Boot.test_27`).
 - All 32 syscall slots are used (`NSYS=32`); a new one is a 6-byte entry in the `$CF00` page, which
   has about 29 bytes free (hand count: 4 more calls fit). A module cannot register a syscall.
 
