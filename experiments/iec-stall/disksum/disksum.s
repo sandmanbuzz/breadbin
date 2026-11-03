@@ -243,7 +243,7 @@ spt:
 @c:     lda #17
         rts
 
-; senddec: A = 0 to 99 -> two decimal digits on channel 15 (sent with CHROUT; A is clobbered)
+; senddec: A = 0 to 99 -> decimal digits on channel 15, no leading zero (sent with CHROUT; A is clobbered)
 senddec:
         ldy #0
 @t:     cmp #10
@@ -254,10 +254,11 @@ senddec:
         jmp @t
 @d:     pha
         tya
+        beq @u              ; no leading zero: the drive hangs on "U1:2 0 01 00" (hand test, 2026-11-02)
         clc
         adc #'0'
         jsr CHROUT
-        pla
+@u:     pla
         clc
         adc #'0'
         jsr CHROUT
