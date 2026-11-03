@@ -469,3 +469,7 @@ Load snapshot for the footnote above (host, 2026-11-02, from `uptime`, one sampl
 ### 2026-11-02, new runner: JiffyDOS-ROM drive set in the container, VICE 3.x (Agent A)
 
 Tip `939a83f` (main), `tools/ci/run.sh test-only` with `BREADBIN_CI_JIFFY` (JiffyDOS C64 KERNAL and 1541-II ROM from the CI cache, not in the repo), under `tools/with-lock` (VICE slot). `Boot.test_02_echo` and `Drives` (6 tests including `test_cbm_disk`, `test_breadbin_disk`, `test_format`): **6 of 6 OK, 550 s**. Not run: `Boot` (rest), `Cache`, `Pool` with JiffyDOS, `test_keyboard`, the full suite, the physical 1541.
+
+### 2026-11-02, new runner: physical 1541 power-cycled (fresh device 8), five-boot series of main 939a83f (Agent A)
+
+Drive power-cycled by the user (device 8 fresh). Stock KERNAL, Software IEC off, `plainboot.py build/breadbin.prg`, one configuration setup for five boots, restored on exit (JiffyDOS KERNAL, Software IEC on). **5 of 5 reached login, 22 s each.** Not run: a whole-disk compare, boot time against the old tree, the Ultimate-side `Drives` class (it is VICE-only: `Vice(...)` in `tests/test_system.py`, already run under JiffyDOS in the container, 6 of 6).
