@@ -1,6 +1,6 @@
 # How big are the user programs?
 
-Re-measured on `main` at `ba3b6d0` (43 programs, including `turbo`). An earlier measurement on `fix/iec-recover` (42 programs, 57,198 bytes) is superseded: the programs have shrunk since, by about 260 bytes each on `as` and `basic`. I did not bisect that drop. Method: `make`, then a relink of each program with `ld65 -m` to attribute bytes to modules. Blocks are 254 data bytes. Nothing in the tree was changed. Savings marked *est.* are arithmetic on these measurements, not builds.
+Re-measured on `main` at `ba3b6d0` (43 programs, including `turbo`). An earlier measurement on `fix/iec-recover` (42 programs, 57,198 bytes) is superseded: the programs have shrunk since, by 259 bytes each on every program that links `err.o` (`as`, `basic`, `sh`, `passwd`, `format`, ...). The cause is one commit, `b5efcda` ("err strings out of the programs: perr looks the message up in /etc/errors"): builds of it and of its parent `71ac25f` give `as` 6,375 and 6,116, `basic` 5,409 and 5,150, `sh` 3,941 and 3,682, `passwd` 2,598 and 2,339, `format` 2,232 and 1,973, and `edit` (no `err.o`) 2,099 in both. By reading the diff: `err.o` went from 609 to 368 bytes (strings out, a file reader in), and 9 fewer relocations at 2 bytes each make up the other 18 (241 + 18 = 259). Method: `make`, then a relink of each program with `ld65 -m` to attribute bytes to modules. Blocks are 254 data bytes. Nothing in the tree was changed. Savings marked *est.* are arithmetic on these measurements, not builds.
 
 ## Totals
 
