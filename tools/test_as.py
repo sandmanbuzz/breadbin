@@ -130,6 +130,21 @@ class AsOutput(unittest.TestCase):
             run = asim.run("bigbuf", [], path=f.name)
         self.assertEqual((run.exit, run.out), (0, b"bss ok\n"))
 
+    def test_pc_wrap_then_more_bytes_ends_cleanly(self):
+        # the hater's input: a wrap error, then more bytes: the old fill loop wrote over all of memory
+        r = self.asm(".byte 1,1,1,1,1,1,1,1,1,1\n.res 65530\n.byte 1\n", expect_exit=1)
+        self.assertIn(b"too big", r.err)
+        self.assertNotIn("/o", r.files)
+
+    def test_a_forward_res_count_is_an_error(self):
+        r = self.asm(".byte 1\n.res n\n.byte 2\nn = 4\n", expect_exit=1)
+        self.assertIn(b"res count", r.err)
+        self.assertNotIn("/o", r.files)
+
+    def test_a_backward_res_count_is_fine(self):
+        h, img, _ = self.out("n = 4\n.byte 1\n.res n\n")
+        self.assertEqual((h["image"], h["bss"]), (1, 4))
+
 
 if __name__ == "__main__":
     unittest.main()

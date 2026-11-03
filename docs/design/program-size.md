@@ -90,3 +90,5 @@ done
 ```
 
 then read the "Modules list" section of each map (the `breadbin.lib(...)` entries are library modules).
+
+After S12a (a trailing `.res` is BSS in `as`), `as` is 6,270 bytes (6,116 before): the kernel figures are unchanged. Measured with `make size` on the branch that made the change.
