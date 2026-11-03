@@ -10,7 +10,7 @@
 set -u
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-rev=HEAD; out=; stagger=5; outer=1; expect=; check=0
+rev=HEAD; out=; stagger=5; outer=1; expect=; check=0; vdir=
 while [ $# -gt 0 ]; do
     case $1 in
         --rev) rev=$2; shift 2 ;;
@@ -19,11 +19,50 @@ while [ $# -gt 0 ]; do
         --no-outer-lock) outer=0; shift ;;
         --expect) expect=$2; shift 2 ;;
         --check) check=1; shift ;;
-        *) echo "usage: $0 [--check] [--rev REV] [--out DIR] [--stagger S] [--no-outer-lock] [--expect N]" >&2; exit 2 ;;
+        --verdict) vdir=$2; shift 2 ;;
+        *) echo "usage: $0 [--check] [--verdict DIR --expect N] [--rev REV] [--out DIR] [--stagger S] [--no-outer-lock] [--expect N]" >&2; exit 2 ;;
     esac
 done
 
+
+# verdict DIR EXPECT: judge a finished run from its files (DIR/names, NAME.log .rc .start .end, t0).
+# Red on: a non-zero shard, a shard with no "Ran N tests" line, any skip, or a total that differs
+# from EXPECT. Writes DIR/merged.log (failure sections first). Used by the run and by --verdict.
+verdict() {
+    local out=$1 expect=$2 n log rc wall ran cnt secs note fail=0 total=0 names=() t0e
+    mapfile -t names < "$out/names"
+    printf '%-26s %4s %6s %8s %10s %s\n' shard rc tests wall_s unittest_s note
+    for n in "${names[@]}"; do
+        log=$out/$n.log
+        rc=$(cat "$out/$n.rc" 2>/dev/null || echo 99)
+        wall=$(( $(cat "$out/$n.end" 2>/dev/null || date +%s) - $(cat "$out/$n.start" 2>/dev/null || date +%s) ))
+        ran=$(sed -nE 's/^[0-9.]+ Ran ([0-9]+) tests? in ([0-9.]+)s$/\1 \2/p' "$log" 2>/dev/null | tail -1)
+        cnt=${ran%% *}; secs=${ran#* }; note=
+        [ "$rc" = 0 ] || { note="rc=$rc"; fail=1; }
+        [ -n "$ran" ] || { note="$note no-Ran-line"; fail=1; cnt=0; secs=-; }
+        if grep -qE ' \.\.\. skipped|skipped=' "$log" 2>/dev/null; then note="$note SKIPS"; fail=1; fi
+        total=$(( total + cnt ))
+        printf '%-26s %4s %6s %8s %10s %s\n' "$n" "$rc" "$cnt" "$wall" "$secs" "$note"
+    done
+    t0e=$(cat "$out/t0" 2>/dev/null || date +%s)
+    echo "sharded: $total tests run, $expect expected; wall $(( $(date +%s) - t0e ))s"
+    [ "$total" = "$expect" ] || { echo "sharded: test count mismatch" >&2; fail=1; }
+    {
+        for n in "${names[@]}"; do
+            sed -nE '/^[0-9.]+ ={70}$/,/^[0-9.]+ Ran /p' "$out/$n.log" 2>/dev/null | sed "s/^/[$n] /"
+        done
+        for n in "${names[@]}"; do sed "s/^/[$n] /" "$out/$n.log" 2>/dev/null; done
+    } > "$out/merged.log"
+    echo "sharded: merged log $out/merged.log"
+    [ $fail = 0 ] && echo "sharded: PASS" || echo "sharded: FAIL"
+    return $fail
+}
+
 slots=${BREADBIN_VICE_SLOTS:-6}
+if [ -n "$vdir" ]; then
+    [ -n "$expect" ] || { echo "--verdict needs --expect N" >&2; exit 2; }
+    verdict "$vdir" "$expect"; exit $?
+fi
 if [ $check = 1 ]; then
     exec python3 -I "$repo/tools/ci/shards.py" check "$slots"
 fi
@@ -69,11 +108,11 @@ echo "sharded: host tests rc=$hrc in $(( $(date +%s) - t0 ))s"
       "$(cut -d' ' -f1-3 /proc/loadavg)"; sleep 2; done ) > "$out/pressure.log" &
 sampler=$!
 
-declare -A pid start
-names=()
+declare -A pid
+names=(); : > "$out/names"; date +%s > "$out/t0"
 while IFS=$'\t' read -r name specs; do
     names+=("$name")
-    start[$name]=$(date +%s)
+    echo "$name" >> "$out/names"; date +%s > "$out/$name.start"
     # shellcheck disable=SC2086  # specs are plain test names, split on purpose
     ( "$snap/tools/ci/run.sh" test-only T="$specs" 2>&1 | stamp > "$out/$name.log"
       echo "${PIPESTATUS[0]}" > "$out/$name.rc"
@@ -84,30 +123,5 @@ done < <(python3 -I "$snap/tools/ci/shards.py" list)
 for n in "${names[@]}"; do wait "${pid[$n]}"; done
 kill $sampler 2>/dev/null; sampler=
 
-fail=0; total=0
-printf '%-26s %4s %6s %8s %10s %s\n' shard rc tests wall_s unittest_s note
-for n in "${names[@]}"; do
-    log=$out/$n.log
-    rc=$(cat "$out/$n.rc" 2>/dev/null || echo 99)
-    wall=$(( $(cat "$out/$n.end" 2>/dev/null || date +%s) - ${start[$n]} ))
-    ran=$(sed -nE 's/^[0-9.]+ Ran ([0-9]+) tests? in ([0-9.]+)s$/\1 \2/p' "$log" | tail -1)
-    cnt=${ran%% *}; secs=${ran#* }; note=
-    [ "$rc" = 0 ] || { note="rc=$rc"; fail=1; }
-    [ -n "$ran" ] || { note="$note no-Ran-line"; fail=1; cnt=0; secs=-; }
-    if grep -qE ' \.\.\. skipped|skipped=' "$log"; then note="$note SKIPS"; fail=1; fi
-    total=$(( total + cnt ))
-    printf '%-26s %4s %6s %8s %10s %s\n' "$n" "$rc" "$cnt" "$wall" "$secs" "$note"
-done
-echo "sharded: $total tests run, $expect expected; wall $(( $(date +%s) - t0 ))s"
-[ "$total" = "$expect" ] || { echo "sharded: test count mismatch" >&2; fail=1; }
-
-# Merged log: unittest's failure sections first, then every shard in full.
-{
-    for n in "${names[@]}"; do
-        sed -nE '/^[0-9.]+ ={70}$/,/^[0-9.]+ Ran /p' "$out/$n.log" | sed "s/^/[$n] /"
-    done
-    for n in "${names[@]}"; do sed "s/^/[$n] /" "$out/$n.log"; done
-} > "$out/merged.log"
-echo "sharded: merged log $out/merged.log, load samples $out/pressure.log"
-[ $fail = 0 ] && echo "sharded: PASS" || echo "sharded: FAIL"
-exit $fail
+verdict "$out" "$expect"
+exit $?
