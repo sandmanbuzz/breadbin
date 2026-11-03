@@ -2,6 +2,8 @@
 import os
 import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -84,6 +86,90 @@ class Driver(unittest.TestCase):
     def test_bad_option(self):
         script = os.path.join(ROOT, "tools", "ci", "sharded.sh")
         self.assertEqual(subprocess.run([script, "--nope"], capture_output=True).returncode, 2)
+
+
+class Verdict(unittest.TestCase):
+    """The red/green judgement of sharded.sh on logs from REAL unittest runs (a stub run would only
+    prove the stub): green, failing test, skipped test, crash with no Ran line, wrong count."""
+    SCRIPT = os.path.join(ROOT, "tools", "ci", "sharded.sh")
+    BODY = {
+        "green": "def test_a(self): pass\n    def test_b(self): pass\n",
+        "red": "def test_a(self): pass\n    def test_b(self): self.assertEqual(1, 2)\n",
+        "skip": "def test_a(self): pass\n    def test_b(self): self.skipTest('no display')\n",
+    }
+
+    def real_log(self, d, name, kind):
+        """Run a tiny real unittest module and store its stderr+stdout the way run.sh would,
+        every line prefixed with an epoch stamp. Returns the exit code of the run."""
+        src = "import unittest\nclass T(unittest.TestCase):\n    " + self.BODY[kind] + \
+              "unittest.main()\n"
+        r = subprocess.run([sys.executable, "-I", "-c", src, "-v"], capture_output=True, text=True,
+                           cwd=d)
+        lines = (r.stderr + r.stdout).splitlines()
+        with open(os.path.join(d, name + ".log"), "w") as f:
+            for l in lines:
+                f.write("1700000000.5 %s\n" % l)
+        with open(os.path.join(d, name + ".rc"), "w") as f:
+            f.write("%d\n" % r.returncode)
+        for ext in ("start", "end"):
+            with open(os.path.join(d, name + "." + ext), "w") as f:
+                f.write("1700000000\n")
+        return r.returncode
+
+    def judge(self, kinds, expect, drop=()):
+        d = tempfile.mkdtemp(prefix="verdict-")
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", "--", d]))
+        names = ["s%d" % i for i in range(len(kinds))]
+        with open(os.path.join(d, "names"), "w") as f:
+            f.write("".join(n + "\n" for n in names))
+        for n, k in zip(names, kinds):
+            self.real_log(d, n, k)
+        for n in drop:      # a shard that left no files at all (the container never ran)
+            for ext in ("log", "rc", "end"):
+                p = os.path.join(d, n + "." + ext)
+                if os.path.exists(p):
+                    os.remove(p)
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", str(expect)],
+                           capture_output=True, text=True)
+        return r, d
+
+    def test_green_is_green(self):
+        r, d = self.judge(["green", "green"], 4)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("sharded: PASS", r.stdout)
+
+    def test_a_failing_test_is_red_and_its_block_comes_first(self):
+        r, d = self.judge(["green", "red", "green"], 6)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("FAIL", r.stdout)
+        self.assertIn("rc=1", r.stdout)
+        with open(os.path.join(d, "merged.log")) as f:
+            merged = f.read()
+        first = merged.splitlines()[0]
+        self.assertTrue(first.startswith("[s1] "), first)      # the failure section leads
+        self.assertIn("AssertionError", merged)
+
+    def test_a_skipped_test_is_red_even_with_rc_zero(self):
+        r, d = self.judge(["green", "skip"], 4)
+        with open(os.path.join(d, "s1.rc")) as f:
+            self.assertEqual(f.read().strip(), "0")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("SKIPS", r.stdout)
+
+    def test_a_shard_that_never_ran_is_red(self):
+        r, d = self.judge(["green", "green"], 4, drop=["s1"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no-Ran-line", r.stdout)
+        self.assertIn("rc=99", r.stdout)
+
+    def test_wrong_total_is_red(self):
+        r, d = self.judge(["green", "green"], 5)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("test count mismatch", r.stderr)
+
+    def test_verdict_needs_expect(self):
+        r = subprocess.run([self.SCRIPT, "--verdict", "/nonexistent"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
 
 
 if __name__ == "__main__":
