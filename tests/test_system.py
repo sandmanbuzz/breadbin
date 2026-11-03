@@ -716,3 +716,29 @@ class Pipes(unittest.TestCase):
         self.v.run("echo fig >> /home/so")
         lines = [l.strip() for l in self.v.run("sort /home/so").splitlines() if l.strip()]
         self.assertEqual(lines[:3], ["apple", "fig", "pear"])
+
+
+class Touch(unittest.TestCase):
+    """touch (ported from upstream commit 4cc3c7e): creates a missing file, leaves an existing one alone."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.img = os.path.join(ROOT, "build", "test_touch.d64")
+        with open(IMAGE, "rb") as f, open(cls.img, "wb") as g:
+            g.write(f.read())
+        cls.v = make_target(cls.img)
+        cls.v.wait_shell()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.v.close()
+
+    def test_creates_a_missing_file(self):
+        self.v.run("touch /home/tch1")
+        self.assertIn("tch1", self.v.run("ls /home").split())
+
+    def test_existing_file_is_left_as_it_is(self):
+        self.v.run("echo keep > /home/tch2")
+        # a path that cannot be made: touch must report it, which proves touch ran at all
+        self.assertIn("touch:", self.v.run("touch /home/tch2 /nodir/zz"))
+        self.assertIn("keep", self.v.run("cat /home/tch2"))
