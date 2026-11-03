@@ -40,19 +40,33 @@ def primary():
     return os.path.dirname(os.path.realpath(common))
 
 
+def project_key(path):
+    """Claude's directory name for a path: every character that is not a letter, a digit or
+    '-' becomes '-' ('/', '.', '_' and the rest)."""
+    return re.sub(r"[^A-Za-z0-9-]", "-", path)
+
+
+def mine(name, key):
+    """The clone's own entry or one of its worktree sessions' (<key>--claude-worktrees-...),
+    not a sibling clone whose path merely starts the same."""
+    return name == key or name.startswith(key + "--claude-worktrees-")
+
+
 def packages(parent=False, secrets=False):
     """[(name, base, items, note)] for what exists on this machine, plus a list of notes."""
     repo = primary()
-    key = re.sub(r"[/.]", "-", repo)
+    key = project_key(repo)
     root = os.path.dirname(repo) if parent else repo
     proj = os.path.join(HOME, ".claude", "projects")
     claude = os.path.join(HOME, ".claude")
+    sdir = f"/tmp/claude-{os.getuid()}"
+    scratch = sorted(f"claude-{os.getuid()}/{d}" for d in os.listdir(sdir) if mine(d, key)) if os.path.isdir(sdir) else []
     want = [
         ("repo", os.path.dirname(root), [os.path.basename(root)],
          "the clone, .git, build/, worktrees inside it" + (" and its parent directory" if parent else "")),
-        ("scratch", "/tmp", [f"claude-{os.getuid()}/{key}"],
-         "session scratchpads: worktrees, logs, ROM directories"),
-        ("claude-project", proj, sorted(d for d in os.listdir(proj) if d == key or d.startswith(key + "-"))
+        ("scratch", "/tmp", scratch,
+         "session scratchpads, including those of worktree sessions: worktrees, logs, ROM directories"),
+        ("claude-project", proj, sorted(d for d in os.listdir(proj) if mine(d, key))
          if os.path.isdir(proj) else [], "memory and transcripts of this project"),
         ("claude-global", claude, sorted(set(os.listdir(claude)) - SKIP_CLAUDE) if os.path.isdir(claude) else [],
          "global CLAUDE.md, settings, skills, history (not plugins, caches or credentials)"),
@@ -77,19 +91,24 @@ def packages(parent=False, secrets=False):
     return have, notes
 
 
+def esc(name):
+    return name.replace("\\", "\\\\").replace("\n", "\\n")
+
+
 def entry(base, rel):
     p = os.path.join(base, rel)
+    shown = esc(rel)
     st = os.lstat(p)
     if stat.S_ISLNK(st.st_mode):
-        return f"l - - {rel} -> {os.readlink(p)}"
+        return f"l - - {shown} -> {esc(os.readlink(p))}"
     if stat.S_ISDIR(st.st_mode):
-        return f"d {st.st_mode & 0o7777:o} - {rel}"
+        return f"d {st.st_mode & 0o7777:o} - {shown}"
     if stat.S_ISREG(st.st_mode):
         h = hashlib.sha256()
         with open(p, "rb") as f:
             for chunk in iter(lambda: f.read(1 << 20), b""):
                 h.update(chunk)
-        return f"f {st.st_mode & 0o7777:o} {h.hexdigest()} {rel}"
+        return f"f {st.st_mode & 0o7777:o} {h.hexdigest()} {shown}"
     return None     # socket, fifo, device: tar does not carry them either
 
 
@@ -162,7 +181,7 @@ def open_holders(trees):
         for l in r.stdout.splitlines():
             if l.startswith("p"):
                 pid = int(l[1:])
-            elif l.startswith("c") and pid not in me:
+            elif l.startswith("c") and pid not in me and l[1:] != "lsof":
                 found[pid] = l[1:]
     return found
 
@@ -177,7 +196,22 @@ def cmd_plan(a):
         print("note:", n)
 
 
+def record_block(text, forced):
+    """The comparable part of a readiness report: tips, refs digest, object count. No paths,
+    user names or host names, so the file can be pasted into a handoff."""
+    out, on = [f"readiness: {'forced past a failing check' if forced else 'READY'}"], False
+    for l in text.splitlines():
+        if l.startswith("== RECORD"):
+            on = True
+        elif l.startswith("== ") or l.startswith(("READY", "NOT READY")):
+            on = False
+        elif on:
+            out.append(l)
+    return "\n".join(out) + "\n"
+
+
 def cmd_pack(a):
+    os.umask(0o077)                 # the tarballs may hold secrets: owner only
     have, _ = packages(a.parent, a.with_secrets)
     if a.only:
         keep = set(a.only.split(","))
@@ -214,7 +248,7 @@ def cmd_pack(a):
         cmd = tar_cmd(tarball, base, items)
         print(" ".join(["COPYFILE_DISABLE=1"] + cmd), flush=True)
         subprocess.run(cmd, check=True, env=TAR_ENV)
-        with open(os.path.join(out, "manifests", name + ".txt"), "w") as f:
+        with open(os.path.join(out, "manifests", name + ".txt"), "w", encoding="utf-8", errors="surrogateescape") as f:
             f.write("\n".join(lines) + "\n")
         sums.append(f"{sha256_file(tarball)}  {name}.tar")
         meta.append(dict(name=name, items=items, note=note, files=len(lines)))
@@ -224,27 +258,55 @@ def cmd_pack(a):
     with open(os.path.join(out, "packages.json"), "w") as f:
         json.dump(meta, f, indent=1)
     with open(os.path.join(out, "RECORD.txt"), "w") as f:
-        f.write(ready.stdout)
+        f.write(record_block(ready.stdout, ready.returncode != 0))
     print("packed:", ", ".join(m["name"] for m in meta), "->", out)
+
+
+def read_manifest(path):
+    with open(path, encoding="utf-8", errors="surrogateescape") as f:
+        lines = f.read().split("\n")
+    return lines[:-1] if lines and lines[-1] == "" else lines
 
 
 def cmd_verify(a):
     meta = json.load(open(os.path.join(a.outdir, "packages.json")))
     sums = {n: h for h, n in (l.split("  ", 1) for l in open(os.path.join(a.outdir, "SHA256SUMS")).read().splitlines())}
-    bad = 0
+    mfile = lambda name: os.path.join(a.outdir, "manifests", name + ".txt")
+    # nothing is unpacked until every package checks out, so a failure leaves DEST untouched
+    problems = []
     for m in meta:
         name, tarball = m["name"], os.path.join(a.outdir, m["name"] + ".tar")
         dest = os.path.join(a.dest, name)
+        if not os.path.exists(tarball):
+            problems.append(f"{name}: tarball missing")
+        elif name + ".tar" not in sums:
+            problems.append(f"{name}: not in SHA256SUMS")
+        elif sha256_file(tarball) != sums[name + ".tar"]:
+            problems.append(f"{name}: tarball hash differs from SHA256SUMS")
         if os.path.exists(dest) and os.listdir(dest):
-            sys.exit(f"verify: {dest} is not empty (unpack into a fresh path)")
-        if sha256_file(tarball) != sums[name + ".tar"]:
-            print(f"FAIL {name}: tarball hash differs from SHA256SUMS")
-            bad += 1
-            continue
+            problems.append(f"{name}: {dest} is not empty (unpack into a fresh path)")
+    for p in problems:
+        print("FAIL", p)
+    if problems:
+        sys.exit(1)
+    nomf = [m["name"] for m in meta if not os.path.exists(mfile(m["name"]))]
+    if nomf:
+        print("WARN: no manifest for " + ", ".join(nomf) + " (carry the whole output directory): comparing entry counts only, a weaker check")
+    bad = 0
+    for m in meta:
+        name = m["name"]
+        dest = os.path.join(a.dest, name)
         os.makedirs(dest, exist_ok=True)
-        subprocess.run(tar_cmd(tarball, dest, [], extract=True), check=True, env=TAR_ENV)
+        subprocess.run(tar_cmd(os.path.join(a.outdir, name + ".tar"), dest, [], extract=True), check=True, env=TAR_ENV)
         got = manifest(dest, m["items"])
-        want = open(os.path.join(a.outdir, "manifests", name + ".txt")).read().splitlines()
+        if name in nomf:
+            if len(got) == m["files"]:
+                print(f"PASS {name}: {len(got)} entries (counts only)")
+            else:
+                bad += 1
+                print(f"FAIL {name}: {len(got)} entries, {m['files']} recorded")
+            continue
+        want = read_manifest(mfile(name))
         if got == want:
             print(f"PASS {name}: {len(got)} entries match")
         else:
