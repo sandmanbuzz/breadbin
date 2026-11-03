@@ -6,7 +6,7 @@ the image on the host and compares them. A mismatch names the first differing (t
 
     BREADBIN_ULTIMATE=host SCRATCH=dir python3 disksum.py [IMAGE.d64]       (stock KERNAL host, Software IEC off)
 
-The configuration is changed for the run and restored by a trap (JiffyDOS KERNAL, Software IEC on). The drive is
+The configuration is changed for the run and restored in a finally block (nibsetup.sh down: JiffyDOS KERNAL, Software IEC on). The drive is
 read only; nothing is written to it. A run that stops making progress for STALL_S seconds is reported and not retried.
 Exit status 0 only if the state is "done" and every sector matches.
 """

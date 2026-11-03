@@ -47,15 +47,6 @@ start:
         sta COUNT+1
         sta ERRCH
         sta ERRCH+1
-        lda #<TABLE
-        sta TP
-        lda #>TABLE
-        sta TP+1
-        lda #1
-        sta TRK
-        lda #0
-        sta SECT
-
         ; command channel 15 to device 8, then the direct-access channel 2 ("#")
         lda #0
         ldx #0
@@ -80,6 +71,14 @@ start:
         bcc @o2
         jmp open_fail
 @o2:
+        lda #<TABLE
+        sta TP
+        lda #>TABLE
+        sta TP+1
+        lda #1
+        sta TRK
+        lda #0
+        sta SECT
 
 sector:
         ; "U1:2 0 tt ss" on channel 15
