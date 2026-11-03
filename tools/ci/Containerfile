@@ -14,7 +14,7 @@ RUN sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.lis
  && apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         cc65=2.19-2 vice=3.9+dfsg-1 xdotool=1:3.20160805.1-5.1 python3=3.13.5-1 python3-venv=3.13.5-1 make=4.4.1-2 \
-        xvfb xauth util-linux ca-certificates \
+        xvfb xauth util-linux lsof=4.99.4+dfsg-2 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 # py65 (a 6502 emulator, the UCI simulator tests) is not packaged in Debian: a venv, pinned, so
 # the 35 tests that skip without it run in the gate (docs/testing.md).
