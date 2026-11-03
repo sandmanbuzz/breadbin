@@ -108,8 +108,12 @@ start:  lda #$FF            ; the 32-bit microsecond clock: CIA2 timer A (phi2) 
         jsr op_wrtight
         jmp @next
 @n8:    cmp #8
-        bne @end
+        bne @n9
         jsr op_setpush
+        jmp @next
+@n9:    cmp #9
+        bne @end
+        jsr op_cmd
         jmp @next
 @rl:    jsr op_rdloop
 @next:  jsr log_end
@@ -398,6 +402,16 @@ op_cmd: jsr wait_idle
         lda #0
         sta mode
         sta slen            ; the status of the last command only
+        lda opn             ; op 9: the same, with the response bytes kept in the sink (chunks back to back)
+        cmp #9
+        bne @m0
+        lda #1
+        sta mode
+        lda #<sink
+        sta dp
+        lda #>sink
+        sta dp+1
+@m0:
         jsr stamp_s
         ldx cmdlen
         ldy #2
