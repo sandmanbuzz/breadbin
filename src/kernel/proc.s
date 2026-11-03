@@ -49,36 +49,25 @@ proc_init:
         sta next_pid
         rts
 
-; slot_save_ptr: X = slot -> p3 = &p_save[slot*192]. Preserves X.
+; slot_save_ptr: X = slot -> p3 = &p_save[slot*SAVESZ]. Preserves X.
 .segment "CODE"
 slot_save_ptr:
-        txa
-        lsr a
-        lsr a               ; hi byte of slot*64
-        sta p3+1
-        txa
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a               ; lo byte of slot*64
+        lda #0
         sta p3
-        ; p3 = slot*64; want slot*192 = slot*64*3
-        lda p3
-        asl a
-        sta tmp0
-        lda p3+1
-        rol a
-        sta tmp1            ; tmp = slot*128
+        sta p3+1
+        stx tmp0            ; the loop counts down in tmp0; X is kept
+@m:     lda tmp0
+        beq @add
+        dec tmp0
         lda p3
         clc
-        adc tmp0
+        adc #<SAVESZ
         sta p3
         lda p3+1
-        adc tmp1
+        adc #>SAVESZ
         sta p3+1
-        lda p3
+        jmp @m
+@add:   lda p3
         clc
         adc #<p_save
         sta p3
