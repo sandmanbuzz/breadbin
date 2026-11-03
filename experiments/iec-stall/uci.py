@@ -146,6 +146,8 @@ GROUPS = {
                   ("READ DIR, one listing", cmd(1, 0x14))]),
     "rdsink": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("OPEN DIR (current directory)", cmd(1, 0x13)),
                 ("READ DIR, chunks kept", cmd_sink(1, 0x14))]),
+    "rdlong": ([("CHANGE DIR /SD", cmd(1, 0x11, *b"/SD")), ("OPEN DIR (current directory)", cmd(1, 0x13)),
+                ("READ DIR, chunks kept (names longer than 12)", cmd_sink(1, 0x14))]),
     "net": ([("target 3 identify", cmd(3, 0x01)), ("target 4 identify", cmd(4, 0x01))]),
     # Q2, Q4, Q5 of docs/design/next/uci-v1.md: directory commands (absolute and relative names after CHANGE DIR,
     # FILE STAT by name), the error cases, READ DIR packets. Creates and removes /Temp/bdir and /Temp/bdir/sub.
@@ -230,7 +232,7 @@ for g in sys.argv[1:]:
     run(g, GROUPS[g])
     if g == "rdchunks":
         chunk_log()
-    if g == "rdsink":
+    if g in ("rdsink", "rdlong"):
         chunk_log()
         total = struct.unpack("<H", bytes(u.readmem(0xC710, 2)))[0]
         data = bytes(u.readmem(0x5000, total))
