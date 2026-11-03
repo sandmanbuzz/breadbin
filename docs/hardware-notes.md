@@ -473,3 +473,7 @@ Tip `939a83f` (main), `tools/ci/run.sh test-only` with `BREADBIN_CI_JIFFY` (Jiff
 ### 2026-11-02, new runner: physical 1541 power-cycled (fresh device 8), five-boot series of main 939a83f (Agent A)
 
 Drive power-cycled by the user (device 8 fresh). Stock KERNAL, Software IEC off, `plainboot.py build/breadbin.prg`, one configuration setup for five boots, restored on exit (JiffyDOS KERNAL, Software IEC on). **5 of 5 reached login, 22 s each.** Not run: a whole-disk compare, boot time against the old tree, the Ultimate-side `Drives` class (it is VICE-only: `Vice(...)` in `tests/test_system.py`, already run under JiffyDOS in the container, 6 of 6).
+
+### 2026-11-02, owner-open write: main 939a83f's image onto the physical 1541 (Agent A)
+
+Nibbler copy (`nibcopy.py` with the Keymaster PRG fetched from the Ultimate's SD card over FTP, read-only): "copy complete" after **50 s**; the physical drive renumbered to 9 and back to 8 in software; `LOAD"$",8` lists `"breadbin" prg 59`, `0 blocks free`. One boot of that disk afterwards (`plainboot.py`, stock KERNAL, Software IEC off): **login after 22 s**. Configuration restored by trap (JiffyDOS KERNAL, Software IEC on). Not run: the whole-disk compare (the read-only reader is the next item).
