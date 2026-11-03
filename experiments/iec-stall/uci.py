@@ -151,6 +151,14 @@ GROUPS = {
     "abortmid": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("ABORT after 1 chunk: set", bytes([12, 1])),
                   ("READ DIR, aborted after chunk 1", cmd_sink(1, 0x14)), ("ABORT off: set", bytes([12, 255])),
                   ("OPEN DIR again (recovery)", cmd(1, 0x13)), ("READ DIR after the abort, full listing", cmd_sink(1, 0x14))]),
+    "renameonto": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("MKDIR scratch", cmd(1, 0x16, *b"/Temp/bqscratch")),
+                    ("CREATE a.txt", cmd(1, 0x02, 0x0A, *b"/Temp/bqscratch/a.txt")), ("WRITE a.txt 8 bytes", cmd(1, 0x05, *b"AAAAAAAA")), ("CLOSE a.txt", close()),
+                    ("CREATE b.txt", cmd(1, 0x02, 0x0A, *b"/Temp/bqscratch/b.txt")), ("WRITE b.txt 8 bytes", cmd(1, 0x05, *b"BBBBBBBB")), ("CLOSE b.txt", close()),
+                    ("RENAME a.txt onto existing b.txt", cmd(1, 0x0A, *b"/Temp/bqscratch/a.txt", 0, *b"/Temp/bqscratch/b.txt")),
+                    ("OPEN b.txt for read", open_read(1, b"/Temp/bqscratch/b.txt")), ("READ 8 from b.txt", cmd(1, 0x04, 8, 0)), ("CLOSE b.txt", close()),
+                    ("FILE STAT a.txt (gone?)", cmd(1, 0x08, *b"/Temp/bqscratch/a.txt")), ("FILE STAT b.txt", cmd(1, 0x08, *b"/Temp/bqscratch/b.txt")),
+                    ("DELETE b.txt", cmd(1, 0x09, *b"/Temp/bqscratch/b.txt")), ("DELETE a.txt (if still there)", cmd(1, 0x09, *b"/Temp/bqscratch/a.txt")),
+                    ("DELETE scratch dir", cmd(1, 0x09, *b"/Temp/bqscratch"))]),
     "net": ([("target 3 identify", cmd(3, 0x01)), ("target 4 identify", cmd(4, 0x01))]),
     # Q2, Q4, Q5 of docs/design/next/uci-v1.md: directory commands (absolute and relative names after CHANGE DIR,
     # FILE STAT by name), the error cases, READ DIR packets. Creates and removes /Temp/bdir and /Temp/bdir/sub.
@@ -236,7 +244,7 @@ for g in sys.argv[1:]:
     run(g, GROUPS[g])
     if g == "rdchunks":
         chunk_log()
-    if g in ("rdsink", "rdlong", "abortmid"):
+    if g in ("rdsink", "rdlong", "abortmid", "renameonto"):
         chunk_log()
         total = struct.unpack("<H", bytes(u.readmem(0xC710, 2)))[0]
         data = bytes(u.readmem(0x5000, total)) if total else b""
