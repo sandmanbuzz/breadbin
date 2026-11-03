@@ -13,6 +13,7 @@
 #      BREADBIN_CI_JIFFY  host dir with JiffyDOS-C64.bin and JiffyDOS_1541-II.bin: mounted
 #                         read-only and passed to VICE as the KERNAL and the 1541 ROMs
 #      BREADBIN_VICE_ARGS extra VICE options for the whole run (passed through)
+#      BREADBIN_VICE_PRINT_ARGS  passed through: the harness prints the VICE command line (tools/vicetest.py)
 # The repo is mounted read-only and copied inside, so concurrent runs do not collide.
 # Exit code is make's. Set BREADBIN_CI_KEEP_BUILD=<dir> to copy build/ out afterwards.
 set -eu
@@ -78,6 +79,7 @@ set -- "$img" "$@"
 [ -n "$viceargs" ] && set -- -e "BREADBIN_VICE_ARGS=$viceargs" "$@"
 [ -n "$jiffy" ] && set -- -v "$jiffy:/jiffy:ro" "$@"
 [ -n "$broker" ] && set -- -e "BREADBIN_BROKER=$broker" "$@"
+[ -n "${BREADBIN_VICE_PRINT_ARGS:-}" ] && set -- -e "BREADBIN_VICE_PRINT_ARGS=$BREADBIN_VICE_PRINT_ARGS" "$@"
 set -- -v "$repo:/src:ro" -v "$roms:/roms:ro" "$@"
 [ -n "$mem" ] && set -- "$mem" "$@"
 set -- podman run --rm --init --name "$name" "$@"
