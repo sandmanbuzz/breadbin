@@ -23,6 +23,8 @@ sys.path.insert(0, IEC)
 TABLE, COUNT, ERRCH, STATE = 0x5000, 0xC7F0, 0xC7F2, 0xC7F4
 STALL_S = 150
 POLL_S = 30
+END_S = 1200          # control run: the final read, after about 683 sectors at 1 to 1.5 s each
+CONTROL = "--control" in sys.argv
 
 
 def spt(track):
@@ -101,7 +103,21 @@ def run(image_path):
         feed("sys49152\n")
         t0 = time.time()
         last, last_t = -1, time.time()
-        while True:
+        if CONTROL:
+            # no polling during the run: one read at the watch time, one at the end (the control for DMA polling)
+            time.sleep(STALL_S + 30)
+            state = u.readmem(STATE, 1)[0]
+            count = u.readmem(COUNT, 1)[0] | (u.readmem(COUNT + 1, 1)[0] << 8)
+            print(f"{time.time() - t0:6.0f} s  (control, one read)  sectors {count:3d}/{n}  state {state:02X}", flush=True)
+            if count == 0 and state == 0:
+                result["state"] = "STALLED"
+                result["at"] = 0
+            else:
+                time.sleep(max(0, END_S - (time.time() - t0)))
+                state = u.readmem(STATE, 1)[0]
+                count = u.readmem(COUNT, 1)[0] | (u.readmem(COUNT + 1, 1)[0] << 8)
+                print(f"{time.time() - t0:6.0f} s  (control, final read)  sectors {count:3d}/{n}  state {state:02X}", flush=True)
+        while not CONTROL:
             time.sleep(POLL_S)
             state = u.readmem(STATE, 1)[0]
             count = u.readmem(COUNT, 1)[0] | (u.readmem(COUNT + 1, 1)[0] << 8)
@@ -114,6 +130,16 @@ def run(image_path):
                 result["state"] = "STALLED"
                 result["at"] = last
                 break
+        if result["state"] == "STALLED":
+            # before the restore (which reboots the C64): the reader's code, its pointers and the state bytes
+            dump = {"code_ok": bytes(u.readmem(0xC000, len(code))) == code,
+                    "code": bytes(u.readmem(0xC000, len(code))).hex(),
+                    "zp_F0_FF": bytes(u.readmem(0xF0, 16)).hex(),
+                    "c7f0_c7f4": bytes(u.readmem(0xC7F0, 5)).hex(),
+                    "stack_top": bytes(u.readmem(0x1F0, 16)).hex()}
+            result["dump"] = dump
+            result["zp_expected_init"] = {"TP": "00 50 (lo hi)", "TRK": "01 at F7 after init", "SECT": "00 at F8"}
+            open(os.path.join(os.environ.get("SCRATCH", "."), "disksum-dump.bin"), "wb").write(bytes(u.readmem(0xC000, len(code))))
         if result["state"] is None:
             result["state"] = {1: "done", 0xEE: "block error", 0xEF: "open failed"}.get(state, f"{state:02X}")
         result["elapsed_s"] = round(time.time() - t0)
@@ -132,5 +158,6 @@ def run(image_path):
 
 
 if __name__ == "__main__":
-    img = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "..", "..", "build", "breadbin.d64")
+    args = [a for a in sys.argv[1:] if a != "--control"]
+    img = args[0] if args else os.path.join(HERE, "..", "..", "..", "build", "breadbin.d64")
     sys.exit(run(img))
