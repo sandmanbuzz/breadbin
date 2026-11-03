@@ -560,3 +560,14 @@ Not measured: a directory with a name longer than 12 characters; a listing that 
 ### 2026-11-02, READ DIR with a name longer than 12 characters (Agent A; `uci.py rdlong`, read only)
 
 `CHANGE DIR /SD`, `OPEN DIR`, `READ DIR` once. 13 chunks, 103 bytes, the last ends with `$20` (Data Last). Each chunk is an attribute byte and the name: **`The Very Second` (15 characters) comes back in full** (chunk 10, attribute `$10` for a directory, 16 bytes). The other names are whole as well (`collections`, 11 characters, and the rest). No truncation to 12 was seen. The name was found read only over FTP, and nothing was created. Not measured: a 16-character name (the DOS limit), which the card does not hold.
+
+### 2026-11-02, UCI ABORT in the middle of a READ DIR (Agent A; `uci.py abortmid`, read only)
+
+Bench op 12 sets how many chunks to read before the bench writes ABORT (`$04` to `$DF1C`): `finish` writes it when the count is reached, and the command ends there.
+
+- `READ DIR` of `/Temp` with ABORT after chunk 1: **one chunk (13 bytes) arrived, then the bench wrote ABORT**. The command ended after the first chunk, so ABORT stops the listing mid-way.
+- **The status after the abort is not measured:** the bench returns from `finish` before it reads a status. The `TIMEOUT` mark in the table is the bench's abort marker (result 2), not a timeout.
+- **Recovery:** `OPEN DIR` and `READ DIR` on the same directory after the abort work: 26 chunks, 244 bytes, `00,OK`, Data Last at the end. (The listing had 26 entries this time, against 23 in the earlier runs; not investigated.)
+- Earlier runs of this group stopped after one operation because of a layout bug in the new op 12 (it read its value from the length byte and did not advance the script pointer). Fixed in the bench.
+
+Not measured: the drive's or UCI's status after an ABORT, and an ABORT on an open file (not asked).
