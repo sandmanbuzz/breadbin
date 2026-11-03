@@ -7,23 +7,22 @@ A Unix-like OS for the Commodore 64 (6502 assembly, ca65), forked to be develope
 ```sh
 make                  # build/breadbin.d64 (needs cc65; about 2 seconds)
 make test-host        # image tools, key tables, Ultimate client; no emulator, about 12 seconds
+tools/ci/run.sh all test-host   # the same in the container, plus the py65 simulator tests that skip without a built image
 make size             # bytes per kernel module and the headroom; quote it in commits
-xvfb-run -a make test-smoke       # boot, echo, pipe, Ctrl-C: about 2 minutes
-xvfb-run -a make test-only T="tests.test_system.Boot.test_24_editor"
-xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard   # real keystrokes (xdotool)
-xvfb-run -a -s "-screen 0 1280x1024x24" make test-console
-tools/ci/run.sh test            # the whole suite in a container (podman; works on a Mac; about 50 minutes)
-tools/ci/run.sh test-keyboard   # or test-smoke, test-console, test-only T="..."; docs/ci.md
+tools/ci/run.sh test-smoke      # boot, echo, pipe, Ctrl-C: about 2 minutes
+tools/ci/run.sh test-only T="tests.test_system.Boot.test_24_editor"
+tools/ci/run.sh test-keyboard   # real keystrokes (xdotool); also test-console; docs/ci.md
+BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test   # the whole suite, every VICE slot (podman; about 47 minutes)
 ```
 
-The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. Run targeted tests per change and the full suite (`make test`, about 42 minutes: 55 ok in 2,511 s on 4778b1a) at milestones. Do not run other VICE instances at the same time as the tests; they are timing-sensitive. Wrap VICE and hardware runs in `tools/with-lock` (see `docs/process.md`).
+The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. VICE runs only in the container (`tools/ci/run.sh`; host VICE is being retired). Run targeted tests per change and the full suite at milestones (63 VICE tests in 2,804 s on the runner, exclusive; the older 55-test, 2,511 s figure on 4778b1a was another tree and host). `run.sh` takes a `vice` slot itself (a pool, `docs/process.md`); a run whose timing you will quote takes every slot (`BREADBIN_CI_EXCLUSIVE=1`). Hardware runs go under `tools/with-lock -r ultimate`.
 
 ## Test policy
 
-Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 50 minutes under VICE in a container, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
+Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 47 minutes under VICE in a container, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
 
-- **During a story:** `make test-host`, the targeted tests for what you changed (the table in `docs/testing.md`), and `make test-smoke` before committing. No full suite.
-- **At a milestone** (the end of an M group, or any change to the interrupt path, the bus, the memory map or the linker layout): the full suite with stock ROMs, the disk and bus tests again with the JiffyDOS ROMs (`BREADBIN_VICE_ARGS`, see `docs/testing.md`), and a hardware run of the list in `docs/hardware-notes.md`.
+- **During a story:** `make test-host`, the targeted tests for what you changed (the table in `docs/testing.md`), and `tools/ci/run.sh test-smoke` before committing. No full suite.
+- **At a milestone** (the end of an M group, or any change to the interrupt path, the bus, the memory map or the linker layout): the full suite with stock ROMs, the disk and bus tests again with the JiffyDOS ROMs (`BREADBIN_CI_JIFFY=<dir>`, see `docs/testing.md`; not yet proven in the container), and a hardware run of the list in `docs/hardware-notes.md`.
 - **Hardware** is used for what only hardware can answer, not as a per-story gate. Keep one hardware session alive with its context and give it experiments (`docs/wip.md`), not just test runs.
 - Say in every commit message what was run and what was not.
 
@@ -53,4 +52,6 @@ Physical 1541: the root-mount stall that predates all of this is **mitigated, no
 ## Working conventions
 
 - Develop on the branch you were given; commit with the test status in the message; open a pull request only when asked.
+- Each session works in its own git worktree. Local `main` is the shared truth and is checked out in the primary clone, where nobody else works; origin is a stale mirror, so start from `main`, not `origin/main`. Landing on main is a merge in the primary under a lock (`docs/process.md`).
+- Commits are signed. If signing fails (no cached passphrase), stop and ask the human; never disable signing.
 - Keep ROMs and anything derived from them out of the repo (`keytab.inc` is the standard keyboard layout; `tools/check_keytab.py` compares it with a ROM).
