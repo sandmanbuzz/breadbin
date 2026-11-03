@@ -31,6 +31,7 @@ F_BUILTIN = 8
 .segment "BSS"
 pass:   .res 1
 pc:     .res 2
+hw:     .res 2          ; end of the bytes actually stored (pc past it: a trailing .res, the BSS)
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
@@ -96,8 +97,8 @@ start:  lda argc
         lda #<s_colon
         ldx #>s_colon
         jsr print
-        lda pc
-        ldx pc+1
+        lda hw
+        ldx hw+1
         jsr print_dec
         lda #<s_bytes
         ldx #>s_bytes
@@ -121,6 +122,8 @@ run_pass:
         lda #0
         sta pc
         sta pc+1
+        sta hw
+        sta hw+1
         sta lineno
         sta lineno+1
         sta nrel
@@ -160,12 +163,16 @@ write_out:
         sta hdr+1
         lda #1
         sta hdr+2
-        lda pc
+        lda hw
         sta hdr+3
-        lda pc+1
+        lda hw+1
         sta hdr+4
-        lda #0
+        lda pc
+        sec
+        sbc hw
         sta hdr+5
+        lda pc+1
+        sbc hw+1
         sta hdr+6
         lda nrel
         sta hdr+7
@@ -175,9 +182,9 @@ write_out:
         ldx #>hdr
         ldy #9
         jsr wr
-        lda pc
+        lda hw
         sta r1
-        lda pc+1
+        lda hw+1
         sta r1+1
         lda #<obuf
         sta r0
@@ -400,17 +407,18 @@ d_words:
         jmp @l
 @r:     rts
 
-d_ress: jsr expr
-@l:     lda ev
-        ora ev+1
-        beq @r
-        lda #0
-        jsr emit
-        lda ev
-        bne @d
-        dec ev+1
-@d:     dec ev
-        jmp @l
+d_ress: jsr expr                ; no bytes stored: zeros are filled in only if something follows
+        lda pc
+        clc
+        adc ev
+        sta pc
+        lda pc+1
+        adc ev+1
+        sta pc+1
+        bcc @r
+        lda #<e_big
+        ldx #>e_big
+        jmp error
 @r:     rts
 
 ; ---- instructions ----
@@ -699,7 +707,27 @@ emit:   ldx pass
         lda #<e_big
         ldx #>e_big
         jmp error
-@ok:    lda #<obuf
+@ok:    lda hw                  ; a .res left a gap between hw and pc: store its zeros now
+        cmp pc
+        bne @fill
+        lda hw+1
+        cmp pc+1
+        beq @put
+@fill:  lda #<obuf
+        clc
+        adc hw
+        sta obp
+        lda #>obuf
+        adc hw+1
+        sta obp+1
+        lda #0
+        tay
+        sta (obp),y
+        inc hw
+        bne @ok
+        inc hw+1
+        jmp @ok
+@put:   lda #<obuf
         clc
         adc pc
         sta obp
@@ -709,6 +737,9 @@ emit:   ldx pass
         pla
         ldy #0
         sta (obp),y
+        inc hw
+        bne @inc
+        inc hw+1
 @inc:   inc pc
         bne @r
         inc pc+1
