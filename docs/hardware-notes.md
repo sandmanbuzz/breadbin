@@ -536,3 +536,12 @@ What stands:
 - The design note's "one packet per entry" is **not contradicted** by these measurements. It is still unmeasured, because the chunk boundaries were not logged.
 
 Open for a follow-up: log each chunk's length in `uci.s` for `READ DIR`, to confirm one entry per chunk and to see the end-of-listing status.
+
+### 2026-11-02, READ DIR chunk boundaries (Agent A; `uci.py rdchunks`, bench `uci.s` per-chunk log)
+
+Read only, Ultimate firmware 1.1.0: `CHANGE DIR /Temp`, `OPEN DIR` (no name, the current directory), `READ DIR` once.
+
+- **Total response 208 bytes in 22 chunks.** Chunks 0 to 19 end with status `$30` (Data More); chunk 21 ends with `$20` (Data Last), the end of the listing.
+- Lengths: chunk 0 is 13 bytes, chunks 1 to 19 are 9 bytes, chunk 20 is 13, chunk 21 is 11. The lengths vary with the name, which fits one directory entry per chunk. Not checked against the bytes: that each chunk holds exactly one entry, and what the names are.
+- A second `READ DIR` on the same open directory returns the same listing again (the earlier finding), so the end of the listing is marked by the Data Last status of the last chunk, not by an empty read.
+- The earlier "one packet" wording is withdrawn (see the correction above).
