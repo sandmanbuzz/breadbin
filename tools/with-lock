@@ -11,6 +11,18 @@
 # A command that already runs under with-lock for the same resource (tools/ci/run.sh
 # takes its own slot) passes straight through; asking for -x under a shared slot is an
 # error. While waiting the holders are printed. Needs flock(1).
+# Inner half of an exclusive run (below): every slot and the gate are already held by the
+# flock processes that exec'd us, so only record the holders, run, and clean up.
+if [ -n "${WITH_LOCK_INNER:-}" ]; then
+    label="$(id -un)@$(hostname) pid $$ $(date -u +%FT%TZ) mode x $*"
+    for f in $WITH_LOCK_HOLDERS; do echo "$label" > "$f"; done
+    unset WITH_LOCK_INNER
+    "$@"
+    rc=$?
+    for f in $WITH_LOCK_HOLDERS; do rm -f "$f"; done
+    exit $rc
+fi
+self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
 res=vice; wait=3600; excl=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -55,32 +67,18 @@ busy() { echo "with-lock: '$res' is busy, holders: $(holders | tr '\n' ';'); wai
 # shared runs queue behind it while it collects slots as the running ones finish.
 gate="$dir/$res.gate"
 if [ $excl = 1 ]; then
-    exec 8>>"$gate"
-    flock -w $wait 8 || timeout
-    have=" "; told=0
-    while :; do
-        k=0
-        while [ $k -lt $n ]; do
-            case "$have" in
-                *" $k "*) ;;
-                *)  fd=$((9 + k)); lf=$(lockf $k)
-                    eval "exec $fd>>\"\$lf\""
-                    if flock -n $fd; then have="$have$k "; else eval "exec $fd>&-"; fi ;;
-            esac
-            k=$((k + 1))
-        done
-        k=0; all=1
-        while [ $k -lt $n ]; do
-            case "$have" in *" $k "*) ;; *) all=0 ;; esac
-            k=$((k + 1))
-        done
-        [ $all = 1 ] && break
-        [ $told = 0 ] && { busy; told=1; }
-        [ "$(now)" -lt $deadline ] || timeout
-        sleep 1
-    done
-    exec 8>&-
-    slots=$(seq 0 $((n - 1)))
+    # One flock per slot, nested, then ourselves: the kernel holds each lock for as long as
+    # the process below it lives, and no file descriptor above 9 is needed (dash has none).
+    # The gate is held for the whole run, so plain runs queue behind it. A timeout exits 75
+    # silently (flock -E).
+    holdfiles=; k=0
+    while [ $k -lt $n ]; do holdfiles="$holdfiles $(holdf $k)"; k=$((k + 1)); done
+    h=$(holders); [ -n "$h" ] && busy
+    export BREADBIN_LOCK_HELD="${BREADBIN_LOCK_HELD:-} $res=x" WITH_LOCK_INNER=1 WITH_LOCK_HOLDERS="$holdfiles"
+    set -- "$self" "$@"
+    k=$((n - 1))
+    while [ $k -ge 0 ]; do set -- flock -w "$wait" -E 75 "$(lockf $k)" "$@"; k=$((k - 1)); done
+    exec flock -w "$wait" -E 75 "$gate" "$@"
 else
     told=0; got=
     while :; do
