@@ -274,6 +274,8 @@ class Boot(unittest.TestCase):
         out = self.run_("as /home/bigbuf.s /home/bigbuf")
         self.assertIn("bytes", out)
         self.assertEqual(self.run_("/home/bigbuf"), "bss ok")
+        # the first run left 42 in its BSS; the program checks it is zero again at the start
+        self.assertEqual(self.run_("/home/bigbuf"), "bss ok")
 
 
 class Persistence(unittest.TestCase):

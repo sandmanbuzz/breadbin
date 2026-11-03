@@ -408,18 +408,24 @@ d_words:
 @r:     rts
 
 d_ress: jsr expr                ; no bytes stored: zeros are filled in only if something follows
-        lda pc
+        lda efwd                ; the count must be known in pass 1, or the labels after it move
+        beq @k
+        lda #<e_fwd
+        ldx #>e_fwd
+        jmp error
+@k:     lda pc
         clc
         adc ev
-        sta pc
+        tax
         lda pc+1
         adc ev+1
+        bcs @big                ; pc is left as it was, so hw never passes it
         sta pc+1
-        bcc @r
-        lda #<e_big
+        stx pc
+        rts
+@big:   lda #<e_big
         ldx #>e_big
         jmp error
-@r:     rts
 
 ; ---- instructions ----
 instruction:
@@ -1317,6 +1323,7 @@ e_undef: .byte "undefined symbol", 0
 e_dup:   .byte "duplicate symbol", 0
 e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
+e_fwd:   .byte "res count not known yet", 0
 e_reloc: .byte "bad relocatable expression", 0
 .macro SYM n, v
         .byte n, 0

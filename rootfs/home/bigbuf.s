@@ -3,7 +3,9 @@
 ;   ./bigbuf
 ; A .res at the very end of the source is the program's BSS: zeroed when it loads, not stored in
 ; the file (a .res with anything after it is still stored as zeros).
-start:  lda buf+5000        ; zero at load
+start:  lda buf+5000        ; zero at load (the kernel clears the BSS, also on a second run)
+        bne bad
+        lda buf+9000
         bne bad
         lda #42
         sta buf+9000
