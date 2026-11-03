@@ -69,3 +69,27 @@ Cheap ports, zero kernel cost: `04f3a47` (tee, tail, sort; port), `4cc3c7e` (tou
 
 - The unmerged upstream branches (listed above). Their features need the same reading before any call.
 - Upstream's documentation and test changes, which are skip by rule above (they cost nothing and teach nothing new about the OS).
+
+## Unmerged upstream branches
+
+Upstream branches with commits that are not on upstream `main`: `feat/format-v2` (6), `fix/edit` (5), `feat/tab-complete` (1), `fix/test-scratch` (1), `fix/webdemo-cache` (1). `feat/touch`, `release-0.3` and `release-0.4` add nothing beyond `main`. Same method as the table above (empty-context Sonnet subagents, two batches of seven, spot-checked against the commits; the subagents noted where the same change is already on main). Kernel bytes are estimates.
+
+| branch | commit | size (files, +, -) | what a user sees | verdict | one-line reason | kernel bytes (est.) | files |
+|---|---|---|---|---|---|---|---|
+| feat/format-v2 | `b422525` | 14 files, +162, -0 | c64fs disks switch to 64-byte inodes with time fields; old kernels refuse them | skip | fork dropped c64fs v1 and replaced the filesystem; already on main as c64fs format 2 (5f2a9ec) | 11 | src/kernel/fs.s, cbm.s, src/bin/format.s, fsck.s |
+| feat/format-v2 | `7564994` | 21 files, +938, -0 | kernel keeps a clock; files get mtime and ctime; date, touch, ls -l and stat show them | shape-of | useful idea, but tied to c64fs inodes; already on main as file times (0451759) | unknown | src/kernel/proc.s, fs.s, src/lib/date.s, src/bin/date.s |
+| feat/format-v2 | `3c9b3ef` | 2 files, +5, -0 | fsck no longer reports block 0 on freshly formatted disks | skip | fixes c64fs fsck, which the fork dropped; already on main (5eb72f0) | 0 | src/bin/fsck.s, tests/test_system.py |
+| feat/format-v2 | `00fc737` | 1 files, +10, -0 | a freeze booting from a 1581 is fixed (CLK polled every 11 cycles at talk turnaround) | shape-of | our bus code differs and is patched for stalls; already on main (ff69a25) | unknown | src/kernel/iec.s |
+| feat/format-v2 | `165e02c` | 13 files, +684, -0 | boot from, mount, format and fsck 1581 drives and .d81 images | skip | non-1541 devices are not milestone work for us; built on the c64fs layout; already on main (bf712c2) | unknown | src/kernel/blk.s, cbm.s, file.s, tools/mkimage.py |
+| feat/format-v2 | `14d756b` | 1 files, +53, -0 | none (docs/tests/build) | skip | VICE hang dump only; already on main (1095f03) | 0 | tools/vicetest.py |
+| feat/tab-complete | `ecabba9` | 6 files, +229, -0 | press TAB in the shell to complete command and file names | shape-of | the same feature is on main as 4abb291; the branch is a variant; take main's version | 0 | src/bin/sh.s, include/breadbin.inc, rootfs/etc/help, tests/test_features.py |
+| fix/edit | `6b66acc` | 1 files, +8, -0 | edit no longer draws memory past the text when a file ends past a page boundary | port | fixes an at_end borrow bug; our edit.s has the same code; not on upstream main | 0 | src/bin/edit.s |
+| fix/edit | `c27f6c5` | 1 files, +38, -0 | edit stops flickering: cursor keys redraw only the cursor; status line only on change | shape-of | user-program UX fix; 38 added lines may collide with our edit.s, so rework the idea against our tree | 0 | src/bin/edit.s |
+| fix/edit | `62cb12f` | 1 files, +23, -0 | edit refuses a file over 8 KB instead of silently truncating it on save | port | prevents data loss on save; small self-contained load() change; user program only | 0 | src/bin/edit.s |
+| fix/edit | `1a3843b` | 1 files, +56, -0 | edit's ^K (kill line) is much faster: one block move instead of one per character | port | replaces a per-character delete loop with one block move; user program; check against our edit.s | 0 | src/bin/edit.s |
+| fix/edit | `a73842c` | 1 files, +103, -0 | none (docs/tests/build) | skip | tests only (103 lines in test_features.py); a reference if the edit fixes are ported | 0 | tests/test_features.py |
+| fix/test-scratch | `0eb29c1` | 5 files, +26, -0 | none (docs/tests/build) | skip | test-harness cleanup (deletes image copies, kills stray VICE); we have our own tooling | 0 | tests/test_bugs.py, test_features.py, test_system.py, tools/vicetest.py |
+| fix/webdemo-cache | `9210ff2` | 1 files, +12, -0 | none (docs/tests/build) | skip | browser demo cache-busting name; our tree has no tools/webdemo.py | 0 | tools/webdemo.py |
+
+The `fix/edit` port candidates (`6b66acc`, `62cb12f`, `1a3843b`) are user-program fixes with no kernel cost; they are the next cheap ports after the three in the plan.
+
