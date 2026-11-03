@@ -47,6 +47,7 @@ opn    = $C71E
 tcnt   = $C720              ; 3 byte timeout counter
 done   = $C7F0
 nops   = $C7F1
+chunkn = $C79E              ; READ DIR chunk log: count here, cumulative start (16 bits) at $C7A0, last status at $C760 (32 chunks)
 
         .segment "CODE"
 start:  lda #$FF            ; the 32-bit microsecond clock: CIA2 timer A (phi2) cascaded into timer B
@@ -251,6 +252,17 @@ wait_idle: jsr settimeout   ; STATE = 00; clear a stuck error flag on the way
 ; ---- one command: bytes already queued with push; read everything and accept ------
 ; mode 0: keep the first bytes in the log; mode 1: put the data into the sink
 finish: jsr settimeout
+        ldx chunkn          ; log where this chunk starts (cumulative response length)
+        cpx #32
+        bcs @nolog1
+        txa
+        asl
+        tay
+        lda rlen
+        sta $C7A0,y
+        lda rlen+1
+        sta $C7A1,y
+@nolog1: nop
 @w:     lda UCI_CTL         ; wait for Data Last ($20) or Data More ($30)
         and #$30
         cmp #$20
@@ -263,6 +275,12 @@ finish: jsr settimeout
         sta UCI_CTL
         rts
 @got:   sta lastst
+        ldx chunkn          ; the status that ended this chunk, then count it
+        cpx #32
+        bcs @nolog2
+        sta $C760,x
+        inc chunkn
+@nolog2: nop
         lda UCI_CMD
         sta idsnap
         lda mode
@@ -372,6 +390,8 @@ sstore: ldx slen            ; the first 28 status bytes of the last command (the
 
 ; ---- operations -----------------------------------------------------------------
 op_cmd: jsr wait_idle
+        lda #0
+        sta chunkn
         ldy #1
         lda (sp),y
         sta cmdlen
