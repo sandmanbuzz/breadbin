@@ -22,6 +22,7 @@ sys.path.insert(0, IEC)
 
 TABLE, COUNT, ERRCH, STATE = 0x5000, 0xC7F0, 0xC7F2, 0xC7F4
 STALL_S = 150
+CAP_S = 1200          # hard cap on a run that keeps moving
 POLL_S = 30
 END_S = 1200          # control run: the final read, after about 683 sectors at 1 to 1.5 s each
 CONTROL = "--control" in sys.argv
@@ -124,19 +125,25 @@ def run(image_path):
             print(f"{time.time() - t0:6.0f} s  sectors {count:3d}/{n}  state {state:02X}", flush=True)
             if state != 0:
                 break
+            if time.time() - t0 > CAP_S:
+                result["state"] = "CAPPED"
+                result["at"] = count
+                break
             if count != last:
                 last, last_t = count, time.time()
             elif time.time() - last_t > STALL_S:
                 result["state"] = "STALLED"
                 result["at"] = last
                 break
-        if result["state"] == "STALLED":
+        if result["state"] in ("STALLED", "CAPPED"):
             # before the restore (which reboots the C64): the reader's code, its pointers and the state bytes
             dump = {"code_ok": bytes(u.readmem(0xC000, len(code))) == code,
                     "code": bytes(u.readmem(0xC000, len(code))).hex(),
                     "zp_F0_FF": bytes(u.readmem(0xF0, 16)).hex(),
                     "c7f0_c7f4": bytes(u.readmem(0xC7F0, 5)).hex(),
-                    "stack_top": bytes(u.readmem(0x1F0, 16)).hex()}
+                    "stack_top": bytes(u.readmem(0x1F0, 16)).hex(),
+                    "state_c7e0_c7eb": bytes(u.readmem(0xC7E0, 12)).hex(),
+                    "tp_fb_fc": bytes(u.readmem(0xFB, 2)).hex()}
             result["dump"] = dump
             result["zp_expected_init"] = {"TP": "00 50 (lo hi)", "TRK": "01 at F7 after init", "SECT": "00 at F8"}
             open(os.path.join(os.environ.get("SCRATCH", "."), "disksum-dump.bin"), "wb").write(bytes(u.readmem(0xC000, len(code))))
