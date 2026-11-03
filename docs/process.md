@@ -65,6 +65,34 @@ Sessions message each other at the addresses on the roster (`fleet/roster.md` on
 
 As in `CLAUDE.md`: targeted tests inside a story (`make test-host`, the table in `docs/testing.md`, `make test-smoke` before committing); the full suite and the JiffyDOS-ROM subset at milestones; hardware for what only hardware can answer. VICE runs go through `tools/ci/run.sh` (it takes its own slot) and hardware runs through `tools/with-lock -r ultimate`.
 
+## Fleet practices
+
+From the debriefs of the parked sessions (2026-11): what they say cost them time or caught a bug.
+
+**Evidence**
+- A "done" post names its evidence: the command, the tip hash, what was run and what was NOT run. A merge commit says the same, with the room figures (`make size`).
+- Before anything is called done, a hater (a fresh reviewer) gets the spec, the diff and the claimed evidence, never the author's reasoning, and a note on what was not run. Every finding is fixed, rebutted with evidence, or brought to the owner. It found a real bug every time.
+- One frozen tip per milestone: run the full suite on that exact commit and tag only what that run supports. Evidence from an earlier tip goes on its own line with who ran it.
+- Measure before deciding: a block-cache cut that looked free cost 18% at the prompt. For timing, take total time as a black box (timers under `SEI` lie).
+- Verify state before reporting it: look at the lock holders (`lsof`, or the `with-lock` message) before saying a lock or the hardware is free.
+
+**Experiments**
+- Alternate A and B with fixed counts and a stopping rule written before the first run. Say which result would change the plan, and stop and report when one does.
+- One wrapper for any run that changes machine config, restoring it on exit.
+- Long runs get an explicit limit set from a measured duration with margin (a hard-coded short timeout once lost a 25-minute run), one at a time, with a monitor on the end of the run; do not poll.
+- Findings go in one append-only log. A wrong conclusion is retracted in the log, in the open, not edited away.
+
+**Working together**
+- Claim work in `fleet/roster.md` before building (two sessions once built the same module tooling at once).
+- A message to a peer carries the result, the commands, and what was NOT run.
+- Hands-needed asks go last and one at a time, with the exact state wanted ("drive on, device 8, nothing else on the bus").
+- Relay an owner decision verbatim and say who answered. A policy finding is a branch, not an applied edit.
+- Give small agents mechanical work with a verification checklist and no push rights.
+
+**Git**
+- In a tree others use (the primary clone), never `git add -A` and never switch branches; commit with an explicit path (`git commit -- path`). In your own worktree `git add -A` is fine.
+- Before anything goes to origin: a leak scan that reads binary files too (a text scan missed a path inside an object file) and `git ls-files` for artifacts that should not be tracked.
+
 ## Research helpers
 
 Small, specific questions with an empty context are the sweet spot: one question, a report template (`docs/design/research/TEMPLATE.md`), a stated output file, a word limit. Rules that worked:
