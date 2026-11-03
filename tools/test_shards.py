@@ -40,10 +40,12 @@ class ShardList(unittest.TestCase):
         for n, text in flat.items():   # Drives writes the master image: nothing that boots it may follow
             if "Drives" in text:
                 self.assertNotIn("Cache", text.split("Drives")[1], n)
-        # Console and Keyboard (real speed, fixed sleeps) never share a container with other classes
+        # Console and Keyboard (real speed, fixed sleeps) run whole, never split by method; they may share
+        # a container with other classes, since tests in one container run one after another
         for n, specs in sl.items():
-            if any(s.startswith(("tests.test_console", "tests.test_keyboard")) for s in specs):
-                self.assertTrue(all(s.startswith(("tests.test_console", "tests.test_keyboard")) for s in specs), n)
+            for s in specs:
+                if s.startswith(("tests.test_console", "tests.test_keyboard")):
+                    self.assertIn(s, ("tests.test_console", "tests.test_keyboard"), n)
         # Boot: if split, into contiguous halves, each in Boot's own (alphabetical) order
         boot = [(n, [s for s in specs if s.startswith("tests.test_system.Boot.")]) for n, specs in sl.items()]
         boot = [(n, s) for n, s in boot if s]
@@ -61,8 +63,8 @@ class ShardList(unittest.TestCase):
         specs = [s for _, ss in shards.shards() for s in ss if s.startswith("tests.test_system.Drives")]
         self.assertTrue(all(s.rsplit(".", 1)[1].startswith("test_") for s in specs), specs)
         self.assertEqual(sorted(specs), sorted(ids))
-        drives = [(n, ss) for n, ss in shards.shards() if any(s.startswith("tests.test_system.Drives") for s in ss)]
-        self.assertEqual(shards.problems(drives, ids, len(drives)), [])
+        drives = [(n, [s for s in ss if s.startswith("tests.test_system.Drives")]) for n, ss in shards.shards()]
+        self.assertEqual(shards.problems([(n, ss) for n, ss in drives if ss], ids, 6), [])
 
 class Driver(unittest.TestCase):
     def test_script_parses_and_check_mode_runs(self):
