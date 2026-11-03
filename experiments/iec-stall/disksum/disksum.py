@@ -47,6 +47,11 @@ def checksum(sector):
     return total & 0xFF, total >> 8, x
 
 
+def command_string(track, sector):
+    """The text disksum.s sends on channel 15 for a block read: decimal, no leading zeros, a space between."""
+    return f"U1:2 0 {track} {sector}"
+
+
 def expected(image_bytes):
     """The checksum triples of every sector of a d64 image, in layout order."""
     out = []
