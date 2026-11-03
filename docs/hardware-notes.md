@@ -581,3 +581,14 @@ Not measured: the drive's or UCI's status after an ABORT, and an ABORT on an ope
 - **The target survives:** b.txt reads back `BBBBBB`.
 - Caveat: the READ asked for 8 bytes and returned 6, and `FILE STAT` answered `82,FILE NOT FOUND` for both files (already known to fail on just-written files), so neither the 8-byte content nor the STAT result is trusted. The short read may be the bench's write length, not the firmware; not checked.
 - Not measured: disk full (skipped on the owner's instruction).
+
+### 2026-11-02, Q6: write-back of a drive-written image, drive B on bus 10 (Agent A; `experiments/iec-stall/writeback_b.py`)
+
+Scratch copy of `build/breadbin.d64` at `/Temp/bqwb/wb.d64`. Drive B: bus set to 10 while disabled, enabled, mounted read/write, machine reset. From BASIC on device 10: `open2,10,2,"#"`, a 15-byte probe ("WRITEBACK-PROBE") into the buffer, `u2:2 0 1 1`.
+
+- **`U2` status `00, OK`** (drive B answered).
+- **The probe did not reach the file** within 45 s after the U2, and it was not in the file after the unmount.
+- Config restored by the finally block: drive B disabled, bus 9; the readback equals the baseline taken before the run (Kernal JiffyDOS, Software IEC enabled, drive A on bus 9 with `/Temp/breadbin.d64` untouched).
+- Scratch file and directory removed (checked over FTP).
+
+This repeats the earlier drive-A result (no write-back observed). The write-back question stays open: the file did not change during or after the unmount, so the emulator's write path to the image is not reached by a block write. Not tried: a drive reset after the U2, a longer wait, the SD card as the image's home.
