@@ -2,48 +2,46 @@
 
 **Moved to the runner (2026-11).** Local `main` in the primary clone is the shared truth (origin is a stale mirror; `docs/process.md`, "Origin"); each session works in its own worktree; the roster is `fleet/roster.md` on the `fleet-store` branch. Where the text below speaks of a cloud session, `hw-bench`, origin as truth or pushing freely, it is history from before the move: check `git log` and `docs/process.md` before acting on it.
 
-Rewritten 2026-10-31. For whoever picks this up next, in particular the session running next to the Ultimate. Read `CLAUDE.md` first (build, tests, test policy, standing decisions), then this. `docs/roadmap.md` has the full story list and the memory and disk-speed analyses.
+Snapshot, lanes, rules and open items refreshed 2026-11-03 to match main (45eacff) and the roster on `fleet-store`. The per-session state blocks and the first-milestone gaps are history, kept as written. Read `CLAUDE.md` first (build, tests, test policy, standing decisions), then this. `docs/roadmap.md` has the full story list and the memory and disk-speed analyses.
 
-## Two sessions, one repository
+## Lanes now
 
-| Session | Where | Does |
+The roster is `fleet/roster.md` on `fleet-store` (the owner's roster, published by the facilitator). Lanes are a starting point, not walls: the swarm hands work to whoever is free, and a claim is a post on the roster.
+
+| Lane | Who | Owns |
 |---|---|---|
-| **Cloud session** | a cloud container, branch `claude/brave-wright-km3nrm` | The kernel: the KERNAL takeover (M0), memory layout, the filesystem interface, the UCI kernel backend. Tests under VICE. Cannot reach the Ultimate or the drives. |
-| **Hardware session** | next to the C64 Ultimate and the real 1541 | Everything that needs the machine: verification, and the experiments below. It owns its own branch (`hw-bench`) and rebases it on the cloud branch. |
+| Facilitator | caf6de | the roster, routing, the all-stop and all-start process |
+| Hygiene, process, docs | C (102763) | `main` hygiene, the docs audit, `tools/ci` sharding |
+| Hardware | A (55d192) | the Ultimate, the physical 1541, `experiments/`, `tools/ultimate*`, `docs/hardware-notes.md` |
+| Footprint | B (0d9a05) | kernel footprint: `jtab`, `proc`, `main`, `mem`, `kernel.cfg`, `k.inc`, `src/lib` |
+| Test gates | D (5b44e6) | the VICE gates, the suite counts, the review of other lanes' work |
 
-The hardware session is not a remote hand. It has the codebase and the machine, and it should use judgement: if an experiment shows the plan is wrong, say so in `docs/hardware-notes.md` and say what you would do instead.
+## Snapshot (main 45eacff, 2026-11-03)
 
-## Snapshot
-
-- **Done:** M0-1 to M0-5. The kernel owns the interrupt entry, keyboard, screen, serial bus and channels; the KERNAL ROM is not used; the BSS moved into the old ROM region, leaving 6,079 bytes of room for code (`make size`). Stage 2 of the bus driver is verified under VICE with stock and JiffyDOS ROMs, **and on your hardware** (reported: boot 75.5 s against 46.5 s for the ROM bus, since the ROM's JiffyDOS fast protocol is no longer used).
-- **Next on the kernel side (cloud):** the test and size consolidation, then the filesystem interface (S6) and the UCI kernel backend (S10, S11). Disk speed is decided in `docs/roadmap.md` ("Disk speed"): the Ultimate file backend is the principal fast path; an REU block cache is the quick win; JiffyDOS and drive-side loaders are deferred.
-- **Not yet done on hardware:** the physical 1541 as the boot drive, `format`, and the full M0-5 build.
+- **Memory (`make size`, main):** code and data end at `$CD9D`; room below `$CF00` is **354 bytes**; BSS and CODEHI end at `$FFEB`; room below `$FFFA` is **14 bytes** (a link-time assert guards it, `src/kernel/main.s`). `KSTART` is `$A200` (`src/kernel/k.inc`), so the user pool is `$0800-$A1FF`, 154 pages. An idle prompt holds 21 pages (B's measurement on main; the older 23-page figure is not reproduced). The figures are kept in `docs/size-ledger.tsv`, one row per commit (`tools/size_ledger.py`; see Open items).
+- **Built and on main:** M0 (own interrupt entry, keyboard, screen, serial bus and channels); the REU block cache; the footprint pass; kernel modules (the `mod` command), the CBM DOS module, UCI v1 as a module (`mount uci`), `exec`, `turbo`.
+- **Hardware (Ultimate, firmware 1.1.0):** the Boot and Console subsets pass on the tip; the JiffyDOS-ROM drive set passes in the container (Boot.test_02, Drives 6 of 6). UCI measured: read and write round trips, one entry per READ DIR chunk, ABORT stops a listing after its chunk, LOAD REU at the end of 2 MB, RENAME onto an existing name answers FILE EXISTS. Full list and dates in `docs/hardware-notes.md`.
+- **Physical 1541:** boots the tip image to login in 22 s (5 of 5 on 2026-11-02, after the nibbler copy of the image). The disk is not compared sector by sector: the whole-disk reader stalled four times at sector 0 (`docs/hardware-notes.md`, "four stalls").
+- **Write-back:** a block written by the drive through U2 does not reach the mounted image file, in the 45 s, 300 s and drive-reset variants on a RAM-disk image (Q6, closed under those conditions).
 
 ## Rules of the road
 
-- (History, before the move.) Own branch `hw-bench`, rebased on `claude/brave-wright-km3nrm` before each work package. A push waits for the user's go (`docs/process.md`, "Origin").
-- **You own:** `tools/ultimate*.py`, `tools/fake_ultimate.py` and its tests, any new command under `src/bin/` (the Makefile builds every `src/bin/*.s` automatically), anything under `experiments/`, and `docs/hardware-notes.md`.
-- (History: the hardware session is now a peer committer, `docs/process.md`.) **Do not edit** `src/kernel/`, `src/lib/`, `include/breadbin.inc`, `kernel.cfg` or `k.inc`: the cloud session is working there. If you need a kernel change or a library routine, describe it in `docs/hardware-notes.md` (what, why, the smallest version) and carry on with a workaround.
-- Test policy as in `CLAUDE.md`: targeted tests per package; the cloud session runs the full suite at milestones.
-- ROM images and firmware stay out of the repository. The JiffyDOS images on your machine are for experiments only.
-- Credit sources in the code: `fastboot1541` is by Michael Steil and asks for credit.
-- Report in `docs/hardware-notes.md`: date, what you ran (a command someone else can repeat), what happened, and the commit.
+- Local `main` in the primary clone is the shared truth. Origin is a mirror and out of scope for now; a push waits for the user's go (`docs/process.md`).
+- Each session works in its own worktree. Land work on local `main` under the land lock (`tools/with-lock -r land -- ...`), and say what was run and not run in the commit message.
+- A commit records state, not success: red is fine when it is what you are working on.
+- Emulator runs go through `tools/ci/run.sh`; timing runs take every slot with `BREADBIN_CI_EXCLUSIVE=1`. Hardware runs take `tools/with-lock -r ultimate -- ...`, announce the write first, restore the configuration by trap, and read it back.
+- Post claims, results and blocks on the roster. Re-read the `fleet-store` tip before a roster write, and base the write on that tip.
 
-## Work packages, in priority order
+## Open items
 
-**WP0. Verify the current build (short).** Pull the cloud branch, `make`, boot it, and run the targeted tests from the "hardware list" in `docs/hardware-notes.md` (boot, `test_02`, `test_13`, `test_07`, `test_10`, `test_console`). The change to verify is M0-5: the kernel's tables moved to `$E000`. Record boot time. If the physical 1541 is available as device 8, repeat on it.
-
-**WP1. A UCI explorer, as a Breadbin command.** *The most valuable package.* Write `src/bin/uci.s`: a command that talks to the Ultimate Command Interface directly (registers `$DF1B–$DF1F`; programs may touch hardware, there is no memory protection). Start with `uci id` (read `$DF1D`, expect `$C9`; send the DOS target's identify command and print the reply), then `uci ls [path]`, `uci cat file`, `uci seek`, `uci time`, and whatever else the DOS target offers (`uci/ultimate_dos_target.rst` in the documentation repository). Measure real behavior against the documentation: queue and chunk sizes, status strings, error cases, how long open, read and seek take, and the sustained read throughput on a 32 KB file in 512-byte chunks. This is the prototype for the UCI file backend (S10, S11); what you learn here is what the kernel backend is designed from, so write down every surprise. Deliverable: the command, plus a "UCI as measured" section in `docs/hardware-notes.md`. Constraint: UCI requires the "Command Interface" menu option on (it is, per your notes) and interrupts do not matter to it (polled), but keep one transaction in flight at a time.
-
-**WP2. Fast-read feasibility (groundwork for M0-8).** Under `experiments/fastread/`, build `mist64/fastboot1541` (read its README and `pagetable.com/?p=568`), run it from the Ultimate, and find out: does it work on the emulated 1541 with the JiffyDOS ROM; with a stock ROM (the Ultimate can load a drive ROM by API, `drives/a:load_rom`; `tools/setup-vice-roms.sh` fetches one); on the physical 1541? What throughput does it reach, and does it need the screen blanked or interrupts off? Then a small variant that reads an arbitrary list of sectors, to see whether the technique serves the kernel's block reads. Deliverable: a table of drive and ROM combinations that work, speeds, and constraints, in `docs/hardware-notes.md`. Do not touch the kernel.
-
-**WP3. Pixel-exact frames.** Start the video stream (`streams/video:start`), receive it on the test host, and write `tools/ultimate_video.py` and `UltimateTarget.screenshot(path)` (PNG via the standard library only). Read the stream format from `data_streams.rst`. Answers H9. Useful for console tests that check colour and reverse video exactly. Deliverable: the tool, a test that skips without hardware, and the format notes.
-
-**WP4. Turbo, measured.** Through the configuration API enable the Turbo Mode setting that exposes `$D031`, then write a small command `turbo` that reads and sets the speed index and report `$D031` presence. Measure: does CPU speed change as documented (time a fixed loop against the jiffy clock)? What happens to the IEC bus driver at higher speed (expect it to break; note where), and to REU DMA and bad lines? Deliverable: the command and the measurements. No kernel changes: the kernel will switch turbo off around bus use once these are known.
-
-When a package is done, push, and say so in `docs/hardware-notes.md`. If two or more are done and nothing new has come in, rebase and start the next one. If you are blocked on a kernel change, write it down and move on.
-
-**WP5. Loader POC on the bench (queued, do not start until the physical-1541 stall is localised).** Only after you are confident about the bus behaviour (the physical-1541 root-mount stall, drive timing). Take Krill's Loader v194 release archive (BSD-style licence, credit "Loader by Krill"; a link is in `docs/design/fast-io.md`) and run its prebuilt `loadertest-c64.d64` unmodified from the Ultimate: (a) drive A with a stock 1541 ROM, (b) drive A with the JiffyDOS ROM, (c) on the physical 1541 with the JiffyDOS ROM, (d) with a second drive on the bus. Record: does it run; the kB/s lines it prints; whether the screen must be blank; any hang or error. The same experiment under VICE is already done (`docs/design/fast-io.md`, section 16): 6.0 to 6.4 kB/s raw on both ROM sets. A negative result on hardware is as useful as a positive one; write down *where* it fails. Do not touch the kernel for this.
+- **CP2 (footprint):** the branch `feat/cp2-sh-bss` at 6a99281 is held for the user's decision; nothing is merged.
+- **Physical-disk compare:** parked. The reader stalls before the first status byte of the first U1; its code and state are intact. The cause is not known. The read-back that exists (`mcdup` with read-back) rewrites every sector and is the owner's call.
+- **UCI:** the disk-full case (Q4) and Q9 (turbo with UCI, low priority) are open. Disk-full is the owner's to run.
+- **Drives split by method:** D's lane, in progress on a local branch.
+- **Size ledger:** `tools/size_ledger.py` and `docs/size-ledger.tsv` are on `feat/size-ledger` (9353b44). Land it, then point `CLAUDE.md`'s status at the ledger rather than at a number.
+- **Tests:** `test_keyboard` needs X (container); the JiffyDOS-ROM subset is partly run (above).
+- **Roster:** `fleet/missing.md` has no writer yet.
+- **Origin and pushes:** the user's decision.
 
 ## Cloud session state (written before a context compaction, 2026-10-31)
 
@@ -95,33 +93,9 @@ Where the cloud session stands, so a fresh context can resume:
 
 **Next ideas (not started):** pg_used as an owner/class tag (breadbin-next's proposal), a lean `sys_return`, more INIT-style release of rarely used code, undocumented opcodes where they save bytes (stable set cleared on the Ultimate), driver modularisation (needs the S6 vtable first), a TPA-agnostic kernel (NTH).
 
-## Work board (collective autonomy; nobody is in charge, everyone is in charge)
+## Work board
 
-**Shared truth:** local `main` in the primary clone (merge commits welcome, red is fine: a commit records state); origin is a stale mirror (`docs/process.md`, "Origin"). Work in short-lived branches (`fix/<topic>`, `feat/<topic>`), merge back with a merge commit, delete when merged. Say what was run and not run in every commit. Tell the owner at its roster address (`fleet/roster.md` on `fleet-store`) before touching their files; the rule of thumb is "files you claimed below are yours until you release the claim". VICE runs: `tools/with-lock` or the container runner in `tools/ci` (`docs/ci.md`). Hardware needs the user's hands: do not queue anything that needs them while they are away. Nothing leaves the machine except branches and tags: no keys, addresses, hostnames.
-
-| Lane | Who | Claims (files/areas) | Doing / next |
-|---|---|---|---|
-| Kernel footprint round 2 | Agent 3 (Kernal) | `src/kernel/jtab.s`, `proc.s`, `main.s`, `mem.s`, `kernel.cfg`, `k.inc`, `src/lib/*` | test fanout on main (keyboard, full suite in the container); lean `sys_return`, sched fast path, undocumented-opcode peepholes where bytes are saved |
-| UCI v1 (MERGED to main 2026-11-01) | breadbin-next (f7) | new `uci.s`, `cbm.s`, `fs.s`; `blk.s` only after Agent 2's `fix/iec-recover` merges (ask first) | start from `main`; room is tight (236 bytes below $CF00): pay with `KSTART`, a page at a time, and say so |
-| Hardware: IEC recovery | Agent 2 (hardware) | `fix/iec-recover`: `iec.s` (bus_acptr ready wait bounded), `blk.s` (iec_read retries); +56 bytes (180 left below $CF00 after main) | **8 of 8 boots on the physical 1541** (was about 1 in 4), `docs/hardware-notes.md`; merged to local main; next: cache A/B, JiffyDOS-ROM subset, then DMA read bit and image write-back for UCI |
-| Hardware: stall bench | Agent 2 (hardware) | `hw-bench`, `experiments/iec-stall/`, `tools/ultimate*`, `docs/hardware-notes.md`, the `ultimate` lock | physical-1541 stall experiments; hardware list on main. breadbin-2b: idle, unclaimed (settled 2026-11-01) |
-| CI / containers | breadbin-next (f7) authored `tools/ci` (`next/ci`) | `tools/ci`, `docs/ci.md` | container runner works for `test-host` (checked 2026-10-31); keyboard run in progress by Agent 3 |
-
-breadbin-2b's session is now breadbin-69 (idle; stale-branch list delivered). The program-size note is re-measured on main and owned by Agent C (breadbin-83): `docs/design/program-size.md`, commits 33db35b and b576b61. Not taking CX v2 (relocation delta): that changes the CX format and exec.s and waits for the user's go.
-
-**Sprint state (2026-11-02, landed by Agent C, breadbin-83):** the sprint discussion is peer-to-peer. A (breadbin-d8, hardware) holds the `ultimate` lock until the user says go, makes no kernel edits, and logs results on its branch. D (breadbin-75) pushes nothing and aligns with the program-size work. breadbin-69 is the former 2b (hygiene; it holds the stale-branch list). B is unmapped and doing worktree mop-up. Open for the user: one owner for the delete run (breadbin-69 or Agent C; the facilitator has not named one), the drive-module modularisation decision, and the 259-byte drop in the program sizes (bisect deferred by the facilitator). Stale state: `fleet-store` was reset once (tip 27df1ac; the discarded 8ecb83e is reachable until gc); origin still has `fix/iec-recover` and `hw-bench`, both merged.
-
-**Hygiene owner (decided by Agent 4, coordinator, 2026-11-01): breadbin-2b.** (Now breadbin-69; the delete run's owner is open, see above.) Scope: `.gitignore` and untracking `experiments/iec-stall/uci.bin`; deleting the merged `fix/iec-recover` on origin; stale branches and worktrees (after asking their owners); tagging the milestone once the gates pass. Pushes, remote deletes and tags wait for the user's confirmation, routed through the coordinator. Not in scope: any GitHub history purge (deferred by the user).
-
-**Open items nobody owns yet:** JiffyDOS-ROM disk and bus subset on main; drive-module modularisation (needs the S6 filesystem interface first); a TPA-agnostic kernel (NTH). Take one by writing your name here.
-
-**UCI v1 merged (2026-11-01):** it spent 10 pages of TPA (`KSTART` $9700, 143 pool pages; was 153 before it) and left 310 bytes below $CF00 and 58 bytes above BSS+CODEHI. `uci.s` is throwaway-labelled: its header lists the cut list for the next footprint pass, and in v2 it becomes a loadable module (the `bmi` dispatch sites in file.s/fs.s/exec.s/cbm.s are the seam). The author's runs: Pool, Drives, Persistence, smoke, 71 host tests (23 sim tests need py65), py65 sim 23. The full suite on the merged tree is the fanout item below.
-
-**Fanout results (Agent 3, 2026-11-01):** on `main` 4778b1a (UCI v1 merged), container (VICE 3.9): host tests 71 ok (23 skipped, need py65); full VICE suite 55 ok in 2511 s. Earlier on b9b1c9e / ca89021: keyboard 7 ok, console 6 ok (container); full suite 55 ok. Agent 2 on the JiffyDOS ROMs (VICE 3.10, JiffyDOS C64 KERNAL + 1541-II ROM): Boot + Cache + Drives, 39 ok. Hardware: physical 1541 8 of 8 boots with fix/iec-recover; cache A/B 10 of 10 at 52 s. Not run on main: the hardware list beyond those boots, anything needing the user's hands. In flight: `fix/die-deferred` (proc.s `@die` defers the exit out of the IRQ handler; Boot class running).
-
-**TPA status (Agent 3, 2026-11-01, main ab4888d):** kernel side `KSTART` $9A00 = 146 pool pages (37,376 bytes); was 120 at the fork, 153 at the peak before UCI v1, 142 with UCI v1 plus the module loader. Done since: `cbm.km` (CBM DOS as a module loaded at the first CBM mount), the spawn/loader chain in CODEHI, `exec` (login becomes sh: login's 7 pages are free at every prompt; idle `ps` shows init 5 + sh 18 pages), `@die` deferred out of the IRQ. At idle, resident user pages are now about 23 (init 5 + sh 18) instead of about 30. Room: 159 bytes below $CF00, 75 above BSS+CODEHI. In flight: `uci.km` (f7, branch `feat/uci-km`: pool 154 pages on its own branch; waits for review and a rebase on exec), then BSS/cold-code moves from `docs/design/next/tpa-recovery.md` (items 4 to 6). Owed on main: JiffyDOS-ROM Boot/Drives and a hardware login on the exec path (Agent 2); the py65 exec error-state tests (f7, after its quota reset).
-
-**NBUF measured, rejected (Agent 3, 2026-11-01, VICE 3.9, 2 MB REU with the cache on; block reads = cache hits + bus reads, i.e. every RAM-buffer miss, which is a bus read on a machine without a cache; same boot plus 12 shell commands):** NBUF 6: 71 at the prompt, 287 after; NBUF 4: 78 (+10%), 332 (+16%); NBUF 3: 84 (+18%), 372 (+30%). Freed BSS would be 512 / 768 bytes (2 / 3 pool pages, via code moved above the BSS). A Classic machine pays about half a second per extra read, so the cost is a slower boot and about a third more disk time per command for 2% of the pool. Kept at 6. A machine with an REU could use fewer buffers (the cache absorbs the misses) but that needs a run-time choice, not a constant. What is left in `docs/design/next/tpa-recovery.md`: item 5 (`p_save` into process pages, about 6 pages at an idle prompt, touches sched/proc_exit: heavy) and item 7 (`p_cwd`, about 2 pages, UCI paths must stay strings). The pool is 154 pages (39,424 bytes), above stock BASIC's 38,911. I would stop the TPA pass here unless the user wants item 5.
+Replaced by the roster: `fleet/roster.md` on `fleet-store`. Claims, results and blocks go there, not here.
 
 ## Known gaps at the first milestone (Agent 3, 2026-11-01; these are declared, not hidden)
 
