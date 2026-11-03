@@ -488,3 +488,12 @@ Answers Q2, Q4 and Q5 of `docs/design/next/uci-v1.md` section 9. All ran under `
 - Timing: OPEN DIR 2 to 5 ms; READ DIR 2.2 to 8 ms per packet (about 11 KB/s at 85 bytes, a per-command cost, not a bandwidth).
 
 Not run: the module's own `ls` on the Ultimate after these (the bench does not run the module), a directory listing longer than one packet, `DELETE` on a directory that is open.
+
+### 2026-11-02, UCI LOAD REU at the end of a 2 MB REU, Q7 (Agent A; `experiments/iec-stall/uci.py write reuend`)
+
+- `LOAD REU` of 32 KB at `$1F8000` (ends exactly at 2 MB): `00,OK`, 32,768 bytes, 6.3 ms.
+- `LOAD REU` of 256 bytes at `$1FFF00` (ends at 2 MB): `00,OK`, 256 bytes, 3.6 ms.
+- `LOAD REU` of 512 bytes at `$1FFF00` (**runs 256 bytes past 2 MB**): **`00,OK`, 512 bytes reported loaded**, 3.5 ms. No error. The firmware neither refuses the overrun nor reports a short count. Whether the 256 bytes past the end wrap to `$000000` or are dropped is **not measured** (a read-back of the REU's first bytes would settle it).
+- Measurement trap, now fixed in the group: a second LOAD on the same open file reads at end of file and loads 0 bytes. Each load in the group reopens the file.
+
+Consequence for a fast path: the caller must bound `REU address + length` itself. Do not rely on the firmware to refuse an overrun.
