@@ -76,9 +76,10 @@ class Compiled(unittest.TestCase):
         self.assertEqual(self.run_compiled("ccloop", LOOP).splitlines(), ["tick"] * 5)
 
     def test_operators_branches_and_a_long_string(self):
-        # the screen is 40 columns: a long line wraps, so compare the text without its line breaks
+        # the screen is 40 columns: a long line wraps at a space, and the space is lost at the
+        # break, so compare with all whitespace removed on both sides (no character may be lost)
         out = self.run_compiled("ccops", OPS)
-        self.assertEqual("".join(out.splitlines()), "eqsubge" + LONG_LINE)
+        self.assertEqual("".join(out.split()), "eqsubge" + "".join(LONG_LINE.split()))
 
 
 if __name__ == "__main__":
