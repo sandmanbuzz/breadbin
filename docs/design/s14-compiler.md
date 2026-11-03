@@ -33,6 +33,25 @@ Not yet: `char`, arrays, pointers, `for`, `* /`, parameters, globals, `#include`
 
 ## Limits to keep in mind
 
+Refused with a message (checked by `tools/test_cc.py`):
+
+- Recursion, direct or mutual: locals are static, so it would give wrong answers.
+- Stack use along a call chain above 31 values (`cc_stk` holds 32 two-byte values).
+- Names longer than 14 characters, and names that clash ignoring case (as keeps 14 characters
+  and ignores case).
+- Strings longer than 254 bytes (`rt_puts` indexes with Y), strings with `\\0` (it would end
+  them early), and characters above Latin-1 (`as` stores 8 bits).
+- `*` and `/`, and expressions nested too deeply for the parser.
+- Programs needing more than 185 symbols (`as` holds 220 less its 35 builtins).
+
+Accepted, by decision, and documented here for the owner:
+
+- Comparisons are unsigned: `int x = 0 - 1; if (x < 0)` takes the false branch. C would take
+  the true branch. Pinned by the executed tests. Signed compare, or refusing `<` on signed
+  values, is for the owner to choose.
+- Block scope is not enforced: `{ int x = 1; } x = 2;` compiles, because all locals of a
+  function share one namespace. C would refuse the second use.
+
 - `as` symbol names are at most 15 characters; the compiler refuses longer local names.
 - `as` holds at most 220 symbols (`NSYM`); a large program will hit that before it hits the code
   size. The count is not checked yet.
@@ -43,9 +62,13 @@ Not yet: `char`, arrays, pointers, `for`, `* /`, parameters, globals, `#include`
 - Zero page: one pair, `cc_ptr = $2b` (the string pointer for `(zp),y` in `rt_puts`). `as`
   accepted `(zp),y` with a non-zero-page pointer and emitted a silent wrong address (found on the
   machine: the string read as empty). The data area was the first placement and it was wrong.
-- Run on the C64: `tests/test_compiled.py` compiles hello and a five-pass loop on the host,
+- Run on the C64: `tests/test_compiled.py` compiles hello, a five-pass loop, and an operator
+  program with a string of 82 characters (emitted over several lines), on the host,
   puts the `.s` on a copy of the test disk, runs `as` on the machine, runs the result and checks
-  the output. Both pass.
+  the output.
+- Executed on a 6502 simulator on the host (`tools/test_cc_run.py`, needs ca65, ld65 and py65):
+  the operator grid, wrap-around arithmetic, call return values, a long string, a long loop body
+  and a 31-value expression. Mutants of `cc_lt` and `cc_swap` fail the grid.
 
 ## Open for S17
 

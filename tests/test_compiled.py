@@ -26,6 +26,22 @@ int main() {
 """
 
 
+# 82 characters: as drops input past 127 characters a line, so the string is emitted over several lines
+LONG_LINE = "a line of text that is longer than what an old as line held, so it has to be split"
+
+OPS = """\
+int f() { return 3 - 1; }
+int main() {
+  int a = 5;
+  if (a == 5) puts("eq\\n"); else puts("ne\\n");
+  if (f() - 1 == 1) puts("sub\\n"); else puts("nosub\\n");
+  if (a < 3) puts("lt\\n"); else puts("ge\\n");
+  puts("%s\\n");
+  return 0;
+}
+""" % LONG_LINE
+
+
 def make_disk(name, asm):
     """A copy of the breadbin image with /home/<name>.s added (the image is the root filesystem)."""
     tmp = tempfile.mkdtemp(prefix="cc-")
@@ -58,6 +74,10 @@ class Compiled(unittest.TestCase):
 
     def test_loop_counts_to_five(self):
         self.assertEqual(self.run_compiled("ccloop", LOOP).splitlines(), ["tick"] * 5)
+
+    def test_operators_branches_and_a_long_string(self):
+        self.assertEqual(self.run_compiled("ccops", OPS).splitlines(),
+                         ["eq", "sub", "ge", LONG_LINE])
 
 
 if __name__ == "__main__":

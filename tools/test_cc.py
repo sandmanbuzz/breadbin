@@ -39,8 +39,19 @@ class Hello(unittest.TestCase):
 
     def test_string_is_zero_terminated_bytes(self):
         out = compile_src(HELLO)
-        want = "s_1: .byte 104, 101, 108, 108, 111, 44, 32, 119, 111, 114, 108, 100, 33, 10, 0\n"
-        self.assertIn(want, out)
+        self.assertIn("s_1:\n        .byte 104, 101, 108, 108, 111, 44, 32, 119, 111, 114, 108, 100, 33, 10, 0\n", out)
+
+    def test_long_string_is_split_into_short_lines(self):
+        # as reads at most 127 characters a line and drops the rest silently
+        text = "the quick brown fox jumps over the lazy dog, twice over and over again\\n"
+        out = compile_src('int main() { puts("%s"); return 0; }' % text)
+        lines = out.split("\n")
+        self.assertTrue(all(len(l) <= 127 for l in lines), max(len(l) for l in lines))
+        data = []
+        for l in lines:
+            if l.startswith("        .byte "):
+                data += [int(v) for v in l[len("        .byte "):].split(",")]
+        self.assertEqual(data, list(text.replace("\\n", "\n").encode("latin-1")) + [0])
 
     def test_puts_goes_through_the_runtime_and_sys_write(self):
         out = compile_src(HELLO)
@@ -80,6 +91,16 @@ int main() {
   return n;
 }
 """
+
+    def test_branches_use_the_long_form(self):
+        # a short conditional branch reaches 127 bytes; a body can be longer than that
+        body = "".join("    n = n + %d;\n" % i for i in range(60))
+        src = "int main() { int n = 0; int i = 0; while (i < 2) {\n" + body + "    i = i + 1; } return n; }\n"
+        out = compile_src(src)
+        lines = out.split("fn_main:\n", 1)[1].split("; --- runtime", 1)[0].split("\n")
+        for i, line in enumerate(lines):
+            if re.match(r"\s+(beq|bne|bcc|bcs)\s", line):
+                self.assertTrue(lines[i + 1].startswith("        jmp "), (line, lines[i + 1]))
 
     def test_while_and_if_labels_resolve(self):
         out = compile_src(self.SRC)
@@ -174,7 +195,50 @@ class Errors(unittest.TestCase):
         self.assertFails("int main() { return 0; }\nint main() { return 1; }", "defined twice")
 
     def test_as_symbol_limit(self):
-        self.assertFails("int main() { int abcdefghijklmnop; return 0; }", "longer than 15 characters")
+        self.assertFails("int main() { int abcdefghijklmnop; return 0; }", "longer than 14 characters")
+
+    def test_names_clash_regardless_of_case(self):
+        self.assertFails("int main() { int Count = 1; int count = 2; return 0; }", "clashes with")
+
+    def test_function_name_length(self):
+        self.assertFails("int abcdefghijklmn() { return 0; }\nint main() { return 0; }", "longer than 14 characters")
+
+    def test_recursion_is_refused(self):
+        self.assertFails("int f() { return f(); }\nint main() { return f(); }", "recursion")
+
+    def test_mutual_recursion_is_refused(self):
+        self.assertFails("int f() { return g(); }\nint g() { return f(); }\nint main() { return f(); }",
+                         "recursion")
+
+    def test_stack_along_a_call_chain_is_checked(self):
+        # each function is within 31 levels; the call from inside an expression adds to the chain
+        inner = "1+(" * 20 + "1" + ")" * 20
+        src = ("int f() { return %s; }\n"
+               "int main() { int y = %s f() %s; return 0; }\n") % (inner, "1+(" * 20, ")" * 20)
+        self.assertFails(src, "stack use along one call chain")
+
+    def test_latin1_only(self):
+        self.assertFails('int main() { puts("\u20ac"); return 0; }', "Latin-1")
+
+    def test_string_longer_than_rt_puts_allows(self):
+        self.assertFails('int main() { puts("%s"); return 0; }' % ("a" * 255), "longer than 254 bytes")
+
+    def test_embedded_nul_is_refused(self):
+        self.assertFails('int main() { puts("a\\0b"); return 0; }', "would end it early")
+
+    def test_multiplication_is_refused(self):
+        self.assertFails("int main() { return 2 * 3; }", "operator * is not in this slice")
+
+    def test_division_is_refused(self):
+        self.assertFails("int main() { return 6 / 3; }", "operator / is not in this slice")
+
+    def test_deep_parentheses_are_a_compile_error(self):
+        src = "int main() { return " + "(" * 400 + "1" + ")" * 400 + "; }"
+        self.assertFails(src, "too deeply for the parser")
+
+    def test_symbol_table_limit(self):
+        body = "".join("    if (%d == 1) { }\n" % i for i in range(200))
+        self.assertFails("int main() {\n" + body + "    return 0;\n}\n", "symbols; as holds 185")
 
     def test_expression_depth_limit(self):
         ok = "int main() { return " + "1+(" * 31 + "1" + ")" * 31 + "; }"

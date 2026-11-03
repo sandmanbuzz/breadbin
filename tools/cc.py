@@ -18,14 +18,16 @@ import sys
 
 KEYWORDS = {"int", "if", "else", "while", "return"}
 MAX_DEPTH = 31                       # cc_stk holds 32 two-byte values
-SYMMAX = 15                          # `as` symbol names
+SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
+LINE_BYTES = 16                      # .byte values per emitted line (as reads at most 127 characters a line)
+SYMTABLE = 185                       # as NSYM 220 less its 35 builtins
 
 TOKEN = re.compile(r"""
     (?P<ws>\s+) | (?P<lc>//[^\n]*) | (?P<bc>/\*.*?\*/) |
     (?P<num>0[xX][0-9a-fA-F]+|[0-9]+) |
     (?P<str>"(?:\\.|[^"\\\n])*") |
     (?P<id>[A-Za-z_][A-Za-z_0-9]*) |
-    (?P<op>==|!=|<=|>=|[-+<>=(){};,])
+    (?P<op>==|!=|<=|>=|[-+*/<>=(){};,])
 """, re.X | re.S)
 
 ESCAPES = {"n": 10, "t": 9, "r": 13, "0": 0, "\\": 92, '"': 34}
@@ -69,6 +71,8 @@ def unescape(body, line):
                 raise CompileError(f"line {line}: bad escape in string literal")
             out.append(ESCAPES[body[i]])
         else:
+            if ord(c) > 255:
+                raise CompileError(f"line {line}: string literal characters must be Latin-1 (as stores 8 bits)")
             out.append(ord(c))
         i += 1
     return bytes(out)
@@ -174,7 +178,10 @@ class Parser:
         return e
 
     def expr(self):
-        return self.binary(0)
+        e = self.binary(0)
+        if self.peek()[0] == "op" and self.peek()[1] in ("*", "/"):
+            raise CompileError(f"line {self.peek()[2]}: operator {self.peek()[1]} is not in this slice")
+        return e
 
     def binary(self, level):
         if level == len(LEVELS):
@@ -357,6 +364,7 @@ class Gen:
         self.funcs = {name: line for name, _, line in funcs}
         self.out, self.n, self.depth = [], 0, 0
         self.strings, self.locals, self.calls = [], [], []
+        self.names, self.fn_max, self.call_sites, self._worst = {}, {}, {}, {}
         self.fn, self.vars = None, {}
 
     def ins(self, text):
@@ -383,10 +391,23 @@ class Gen:
         for name, line in self.calls:
             if name not in self.funcs:
                 raise CompileError(f"line {line}: undefined function {name}")
+        for name in self.funcs:
+            w = self.worst(name, [])
+            if w > MAX_DEPTH:
+                raise CompileError(f"{name}: stack use along one call chain is {w + 1} values; cc_stk holds 32")
         return "\n".join(self.out) + "\n" + RUNTIME + self.strings_text() + DATA + self.locals_text()
+
+    def claim(self, lbl, line):
+        if len(lbl) > SYMMAX:
+            raise CompileError(f"line {line}: {lbl} is longer than {SYMMAX} characters (as limit)")
+        key = lbl.lower()
+        if key in self.names:
+            raise CompileError(f"line {line}: {lbl} clashes with {self.names[key]} (as ignores case)")
+        self.names[key] = lbl
 
     def function(self, name, body, line):
         self.fn, self.vars = name, {}
+        self.claim("fn_" + name, line)
         self.lab("fn_" + name)
         for s in body:
             self.stmt(s)
@@ -395,9 +416,25 @@ class Gen:
         self.ins("sta acc+1")
         self.ins("rts")
 
+    def worst(self, f, path):
+        """Most values pushed at once on any call chain that starts in f (no recursion allowed)."""
+        if f in path:
+            raise CompileError(f"recursion: {' -> '.join(path + [f])} (locals are static: no recursion yet)")
+        if f not in self._worst:
+            w = self.fn_max.get(f, 0)
+            for callee, _line, d in self.call_sites.get(f, []):
+                w = max(w, d + self.worst(callee, path + [f]) + 1)
+            self._worst[f] = w
+        return self._worst[f]
+
     def strings_text(self):
-        return "".join(f"{lbl}: .byte {', '.join(str(b) for b in data + b'\0')}\n"
-                       for lbl, data in self.strings)
+        out = []
+        for lbl, data in self.strings:
+            vals = [str(b) for b in data + b"\0"]
+            out.append(f"{lbl}:")
+            for i in range(0, len(vals), LINE_BYTES):
+                out.append("        .byte " + ", ".join(vals[i:i + LINE_BYTES]))
+        return "\n".join(out) + "\n"
 
     def locals_text(self):
         return "".join(f"{lbl}: .res 2\n" for lbl in self.locals)
@@ -426,8 +463,7 @@ class Gen:
             if name in self.vars:
                 raise CompileError(f"line {line}: {name} is already declared in {self.fn}")
             lbl = f"v_{self.fn}_{name}"
-            if len(lbl) > SYMMAX:
-                raise CompileError(f"line {line}: {lbl} is longer than {SYMMAX} characters (as limit)")
+            self.claim(lbl, line)
             self.vars[name] = lbl
             self.locals.append(lbl)
             if init is not None:
@@ -450,9 +486,11 @@ class Gen:
             self.ins("rts")
         elif kind == "if":
             _, cond, then, other, _line = s
-            else_l, end_l = self.new_label(), self.new_label()
+            else_l, end_l, yes_l = self.new_label(), self.new_label(), self.new_label()
             self.test(cond)
-            self.ins(f"beq {else_l}")
+            self.ins(f"bne {yes_l}")
+            self.ins(f"jmp {else_l}")
+            self.lab(yes_l)
             self.stmt(then)
             self.ins(f"jmp {end_l}")
             self.lab(else_l)
@@ -461,10 +499,12 @@ class Gen:
             self.lab(end_l)
         elif kind == "while":
             _, cond, body, _line = s
-            top_l, end_l = self.new_label(), self.new_label()
+            top_l, end_l, yes_l = self.new_label(), self.new_label(), self.new_label()
             self.lab(top_l)
             self.test(cond)
-            self.ins(f"beq {end_l}")
+            self.ins(f"bne {yes_l}")
+            self.ins(f"jmp {end_l}")
+            self.lab(yes_l)
             self.stmt(body)
             self.ins(f"jmp {top_l}")
             self.lab(end_l)
@@ -498,6 +538,7 @@ class Gen:
                 if args:
                     raise CompileError(f"line {line}: arguments are not in this slice")
                 self.calls.append((name, line))
+                self.call_sites.setdefault(self.fn, []).append((name, line, self.depth))
                 self.ins(f"jsr fn_{name}")
         elif kind == "neg":
             self.expr(e[1])
@@ -517,6 +558,7 @@ class Gen:
 
     def push(self):
         self.depth += 1
+        self.fn_max[self.fn] = max(self.fn_max.get(self.fn, 0), self.depth)
         if self.depth > MAX_DEPTH:
             raise CompileError("expression too deeply nested for the software stack")
         self.ins("jsr cc_push")
@@ -524,8 +566,13 @@ class Gen:
     def puts(self, args, line):
         if len(args) != 1 or args[0][0] != "str":
             raise CompileError(f"line {line}: puts takes one string literal")
+        data = args[0][1]
+        if len(data) > 254:
+            raise CompileError(f"line {line}: string literal is longer than 254 bytes (rt_puts indexes with Y)")
+        if 0 in data:
+            raise CompileError(f"line {line}: a \\0 in a string would end it early; not in this slice")
         lbl = f"s_{len(self.strings) + 1}"
-        self.strings.append((lbl, args[0][1]))
+        self.strings.append((lbl, data))
         self.ins(f"lda #<{lbl}")
         self.ins("sta cc_ptr")
         self.ins(f"lda #>{lbl}")
@@ -549,13 +596,20 @@ BINOPS = {
 
 
 def compile_c(src):
-    funcs = Parser(lex(src)).program()
+    try:
+        funcs = Parser(lex(src)).program()
+    except RecursionError:
+        raise CompileError("expression nested too deeply for the parser") from None
     seen = set()
     for name, _, line in funcs:
         if name in seen:
             raise CompileError(f"line {line}: function {name} is defined twice")
         seen.add(name)
-    return Gen(funcs).program(funcs)
+    text = Gen(funcs).program(funcs)
+    symbols = len(re.findall(r"^[A-Za-z_][A-Za-z_0-9]*:", text, re.M)) + 1   # + cc_ptr =
+    if symbols > SYMTABLE:
+        raise CompileError(f"program needs {symbols} symbols; as holds {SYMTABLE} for a program")
+    return text
 
 
 def main(argv):
