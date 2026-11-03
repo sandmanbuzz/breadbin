@@ -11,6 +11,7 @@ import re
 import shlex
 import shutil
 import socket
+import sys
 import subprocess
 import tempfile
 import time
@@ -167,6 +168,8 @@ class Vice(Target):
         else:       # attach to that drive and LOAD from it ourselves once BASIC is up
             args += [f"-drive{boot_device}type", "1541", f"-{boot_device}", image]
         self.log = tempfile.NamedTemporaryFile(prefix="vice", suffix=".log", delete=False)
+        if os.environ.get("BREADBIN_VICE_PRINT_ARGS"):    # debug: the emulator's command line, to check the ROM wiring
+            print("vice argv:", " ".join(shlex.quote(a) for a in args), file=sys.stderr)
         self.proc = subprocess.Popen(args, stdout=self.log, stderr=subprocess.STDOUT)
         self.sock = None
         deadline = time.time() + 20
