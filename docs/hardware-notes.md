@@ -461,3 +461,12 @@ Ran `tests.test_system.Exec`, `Modules` and `Persistence` against the Ultimate (
 ### 2026-11-02, tip `cac322d` under VICE 3.10, stock ROMs: Cache, REU, Pool (Agent A)
 
 `tests.test_system.Cache`, `REU` and `Pool` (VICE-only classes, as the Exec/Modules/Persistence entry above): **11 of 11 OK, 735 s**, windowless `-console`, scratch HOME, `tools/with-lock` (queued behind the gate-2 `vice` lock, then run). Not run: `Drives`, the JiffyDOS-ROM set, `test_keyboard`, the full suite.
+### 2026-11-02, milestone gates on main 9693358 (emulation only, no hardware)
+
+Gate 1, full suite with stock ROMs: `tools/ci/run.sh test` (container, warp, under `tools/with-lock`). Host tests `make test-host`: 94 run, OK, 35 skipped (py65 not installed). VICE: 63 run, OK, 2917.2 s, `EXIT=0`. Started 09:33:15, ended 10:22:08. The run's 63 tests are as the container reports them; keyboard and console classes were not checked separately.
+
+Gate 2, JiffyDOS subset: `tools/with-lock -- python3 -m unittest tests.test_system.Cache tests.test_system.REU tests.test_system.Boot tests.test_system.Drives tests.test_system.Pool -v` with `BREADBIN_VICE_ARGS` set to the JiffyDOS C64 KERNAL and 1541-II ROM images (macOS VICE 3.10, windowless, warp). 43 run, OK, 2221.2 s, `EXIT=0`. Started 10:54:46, ended 11:37:18.
+
+Not counted: two earlier gate 2 attempts. The first (10:22) errored 17 tests because the results worktree had no `build/` directory (setup, not a kernel result); `make` fixed it. The second (10:24) was killed by a 30-minute background limit at `Drives.test_breadbin_disk` with no verdict; 27 tests passed and none failed before the kill.
+
+Both runs on main tip 9693358. Results only; nothing built or changed in the tree.
