@@ -40,12 +40,17 @@ class ShardList(unittest.TestCase):
         for n, text in flat.items():   # Drives writes the master image: nothing that boots it may follow
             if "Drives" in text:
                 self.assertNotIn("Cache", text.split("Drives")[1], n)
-        # Console and Keyboard run alone
+        # Console and Keyboard (real speed, fixed sleeps) never share a container with other classes
         for n, specs in sl.items():
             if any(s.startswith(("tests.test_console", "tests.test_keyboard")) for s in specs):
-                self.assertEqual(len(specs), 1, n)
-        # Boot stays whole
-        self.assertTrue(any(s == ["tests.test_system.Boot"] for s in sl.values()))
+                self.assertTrue(all(s.startswith(("tests.test_console", "tests.test_keyboard")) for s in specs), n)
+        # Boot: if split, into contiguous halves, each in Boot's own (alphabetical) order
+        boot = [(n, [s for s in specs if ".Boot" in s]) for n, specs in sl.items()]
+        boot = [(n, s) for n, s in boot if s]
+        flat = [m for _, ms in boot for m in ms]
+        self.assertEqual(flat, sorted(flat))
+        for n, ms in boot:
+            self.assertEqual(ms, sorted(ms), n)
 
 
 class Driver(unittest.TestCase):
