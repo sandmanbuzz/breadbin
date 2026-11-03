@@ -25,6 +25,23 @@ class Checksum(unittest.TestCase):
             self.assertNotEqual(disksum.checksum(bytes(changed))[:2], disksum.checksum(base)[:2], i)
 
 
+class CommandString(unittest.TestCase):
+    """The exact text the reader sends. Mirrors disksum.s; the 6502 path itself is only checked on hardware."""
+
+    def test_sectors_0_9_10_and_682(self):
+        lay = disksum.layout()
+        self.assertEqual(disksum.command_string(*lay[0]), "U1:2 0 1 0")       # sector 0
+        self.assertEqual(disksum.command_string(*lay[9]), "U1:2 0 1 9")       # sector 9
+        self.assertEqual(disksum.command_string(*lay[10]), "U1:2 0 1 10")     # sector 10
+        self.assertEqual(disksum.command_string(*lay[682]), "U1:2 0 35 16")   # the last sector, index 682
+
+    def test_no_padded_form_is_ever_produced(self):
+        for t, s in disksum.layout():
+            text = disksum.command_string(t, s)
+            for field in text.split()[2:]:
+                self.assertFalse(len(field) > 1 and field.startswith("0"), text)
+
+
 class Layout(unittest.TestCase):
     def test_683_sectors_in_d64_order(self):
         lay = disksum.layout()
