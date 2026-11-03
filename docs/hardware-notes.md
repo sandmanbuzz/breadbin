@@ -456,7 +456,7 @@ Ran `tests.test_system.Exec`, `Modules` and `Persistence` against the Ultimate (
 
 ### 2026-11-02, tip `cac322d` under VICE 3.10 (bundled app, windowless `-console`, stock ROMs): Exec, Modules, Persistence (Agent A)
 
-`tests.test_system.Exec`, `Modules` and `Persistence` (the classes that the Ultimate run could not take): **7 of 7 OK, 342 s**, in a scratch HOME with the bundle's `share/vice` (recipe in `docs/testing.md`, "Windowless VICE on macOS"), under `tools/with-lock` (the `vice` lock was held by another session for a while first). The output has Python `ResourceWarning`s from tempfile cleanup in the harness, not from the system under test. Not run: `Drives`, `Cache`, `REU`, `Pool`, the JiffyDOS-ROM set, `test_keyboard`.
+`tests.test_system.Exec`, `Modules` and `Persistence` (the classes that the Ultimate run could not take): **7 of 7 OK, 342 s**\* , in a scratch HOME with the bundle's `share/vice` (recipe in `docs/testing.md`, "Windowless VICE on macOS"), under `tools/with-lock` (the `vice` lock was held by another session for a while first). The output has Python `ResourceWarning`s from tempfile cleanup in the harness, not from the system under test. Not run: `Drives`, `Cache`, `REU`, `Pool`, the JiffyDOS-ROM set, `test_keyboard`.
 
 ### 2026-11-02, tip `cac322d` under VICE 3.10, stock ROMs: Cache, REU, Pool (Agent A)
 
@@ -470,3 +470,143 @@ Gate 2, JiffyDOS subset: `tools/with-lock -- python3 -m unittest tests.test_syst
 Not counted: two earlier gate 2 attempts. The first (10:22) errored 17 tests because the results worktree had no `build/` directory (setup, not a kernel result); `make` fixed it. The second (10:24) was killed by a 30-minute background limit at `Drives.test_breadbin_disk` with no verdict; 27 tests passed and none failed before the kill.
 
 Both runs on main tip 9693358. Results only; nothing built or changed in the tree.
+`tests.test_system.Cache`, `REU` and `Pool` (VICE-only classes, as the Exec/Modules/Persistence entry above): **11 of 11 OK, 735 s**\* , windowless `-console`, scratch HOME, `tools/with-lock` (queued behind the gate-2 `vice` lock, then run). Not run: `Drives`, the JiffyDOS-ROM set, `test_keyboard`, the full suite.
+
+\* Unexclusive: host VICE under a plain `vice` slot, with other VICE runs possible during it. The wall-clock figure is a run duration, not a measured benchmark; the load underneath was described as light but not measured, so the error bar is unknown. Pass/fail results are not affected by the choice of run.
+
+Load snapshot for the footnote above (host, 2026-11-02, from `uptime`, one sample, not during the runs): 8 CPUs, load averages 3.08 / 3.52 / 3.32, seven user sessions. So the machine was about 40% busy across everyone, not idle; the VICE runs were not measured against that load. The error bar is that load, unmeasured per run.
+
+### 2026-11-02, new runner: JiffyDOS-ROM drive set in the container, VICE 3.x (Agent A)
+
+Tip `939a83f` (main), `tools/ci/run.sh test-only` with `BREADBIN_CI_JIFFY` (JiffyDOS C64 KERNAL and 1541-II ROM from the CI cache, not in the repo), under `tools/with-lock` (VICE slot). `Boot.test_02_echo` and `Drives` (6 tests including `test_cbm_disk`, `test_breadbin_disk`, `test_format`): **6 of 6 OK, 550 s**. Not run: `Boot` (rest), `Cache`, `Pool` with JiffyDOS, `test_keyboard`, the full suite, the physical 1541.
+
+### 2026-11-02, new runner: physical 1541 power-cycled (fresh device 8), five-boot series of main 939a83f (Agent A)
+
+Drive power-cycled by the user (device 8 fresh). Stock KERNAL, Software IEC off, `plainboot.py build/breadbin.prg`, one configuration setup for five boots, restored on exit (JiffyDOS KERNAL, Software IEC on). **5 of 5 reached login, 22 s each.** Not run: a whole-disk compare, boot time against the old tree, the Ultimate-side `Drives` class (it is VICE-only: `Vice(...)` in `tests/test_system.py`, already run under JiffyDOS in the container, 6 of 6).
+
+### 2026-11-02, owner-open write: main 939a83f's image onto the physical 1541 (Agent A)
+
+Nibbler copy (`nibcopy.py` with the Keymaster PRG fetched from the Ultimate's SD card over FTP, read-only): "copy complete" after **50 s**; the physical drive renumbered to 9 and back to 8 in software; `LOAD"$",8` lists `"breadbin" prg 59`, `0 blocks free`. One boot of that disk afterwards (`plainboot.py`, stock KERNAL, Software IEC off): **login after 22 s**. Configuration restored by trap (JiffyDOS KERNAL, Software IEC on). Not run: the whole-disk compare (the read-only reader is the next item).
+
+### 2026-11-02, UCI directory commands and READ DIR, measured (Agent A; `experiments/iec-stall/uci.py dirs` and `readdir`, Ultimate firmware 1.1.0, Command Interface on)
+
+Answers Q2, Q4 and Q5 of `docs/design/next/uci-v1.md` section 9. All ran under `tools/with-lock -r ultimate`; the groups create and remove only `/Temp/bdir` and `/Temp/bdir/sub` on the Ultimate's RAM disk.
+
+- **Q2, absolute and relative names after CHANGE DIR.** `CHANGE DIR /Temp/bdir` and `CHANGE DIR /Temp` answer `00,OK`; GET PATH then answers `/Temp/bdir/` and `/Temp/`. **FILE STAT by a relative name answers `82,FILE NOT FOUND` in both cases, for a directory that exists (`sub`) and for one that exists after CHANGE DIR (`bdir`).** FILE STAT by absolute name works (`/Temp/bdir/sub`: `00,OK`, 15 bytes, DIR attribute `$10`). So relative FILE STAT is not usable after CHANGE DIR; the module's comment "FILE STAT does not work" is correct, and the design's Q2 reading (relative STAT after an absolute CHANGE DIR) is answered no.
+- **Q4, error cases.** `MKDIR` of an existing directory: `FILE EXISTS` (4 ms). `DELETE` of a non-empty directory: **`ACCESS DENIED`** (not `DIRECTORY NOT EMPTY`; the module's rmdir maps its own error text, so this is the DELETE command's answer, not the rmdir path's). `DELETE` of an empty subdirectory and of a directory then empty: `00,OK` (about 53 ms each, the same cost as MKDIR). FILE STAT of a removed directory: `82,FILE NOT FOUND`.
+- **Q5, READ DIR and OPEN DIR.** Surprise against the design's "one packet per entry": **OPEN DIR ignores its path argument and lists the current directory** (`OPEN DIR /Temp` with the current directory at `/` returned the root: `SD`, `Flash`, `Temp`; `OPEN DIR /Temp/bdir` with the current directory at `/Temp` returned the `/Temp` listing). **READ DIR returns the whole listing of the current directory in one packet** (14 bytes for the root's three entries, each `attribute $10` plus the name; 85 bytes for `/Temp`), and **every READ DIR returns the same packet** (four calls in a row, and again after a reopen): READ DIR does not advance. The module is written for that: it CHANGE DIRs to the directory, OPEN DIRs with no name, then re-lists on every call and skips the entries an earlier call delivered (`src/mod/uci.s`, `uci_readdir`). So `ls` is consistent with the measurement; the design note's "one packet per entry" is not. Not measured: ABORT in the middle of a listing; a listing longer than one packet.
+- Timing: OPEN DIR 2 to 5 ms; READ DIR 2.2 to 8 ms per packet (about 11 KB/s at 85 bytes, a per-command cost, not a bandwidth).
+
+Not run: the module's own `ls` on the Ultimate after these (the bench does not run the module), a directory listing longer than one packet, `DELETE` on a directory that is open.
+
+### 2026-11-02, UCI LOAD REU at the end of a 2 MB REU, Q7 (Agent A; `experiments/iec-stall/uci.py write reuend`)
+
+- `LOAD REU` of 32 KB at `$1F8000` (ends exactly at 2 MB): `00,OK`, 32,768 bytes, 6.3 ms.
+- `LOAD REU` of 256 bytes at `$1FFF00` (ends at 2 MB): `00,OK`, 256 bytes, 3.6 ms.
+- `LOAD REU` of 512 bytes at `$1FFF00` (**runs 256 bytes past 2 MB**): **`00,OK`, 512 bytes reported loaded**, 3.5 ms. No error. The firmware neither refuses the overrun nor reports a short count. Whether the 256 bytes past the end wrap to `$000000` or are dropped is **not measured** (a read-back of the REU's first bytes would settle it).
+- Measurement trap, now fixed in the group: a second LOAD on the same open file reads at end of file and loads 0 bytes. Each load in the group reopens the file.
+
+Consequence for a fast path: the caller must bound `REU address + length` itself. Do not rely on the firmware to refuse an overrun.
+
+### 2026-11-02, disksum: first run of the read-only whole-disk compare STALLED before the first sector (Agent A)
+
+Setup: `experiments/iec-stall/disksum/disksum.py build/breadbin.d64` on the physical 1541 (device 8, fresh power cycle earlier, image written 2026-11-02): stock KERNAL, Software IEC off, reader loaded at `$C000` and started with `SYS 49152`. Under `tools/with-lock -r ultimate`. Polls (1-byte reads every 30 s): `sectors 0/683`, state `00`, for 150 s; the watch stopped the run at 180 s (no change in the count for 150 s), state reported as stalled, and the configuration was restored by the trap (JiffyDOS KERNAL, Software IEC on). `ERRCH` stayed zero, so **no status byte from the drive came back** for the first `U1:2 0 01 00`, or the reader never got past the command. Not known: whether the code started (not read back), where it stopped. Not retried, per the stop rule.
+
+Host-only tests of the checksum definition, the d64 layout and the comparer: 8 of 8 OK (`python3 -m unittest experiments/iec-stall/disksum/test_disksum.py`). The 6502 code is 414 bytes, assembled with ca65, never run before this.
+
+Next, before any second run: read back `$C000` and `$F7/$F8` after a stall (diagnose without retrying), and try one `U1` by hand from BASIC on the same drive, which separates a reader bug from a drive that does not answer channel 15.
+
+### 2026-11-02, disksum reader: four stalls, what was ruled out, what was not (Agent A; read this before repeating)
+
+Reader `experiments/iec-stall/disksum/disksum.s` (builds 414 to 467 bytes), run with `disksum.py` on the physical 1541 (device 8), stock KERNAL, Software IEC off. Every run stopped the same way: `state 00`, sector count 0/683, no status byte from the drive, stopped by the 180 s watch, configuration restored.
+
+Stalls: (1) reader 3a04045, polled every 30 s; (2) reader 3a04045, control mode (one read at 180 s); (3) reader 96beb75 (state moved out of zero page), dump at 180 s; (4) reader 597cc3c (no leading zero in the track and sector), watch at 180 s.
+
+Ruled out, with evidence:
+- **Code corruption:** the code at `$C000` read back identical to the assembled bytes in all four dumps.
+- **Zero-page corruption as the stall cause:** the stock KERNAL serial path writes `$F1`-`$FE` (the table pointer at `$F2/$F3` moved from `$5000` to `$1800` in run 3). Moving the state to RAM (96beb75) fixed that, and the stall stayed.
+- **Leading zeros in the command:** the hand test of `U1:2 0 01 00` hung once (the next memory read timed out). The reader's `U1:2 0 1 0` (597cc3c) stalled the same way, so zeros are not the cause.
+- **CR at the end of the command:** a hand U1 with no CR returned `00, OK`.
+- **Polling during the run:** the control run with one read at 180 s stalled the same way.
+- **A wedged drive:** a UI reset (`73 JIFFYDOS 5.0 1541`), then a directory load (`"breadbin" 59 blocks`) and a hand U1 (`u1 status 0 ok 0 0`) all worked on the same physical drive.
+- **The bus-9 theory:** the reader opens device 8 in both places.
+- **The configuration:** the reader ran under stock KERNAL with Software IEC off (the JiffyDOS readbacks are from after the restore).
+
+Not ruled out: the call order of the reader against BASIC's `PRINT#15`/`INPUT#15` (the reader does `CHKOUT`, `CHROUT` per character, `CLRCHN`, `CHKIN 15`, `CHRIN`; the hand test does the same through BASIC), and any BASIC-set state that a raw KERNAL sequence doesn't set.
+
+Next time: check the hand path first (UI, then a directory load, then a hand U1 with a status read in a program), and read `$C000`, the zero page and the device state before a reader run, not after.
+
+### 2026-11-02, correction to the UCI directory entry above (Agent A, follow-up)
+
+The entry above says "READ DIR returns the whole listing of the current directory in one packet". That is wrong as stated. The bench's `resp` count is the total of **every Data More chunk of one command** (`experiments/iec-stall/uci.s`, `finish` loops on `$30` and `rlen` accumulates across chunks). The 14 and 85 bytes are therefore whole responses, built from several chunks; the chunk boundaries were not recorded.
+
+What stands:
+- **OPEN DIR ignores its path argument** and lists the current directory (`OPEN DIR /Temp` with the current directory at `/` returned the root). The module changes directory first, so this does not affect it.
+- **Each READ DIR call returns the whole listing again** from the first entry (four calls and one reopen gave identical bytes). That matches the module's design: `src/mod/uci.s` `uci_readdir` re-lists on every call and skips the entries an earlier call delivered.
+- The design note's "one packet per entry" is **not contradicted** by these measurements. It is still unmeasured, because the chunk boundaries were not logged.
+
+Open for a follow-up: log each chunk's length in `uci.s` for `READ DIR`, to confirm one entry per chunk and to see the end-of-listing status.
+
+### 2026-11-02, READ DIR chunk boundaries (Agent A; `uci.py rdchunks`, bench `uci.s` per-chunk log)
+
+Read only, Ultimate firmware 1.1.0: `CHANGE DIR /Temp`, `OPEN DIR` (no name, the current directory), `READ DIR` once.
+
+- **Total response 208 bytes in 22 chunks.** Chunks 0 to 19 end with status `$30` (Data More); chunk 21 ends with `$20` (Data Last), the end of the listing.
+- Lengths: chunk 0 is 13 bytes, chunks 1 to 19 are 9 bytes, chunk 20 is 13, chunk 21 is 11. The lengths vary with the name, which fits one directory entry per chunk. Not checked against the bytes: that each chunk holds exactly one entry, and what the names are.
+- A second `READ DIR` on the same open directory returns the same listing again (the earlier finding), so the end of the listing is marked by the Data Last status of the last chunk, not by an empty read.
+- The earlier "one packet" wording is withdrawn (see the correction above).
+
+### 2026-11-02, READ DIR: one entry per chunk, confirmed (Agent A; `uci.py rdsink`, bench op 9 keeps every chunk in the sink)
+
+Read only, `/Temp` on the Ultimate (RAM disk): `CHANGE DIR /Temp`, `OPEN DIR` (no name), `READ DIR` once.
+
+- **23 chunks, 217 bytes**; chunks 0 to 21 end with `$30` (Data More), chunk 22 ends with `$20` (Data Last).
+- **Each chunk is one entry:** one attribute byte (`$20`, a file) followed by the name, with no terminator. Chunk length is 1 plus the name length (13 for `breadbin.d64`, 9 for `temp0004`).
+- **The names equal an independent FTP listing of `/Temp`, in the same order:** `breadbin.d64`, `prog.prg`, `temp0004`, `temp0011`, `temp0013` to `temp0022`, `test.d64`, `test_con.d64`, `uci32k.bin`. Bench entries and FTP entries: 23 and 23, identical (checked by script).
+- So the module's design ("one entry per packet, re-list on every call, skip the entries already delivered") matches the bytes on the wire. The earlier "one packet" note is replaced by this one.
+
+Not measured: a directory with a name longer than 12 characters; a listing that spans more than the 16 KB of the sink (the sink wraps).
+
+### 2026-11-02, READ DIR with a name longer than 12 characters (Agent A; `uci.py rdlong`, read only)
+
+`CHANGE DIR /SD`, `OPEN DIR`, `READ DIR` once. 13 chunks, 103 bytes, the last ends with `$20` (Data Last). Each chunk is an attribute byte and the name: **`The Very Second` (15 characters) comes back in full** (chunk 10, attribute `$10` for a directory, 16 bytes). The other names are whole as well (`collections`, 11 characters, and the rest). No truncation to 12 was seen. The name was found read only over FTP, and nothing was created. Not measured: a 16-character name (the DOS limit), which the card does not hold.
+
+### 2026-11-02, UCI ABORT in the middle of a READ DIR (Agent A; `uci.py abortmid`, read only)
+
+Bench op 12 sets how many chunks to read before the bench writes ABORT (`$04` to `$DF1C`): `finish` writes it when the count is reached, and the command ends there.
+
+- `READ DIR` of `/Temp` with ABORT after chunk 1: **one chunk (13 bytes) arrived, then the bench wrote ABORT**. The command ended after the first chunk, so ABORT stops the listing mid-way.
+- **The status after the abort is not measured:** the bench returns from `finish` before it reads a status. The `TIMEOUT` mark in the table is the bench's abort marker (result 2), not a timeout.
+- **Recovery:** `OPEN DIR` and `READ DIR` on the same directory after the abort work: 26 chunks, 244 bytes, `00,OK`, Data Last at the end. (The listing had 26 entries this time, against 23 in the earlier runs; not investigated.)
+- Earlier runs of this group stopped after one operation because of a layout bug in the new op 12 (it read its value from the length byte and did not advance the script pointer). Fixed in the bench.
+
+Not measured: the drive's or UCI's status after an ABORT, and an ABORT on an open file (not asked).
+
+### 2026-11-02, Q4: RENAME onto an existing name (Agent A; `uci.py renameonto`, a scratch directory on the Ultimate's RAM disk, cleaned up)
+
+`/Temp/bqscratch`: created a.txt and b.txt (8 bytes each), `RENAME a.txt` onto `b.txt`, read b.txt, deleted everything, removed the directory (verified over FTP: gone).
+
+- **RENAME onto an existing name answers `FILE EXISTS`.** It does not overwrite.
+- **The source survives:** `DELETE a.txt` afterwards answers `00,OK`.
+- **The target survives:** b.txt reads back `BBBBBB`.
+- Caveat: the READ asked for 8 bytes and returned 6, and `FILE STAT` answered `82,FILE NOT FOUND` for both files (already known to fail on just-written files), so neither the 8-byte content nor the STAT result is trusted. The short read may be the bench's write length, not the firmware; not checked.
+- Not measured: disk full (skipped on the owner's instruction).
+
+### 2026-11-02, Q6: write-back of a drive-written image, drive B on bus 10 (Agent A; `experiments/iec-stall/writeback_b.py`)
+
+Scratch copy of `build/breadbin.d64` at `/Temp/bqwb/wb.d64`. Drive B: bus set to 10 while disabled, enabled, mounted read/write, machine reset. From BASIC on device 10: `open2,10,2,"#"`, a 15-byte probe ("WRITEBACK-PROBE") into the buffer, `u2:2 0 1 1`.
+
+- **`U2` status `00, OK`** (drive B answered).
+- **The probe did not reach the file** within 45 s after the U2, and it was not in the file after the unmount.
+- Config restored by the finally block: drive B disabled, bus 9; the readback equals the baseline taken before the run (Kernal JiffyDOS, Software IEC enabled, drive A on bus 9 with `/Temp/breadbin.d64` untouched).
+- Scratch file and directory removed (checked over FTP).
+
+This repeats the earlier drive-A result (no write-back observed). The write-back question stays open: the file did not change during or after the unmount, so the emulator's write path to the image is not reached by a block write. Not tried: a drive reset after the U2, a longer wait, the SD card as the image's home.
+
+### 2026-11-02, Q6 variants: a 5-minute wait, and a drive reset after the U2 (Agent A; `writeback_b.py`, one at a time, same scratch setup)
+
+- **5-minute wait after the U2** (`u2:2 0 1 1` status `00, OK`): the probe block was **not** in the image file at 300 s, and not after the unmount.
+- **Drive B reset after the U2, before the unmount** (status `00, OK`): the block was **not** in the file after the reset, and not after the unmount.
+- Config restored after each run; the readback equals the baseline. Scratch file and directory removed.
+
+Under these conditions (a block write by U2 from BASIC, drive B, a 512-byte image copy on the RAM disk), the drive-written block did not reach the image file, in any of the three variants: 45 s, 300 s, or a drive reset. Q6 is closed as: no write-back of drive-modified images under these conditions. Not tried: an SD-card image (skipped by the facilitator), a different write (a full track, a directory entry), or a different host path.
