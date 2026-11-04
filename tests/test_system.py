@@ -710,6 +710,16 @@ class Pipes(unittest.TestCase):
         out = self.v.run(line).replace("\n", "")      # the output wraps at 40 columns too
         self.assertEqual(out.strip(), line[5:])
 
+    def test_tee_five_files_leaves_an_existing_one_alone(self):
+        # the count check runs before anything is opened: the existing file keeps its text
+        self.v.run("echo keep > /k1")
+        out = self.v.run("echo x | tee /k1 /k2 /k3 /k4 /k5")
+        self.assertIn("too many files", out)
+        self.assertIn("keep", self.v.run("cat /k1"))
+
+    def test_tail_count_256_is_an_error(self):
+        self.assertIn("too large", self.v.run("tail -256 /etc/help"))
+
     def test_sort_empty_file(self):
         self.v.run("cat /dev/null > /home/se")
         self.assertEqual(self.v.run("sort /home/se").strip(), "")
