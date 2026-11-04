@@ -39,9 +39,17 @@ class ShardList(unittest.TestCase):
         sl = dict(shards.shards())
         self.assertEqual(len(sl), len(shards.shards()))
         flat = {n: " ".join(s) for n, s in sl.items()}
-        for n, text in flat.items():   # Drives writes the master image: nothing that boots it may follow
-            if "Drives" in text:
-                self.assertNotIn("Cache", text.split("Drives")[1], n)
+        # Drives.test_boot_from_drive_9 writes the master image: nothing that boots from it may follow a
+        # Drives spec in the same shard (the old check looked only between the first two "Drives")
+        master = ("Cache", "Pipes", "Touch", "Pool", "Exec", "Modules", "REU", "Persistence", "Boot")
+        for n, specs in sl.items():
+            seen_drives = False
+            for s in specs:
+                if ".Drives" in s:
+                    seen_drives = True
+                elif seen_drives:
+                    self.assertFalse(any(("." + m + ".") in s or s.endswith("." + m) for m in master),
+                                     "%s: %s follows a Drives spec" % (n, s))
         # Console and Keyboard (real speed, fixed sleeps) run whole, never split by method; they may share
         # a container with other classes, since tests in one container run one after another
         for n, specs in sl.items():
@@ -67,6 +75,33 @@ class ShardList(unittest.TestCase):
         self.assertEqual(sorted(specs), sorted(ids))
         drives = [(n, [s for s in ss if s.startswith("tests.test_system.Drives")]) for n, ss in shards.shards()]
         self.assertEqual(shards.problems([(n, ss) for n, ss in drives if ss], ids, 6), [])
+
+class Strict(unittest.TestCase):
+    def test_a_class_and_its_method_in_one_shard_count_twice(self):
+        bad = shards.problems([("x", ["a.A", "a.A.t1"])], ["a.A.t1", "a.A.t2"], 6)
+        self.assertEqual(bad, ["in 2 shards (x, x): a.A.t1"])
+
+    def test_a_shard_line_without_specs_or_bar_is_refused(self):
+        import tempfile
+        for line in ("s1", "s1|", "|a.A"):
+            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+                f.write("# c\n" + line + "\n")
+            self.addCleanup(os.unlink, f.name)
+            with self.assertRaises(ValueError):
+                shards.shards(f.name)
+
+    def test_the_drives_rule_catches_a_split_drives(self):
+        # the shape the old text check missed: Drives.a Drives.b then a master-image class
+        specs = ["tests.test_system.Drives.a", "tests.test_system.Drives.b", "tests.test_system.Cache.x"]
+        master = ("Cache", "Pipes", "Touch", "Pool", "Exec", "Modules", "REU", "Persistence", "Boot")
+        seen, hit = False, False
+        for s in specs:
+            if ".Drives" in s:
+                seen = True
+            elif seen and any(("." + m + ".") in s or s.endswith("." + m) for m in master):
+                hit = True
+        self.assertTrue(hit)
+
 
 class Driver(unittest.TestCase):
     def test_script_parses_and_check_mode_runs(self):
@@ -170,6 +205,72 @@ class Verdict(unittest.TestCase):
     def test_verdict_needs_expect(self):
         r = subprocess.run([self.SCRIPT, "--verdict", "/nonexistent"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
+
+
+def _git_ok():
+    try:       # the CI container has no git: these tests run on the host
+        r = subprocess.run(["git", "-C", ROOT, "cat-file", "-e", "HEAD:tools/ci/shards.py"], capture_output=True)
+    except OSError:
+        return False
+    return r.returncode == 0
+
+
+STUB = """#!/bin/sh
+# stand-in for tools/ci/run.sh: `all test-host` succeeds at once; `test-only` hangs until told to stop
+case "$1" in all) echo "Ran 1 test in 0.1s"; echo OK; exit 0 ;; esac
+d="$STUB_DIR"
+trap 'echo stopped > "$d/stopped.$$"; kill $s 2>/dev/null; exit 143' TERM INT
+echo started > "$d/started.$$"
+sleep 120 &
+s=$!
+wait $s
+"""
+
+
+@unittest.skipUnless(_git_ok(), "needs the repo's git history")
+class DriverRuns(unittest.TestCase):
+    """The driver against a stub run.sh: a hung shard and Ctrl-C (no VICE, no podman)."""
+    SCRIPT = os.path.join(ROOT, "tools", "ci", "sharded.sh")
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="sharded-test-")
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", "--", self.d]))
+        self.stub = os.path.join(self.d, "run.sh")
+        with open(self.stub, "w") as f:
+            f.write(STUB)
+        os.chmod(self.stub, 0o755)
+        self.out = os.path.join(self.d, "out")
+        self.args = [self.SCRIPT, "--no-outer-lock", "--no-preflight", "--run-sh", self.stub,
+                     "--stagger", "0", "--out", self.out, "--rev", "HEAD"]
+        self.env = dict(os.environ, STUB_DIR=self.d)
+
+    def test_a_hung_shard_is_killed_and_reads_red(self):
+        r = subprocess.run(self.args + ["--shard-timeout", "3"], capture_output=True, text=True,
+                           env=self.env, timeout=120)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("rc=124 timeout", r.stdout)
+        self.assertIn("sharded: FAIL", r.stdout)
+
+    def test_ctrl_c_stops_every_shard(self):
+        import signal
+        import time
+        p = subprocess.Popen(self.args, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            n = len(shards.shards())
+            deadline = time.time() + 60
+            while time.time() < deadline and len([f for f in os.listdir(self.d) if f.startswith("started.")]) < n:
+                time.sleep(0.2)
+            self.assertEqual(len([f for f in os.listdir(self.d) if f.startswith("started.")]), n)
+            p.send_signal(signal.SIGINT)
+            p.wait(timeout=60)
+        finally:
+            if p.poll() is None:
+                p.kill()
+            p.stdout.close()
+            p.stderr.close()
+        self.assertEqual(p.returncode, 130)
+        stopped = [f for f in os.listdir(self.d) if f.startswith("stopped.")]
+        self.assertEqual(len(stopped), n, "every shard's run.sh must get the signal and clean up")
 
 
 if __name__ == "__main__":
