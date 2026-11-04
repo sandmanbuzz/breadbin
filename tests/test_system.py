@@ -703,6 +703,13 @@ class Pipes(unittest.TestCase):
         self.v.run("echo c >> /home/tl")
         self.assertEqual(self.v.run("tail -1 /home/tl").strip(), "c")
 
+    def test_long_line_wraps_at_forty(self):
+        # a 60-column command wraps at 40 columns; the harness must still find its end and output
+        line = "echo " + "0123456789" * 5 + "0123456789ab"[:5]     # 60 columns, the echo wraps at 40
+        self.assertEqual(len(line), 60)
+        out = self.v.run(line).replace("\n", "")      # the output wraps at 40 columns too
+        self.assertEqual(out.strip(), line[5:])
+
     def test_sort_empty_file(self):
         self.v.run("cat /dev/null > /home/se")
         self.assertEqual(self.v.run("sort /home/se").strip(), "")
