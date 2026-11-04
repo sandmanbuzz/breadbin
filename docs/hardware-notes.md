@@ -622,3 +622,12 @@ Build: `make` in a detached worktree at 9ccef95; `build/breadbin.d64` sha256 `74
 5. **Changed story:** the kernel room changed (354 to 361 bytes below `$CF00`). Not checked against its commit message; the Ultimate tests above cover the boot path only.
 
 Stalls: none. Test harness note: the Ultimate test run needs `tests/` as the working directory, because a `tests` package in the Python site-packages shadows the repo's `tests` directory when run from the repo root.
+
+### 2026-11-03, R13: five-boot series on the physical 1541, tip aadea2f (Agent A)
+
+Build: the kernel and sources at aadea2f are identical to 9ccef95 (sha256 `743fd1ac9103fb8b`, `make size` room below `$CF00` 361). Count and stopping rule were set before boot 1: five boots, each must reach login within plainboot's 170 s; pass 5 of 5; the series stops at the first boot that does not, with no retry. Script: `r13series.sh` (scratch; the same shape as the earlier `physseries.sh`), stock KERNAL, Software IEC off, one configuration setup, restored by trap, read back afterwards (JiffyDOS KERNAL, Software IEC on).
+
+- **Boot 1: login after 32 s. Boot 2: 22 s. Boot 3: 22 s. Boot 4: 22 s. Boot 5: 22 s.** Result: **5 of 5 reached login**; no stall, no retry.
+- The root-mount stall mitigation (13 of 13 before the kernel changed, per CLAUDE.md) holds on this build: 5 of 5 here plus the R8 boot (one boot, 32 s).
+
+**Not run (R13 list):** `format` (the list says expendable media only; the Ultimate's emulated drive with a scratch image is the right target, not the physical disk, and needs a second drive configured: not done this turn); the other-drive mount `mount 9 /mnt` (needs a second drive image); `tests.test_keyboard` on the Ultimate (not run this turn). Also not run: the JiffyDOS-ROM set on hardware.
