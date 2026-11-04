@@ -582,6 +582,39 @@ class AsV8(unittest.TestCase):
         self.assertEqual(r.files["/o"][:3], b"CX\x01")
         self.assertNotIn("/^o", r.files)
 
+    def test_an_output_leaf_with_a_cbm_special_character_is_refused_and_touches_nothing(self):
+        # the unlink of the old output sends its raw name to CBM DOS as a scratch command: * ? : , = would be wildcards
+        # or commands and scratch unrelated files
+        for leaf in ("a*", "x?", "a:b", "a,b", "a=b"):
+            files = {"/s": self.SRC8, "/ab": b"KEEP", "/xy": b"KEEP"}
+            r = asim.run("as", ["/s", "/" + leaf], files)
+            self.assertEqual(r.exit, 1, (leaf, r.err))
+            self.assertIn(b"treats specially", r.err, leaf)
+            self.assertEqual(r.files, files, leaf)
+
+    def test_a_special_character_in_a_directory_part_is_not_a_leaf_problem(self):
+        r = asim.run("as", ["/s", "/d*/o"], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_an_output_with_an_empty_leaf_is_refused_and_touches_nothing(self):
+        for out in ("/d/", "/", ""):
+            files = {"/s": self.SRC8, "/d/x": b"KEEP"}
+            r = asim.run("as", ["/s", out], files)
+            self.assertEqual(r.exit, 1, (out, r.err))
+            self.assertIn(b"as: output name", r.err, out)
+            self.assertEqual(r.files, files, out)
+
+    def test_a_failed_temporary_create_names_the_temporary(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_create="/^o")
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertIn(b"^o", r.err)
+
+    def test_a_first_assembly_with_no_old_output_ignores_the_unlinks_enoent_and_renames(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][:3], b"CX\x01")
+        self.assertNotIn("/^o", r.files)
+
     def test_a_caret_output_name_gets_the_plus_temporary(self):
         r = asim.run("as", ["/s", "/^o"], {"/s": self.SRC8}, fail_rename=1)
         self.assertEqual(r.exit, 1, r.err)
