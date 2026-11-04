@@ -1076,7 +1076,10 @@ def compile_c(src):
         if name in seen:
             raise CompileError(f"line {line}: function {name} is defined twice")
         seen.add(name)
-    text = Gen(funcs).program(funcs, globs)
+    try:
+        text = Gen(funcs).program(funcs, globs)
+    except RecursionError:      # the parser builds a left-deep tree; code generation recurses over it too
+        raise CompileError("expression nested too deeply for the code generator") from None
     symbols = len(re.findall(r"^[A-Za-z_][A-Za-z_0-9]*:", text, re.M)) + 1   # + cc_ptr =
     if symbols > SYMTABLE:
         raise CompileError(f"program needs {symbols} symbols; as holds {SYMTABLE} for a program")
