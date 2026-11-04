@@ -1325,7 +1325,10 @@ name_is:
 error:  pha
         txa
         pha
-        inc errs
+        inc errs         ; saturates: 256 errors must not wrap to 0 and read as success
+        bne @cnt
+        dec errs
+@cnt:
         lda #<s_as
         ldx #>s_as
         jsr eprint
