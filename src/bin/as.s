@@ -148,6 +148,14 @@ rp_n:   tsx
         ldx #>s_long
         jsr error
 @ok:    jsr do_line
+        jsr skipsp              ; nothing but a comment may follow a statement
+        jsr peek
+        beq line_done
+        cmp #';'
+        beq line_done
+        lda #<e_junk
+        ldx #>e_junk
+        jsr error
 line_done:
         jmp rp_loop
 rp_done:
@@ -517,8 +525,11 @@ d_bytes:
         bne @e
         jsr adv
 @s:     jsr peek
-        beq @r
-        jsr adv
+        bne @sc
+        lda #<e_str             ; the line ended inside the string
+        ldx #>e_str
+        jmp error
+@sc:    jsr adv
         cmp #'"'
         beq @next
         jsr emit
@@ -1083,12 +1094,14 @@ term:   lda #0
         cmp #'%'
         beq @bin
         cmp #$27
-        beq @chr
-        cmp #'*'
+        bne @nq
+        jmp @chr
+@nq:    cmp #'*'
         beq @pc
         jsr isdigit
-        bcc @dec
-        jsr isidstart
+        bcs @nd
+        jmp @dec
+@nd:    jsr isidstart
         bcs @nsym
         jmp @sym
 @nsym:  lda #<e_syntax
@@ -1105,12 +1118,16 @@ term:   lda #0
         rts
 @chr:   jsr adv
         jsr peek
+        beq @chre               ; the line ended after the quote
         sta tv
         jsr adv
         jsr peek
         cmp #$27
-        bne @r0
+        bne @chre
         jmp adv
+@chre:  lda #<e_chr
+        ldx #>e_chr
+        jmp error
 @hex:   jsr adv
 @hl:    jsr peek
         jsr hexval
@@ -1282,6 +1299,16 @@ lookup: lda #<symtab
 define: sta tv
         stx tv+1
         sty trel
+        lda nlen                ; `a` in an operand is the accumulator: a symbol of that name could never be used
+        cmp #1
+        bne @nota
+        lda name
+        cmp #'a'
+        bne @nota
+        lda #<e_acc
+        ldx #>e_acc
+        jmp error
+@nota:
         jsr lookup
         bcc @have
         ; new symbol (pass 1)
@@ -1551,6 +1578,10 @@ e_eqbyte: .byte "a byte of a label cannot be an = value: use .byte <lbl, >lbl", 
 e_outname: .byte "as: output name is too long", 10, 0
 e_wordb: .byte "a byte of a label in .word: use .byte <lbl, >lbl", 0
 e_resrel: .byte "res count is an address, not a number", 0
+e_str:   .byte "unterminated string", 0
+e_junk:  .byte "junk after the statement", 0
+e_chr:   .byte "unterminated character", 0
+e_acc:   .byte "a is the accumulator, not a symbol name", 0
 e_resbig: .byte "image plus res is too big for the pool", 0
 e_reloc: .byte "bad relocatable expression", 0
 .macro SYM n, v
