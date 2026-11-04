@@ -4,6 +4,8 @@ Status: DRAFT for the owner, 2026-11-04. Drafted by a Sonnet pass over `main`, r
 
 Frame: better than upstream on features and on user memory (TPA), Ultimate-first. Budget: **361 B below $CF00, 14 B above BSS+CODEHI** (VERIFIED `docs/size-ledger.tsv` last row 6bb4635; `docs/wip.md:21` and `cp3-spec.md:85` still say 354, the older row 45eacff; I use 361). Source is `main`. Doc lines are as read on `main`.
 
+Upstream triage and backlog: see "Status and triage, 2026-11-04" in `upstream-survey.md`.
+
 Two facts that shape everything:
 - **A kernel byte over the room costs TPA by page.** Kernel code starts at KSTART ($A200); 361 B is 1.4 pages. Going over by n bytes lowers KSTART by ceil(n/256) pages (ESTIMATE, from `k.inc` policy, `wip.md:92`). So "does not fit" below means "costs this many pool pages".
 - **`$?` needs no new kernel bytes, but it is not free.** `sys_wait` already returns the child's exit status in X (VERIFIED `src/kernel/proc.s:460`, `ldx p_exit,y`), which answers the open question at `shell-operators.md:36`. The shell discards that value today and must keep it; builtins and a failed spawn have no status yet; programs that end with `rts` (`cat`, `ls`, `wc`, `head`) exit 0 through `user_ret`, so `cat nofile && run` would still see success until those programs return a real status; and the test in this note needs a `false` program that does not exist. The cost is shell pool pages and some program edits, not kernel bytes.
