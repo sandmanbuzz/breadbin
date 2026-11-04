@@ -298,5 +298,40 @@ class AsCrAndPointers(unittest.TestCase):
         self.assertEqual(img, b"\x05")
 
 
+@unittest.skipIf(SKIP, SKIP)
+class AsResCount(unittest.TestCase):
+    """.res takes a count that is a number: not a negative one (the 16-bit pc would wrap to a huge BSS)
+    and not an address (a label's value is an image offset, not a count)."""
+
+    def asm(self, src):
+        return asim.run("as", ["/s", "/o"], {"/s": src.encode()})
+
+    def test_a_wrapped_count_is_refused(self):
+        # as has no unary minus (`.res -1` is a syntax error); a wrap is what gets through: 0-1 is $FFFF
+        r = self.asm("        .res 0-1\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"too big", r.err)
+
+    def test_a_count_at_the_pool_size_is_refused(self):
+        r = self.asm("        .res 39424\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"too big", r.err)
+
+    def test_a_count_just_under_the_pool_size_is_fine(self):
+        r = self.asm("        .res 39423\n")
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_a_label_as_the_count_is_refused(self):
+        r = self.asm("n = 4\nbuf: .res n\n")          # a plain equate is a number: fine
+        self.assertEqual(r.exit, 0, r.err)
+        r = self.asm("here: .res here\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"res count is an address", r.err)
+
+    def test_a_count_that_fills_the_address_space_is_refused_when_it_overflows(self):
+        r = self.asm("        .res 65535\n        .res 2\n")
+        self.assertNotEqual(r.exit, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

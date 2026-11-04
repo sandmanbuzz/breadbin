@@ -436,9 +436,20 @@ d_words:
 
 d_ress: jsr expr                ; no bytes stored: zeros are filled in only if something follows
         lda efwd                ; the count must be known in pass 1, or the labels after it move
-        beq @k
+        beq @num
         lda #<e_fwd
         ldx #>e_fwd
+        jmp error
+@num:   lda erel                ; a label is an image offset, not a count
+        beq @sign
+        lda #<e_resrel
+        ldx #>e_resrel
+        jmp error
+@sign:  lda ev+1                ; a count of $9A00 (the user pool, 39424 bytes) or more cannot be loaded
+        cmp #>39424             ; a wrapped one (0-1 is $FFFF) is that big too
+        bcc @k
+        lda #<e_resbig
+        ldx #>e_resbig
         jmp error
 @k:     lda pc
         clc
@@ -1378,6 +1389,8 @@ e_name:  .byte "name longer than 14 characters", 0
 e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
+e_resrel: .byte "res count is an address, not a number", 0
+e_resbig: .byte "res count is too big for the pool (39424 bytes)", 0
 e_reloc: .byte "bad relocatable expression", 0
 .macro SYM n, v
         .byte n, 0
