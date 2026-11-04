@@ -25,7 +25,7 @@ KEYWORDS = {"int", "char", "if", "else", "while", "for", "return"}
 MAX_DEPTH = 31                       # cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
 LINE_BYTES = 16                      # .byte values per emitted line (as keeps at most 254 characters a line)
-SYMTABLE = 185                       # as NSYM 220 less its 35 builtins
+SYMTABLE = 220                       # as NSYM 255 less its 35 builtins
 STATIC_MAX = 8192                    # bytes of static variables a program may have (a project limit: the owner may change it)
 
 TOKEN = re.compile(r"""
@@ -568,6 +568,7 @@ class Gen:
                        for name, params, _, _ in funcs}
         self.out, self.n, self.depth = [], 0, 0
         self.strings, self.locals, self.calls = [], [], []
+        self.shared = {}                   # puts() strings, by text
         self.names, self.fn_max, self.call_sites, self._worst = {}, {}, {}, {}
         self.fn, self.vars = None, {}
         self.globals, self.gdata, self.gres = {}, [], []
@@ -708,12 +709,15 @@ class Gen:
         self.locals.append((lbl, v.nbytes()))
         return v
 
-    def add_string(self, data):
-        for lbl, old in self.strings:       # one label per distinct string
-            if old == data:
-                return lbl
+    def add_string(self, data, share=False):
+        """share: reuse the label of an identical puts() string. Only puts() shares: a pointer to a
+        literal may be written through, so each pointer gets its own bytes."""
+        if share and data in self.shared:
+            return self.shared[data]
         lbl = f"s_{len(self.strings) + 1}"
         self.strings.append((lbl, data))
+        if share:
+            self.shared[data] = lbl
         return lbl
 
     def strings_text(self):
@@ -1036,7 +1040,7 @@ class Gen:
             raise CompileError(f"line {line}: string literal is longer than 254 bytes (rt_puts indexes with Y)")
         if 0 in data:
             raise CompileError(f"line {line}: a \\0 in a string would end it early; not in this slice")
-        lbl = self.add_string(data)
+        lbl = self.add_string(data, share=True)
         self.ins(f"lda #<{lbl}")
         self.ins("sta cc_ptr")
         self.ins(f"lda #>{lbl}")
