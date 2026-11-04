@@ -81,10 +81,12 @@ def unescape(body, line):
                 raise CompileError(f"line {line}: string literal characters must be Latin-1 (as stores 8 bits)")
             out.append(ord(c))
         i += 1
+    if 0 in out:
+        raise CompileError(f"line {line}: a \\0 in a string would end it early; not in this slice")
     return bytes(out)
 
 
-LEVELS = [("==", "!="), ("<", ">", "<=", ">="), ("+", "-")]
+LEVELS = [("==", "!="), ("<", ">", "<=", ">="), ("+", "-"), ("*", "/")]
 TYPES = ("int", "char")
 
 
@@ -116,10 +118,23 @@ class Parser:
         return self.at("kw") and self.peek()[1] in TYPES
 
     def program(self):
-        funcs = []
+        funcs, globs = [], []
         while not self.at("eof"):
-            funcs.append(self.function())
-        return funcs
+            if self.is_function():
+                funcs.append(self.function())
+            else:
+                d = self.decl()
+                self.expect("op", ";")
+                globs.append(d)
+        return funcs, globs
+
+    def is_function(self):
+        j = self.i + 1
+        if self.t[j][:2] == ("op", "*"):
+            j += 1
+        if j + 1 >= len(self.t):
+            return False            # the file ends here: decl() reports what is missing
+        return self.t[j + 1][:2] == ("op", "(")
 
     def function(self):
         self.expect("kw", "int")
@@ -154,7 +169,8 @@ class Parser:
         return stmts
 
     def decl(self):
-        """`int|char [*] name [ [n] ] [= expr]` (without the ';')."""
+        """`int|char [*] name [ [n] ] [= expr]` (without the ';'). An array's size may be left
+        out when a string initialises it; a string initialiser is a ("str", data, line) node."""
         line = self.peek()[2]
         base = self.take()[1]
         ptr = self.at("op", "*") and bool(self.take())
@@ -162,18 +178,29 @@ class Parser:
         arr, init = None, None
         if self.at("op", "["):
             self.take()
-            n = self.expect("num")[1]
+            if self.at("op", "]"):
+                arr = "infer"
+            else:
+                n = self.expect("num")[1]
+                if n < 1:
+                    raise CompileError(f"line {line}: an array needs at least one element")
+                arr = n
             self.expect("op", "]")
-            if n < 1:
-                raise CompileError(f"line {line}: an array needs at least one element")
             if ptr:
                 raise CompileError(f"line {line}: an array of pointers is not in this slice")
-            arr = n
         if self.at("op", "="):
             self.take()
-            if arr is not None:
-                raise CompileError(f"line {line}: an array cannot be initialised in this slice")
-            init = self.expr()
+            if self.at("str"):
+                tok = self.take()
+                init = ("str", tok[1], tok[2])
+            else:
+                init = self.expr()
+        if arr is not None and (init is None and arr == "infer"):
+            raise CompileError(f"line {line}: an array with no size needs a size or a string")
+        if arr is not None and init is not None and init[0] != "str":
+            raise CompileError(f"line {line}: an array can only be initialised from a string literal")
+        if init is not None and init[0] == "str" and arr is None and not ptr:
+            raise CompileError(f"line {line}: a string initialises a char array or a char pointer")
         return ("decl", base, ptr, name, arr, init, line)
 
     def simple(self):
@@ -250,10 +277,7 @@ class Parser:
         return e
 
     def expr(self):
-        e = self.binary(0)
-        if self.peek()[0] == "op" and self.peek()[1] in ("*", "/"):
-            raise CompileError(f"line {self.peek()[2]}: operator {self.peek()[1]} is not in this slice")
-        return e
+        return self.binary(0)
 
     def binary(self, level):
         if level == len(LEVELS):
@@ -432,12 +456,91 @@ rt_puts_1:
         jmp rt_puts_1
 rt_puts_done:
         rts
+cc_mul:                         ; acc = tmp * acc (the low 16 bits)
+        lda #0
+        sta cc_mr
+        sta cc_mr+1
+        ldx #16
+cc_mul_1:
+        lda acc
+        and #1
+        beq cc_mul_2
+        clc
+        lda cc_mr
+        adc tmp
+        sta cc_mr
+        lda cc_mr+1
+        adc tmp+1
+        sta cc_mr+1
+cc_mul_2:
+        lsr acc+1
+        ror acc
+        asl tmp
+        rol tmp+1
+        dex
+        bne cc_mul_1
+        lda cc_mr
+        sta acc
+        lda cc_mr+1
+        sta acc+1
+        rts
+cc_div:                         ; acc = tmp / acc (unsigned; dividing by 0 gives 65535)
+        lda acc
+        sta cc_dv
+        lda acc+1
+        sta cc_dv+1
+        lda tmp
+        sta cc_q
+        lda tmp+1
+        sta cc_q+1
+        lda #0
+        sta cc_rm
+        sta cc_rm+1
+        sta cc_ov
+        ldx #16
+cc_div_1:
+        asl cc_q
+        rol cc_q+1
+        rol cc_rm
+        rol cc_rm+1
+        rol cc_ov               ; the remainder's 17th bit, when it has one
+        sec
+        lda cc_rm
+        sbc cc_dv
+        tay
+        lda cc_rm+1
+        sbc cc_dv+1
+        sta cc_t
+        lda cc_ov
+        bne cc_div_3            ; 17 bits: the remainder is at least the divisor
+        bcc cc_div_2            ; below the divisor: keep the remainder
+cc_div_3:
+        sty cc_rm
+        lda cc_t
+        sta cc_rm+1
+        lda #0
+        sta cc_ov
+        inc cc_q                ; the quotient's bit 0 (it was shifted in as 0)
+cc_div_2:
+        dex
+        bne cc_div_1
+        lda cc_q
+        sta acc
+        lda cc_q+1
+        sta acc+1
+        rts
 """
 DATA = """\
 ; --- data ---
 cc_ptr = $2b           ; zero page: (zp),y in rt_puts needs a zero-page pointer (program ZP is $23-$2f)
 acc:    .res 2
 tmp:    .res 2
+cc_mr:  .res 2
+cc_dv:  .res 2
+cc_rm:  .res 2
+cc_q:   .res 2
+cc_ov:  .res 1
+cc_t:   .res 1
 cc_y:   .res 1
 cc_ch:  .res 1
 cc_sp:  .res 1
@@ -470,6 +573,7 @@ class Gen:
         self.strings, self.locals, self.calls = [], [], []
         self.names, self.fn_max, self.call_sites, self._worst = {}, {}, {}, {}
         self.fn, self.vars = None, {}
+        self.globals, self.gdata, self.gres = {}, [], []
 
     def ins(self, text):
         self.out.append("        " + text)
@@ -501,11 +605,56 @@ class Gen:
         raise CompileError(f"line {line}: {what}: a {'pointer' if got[1] else 'number'} where a "
                            f"{'pointer' if want[1] else 'number'} is needed")
 
-    def program(self, funcs):
+    def global_var(self, d):
+        _, base, ptr, name, arr, init, line = d
+        if name in self.globals:
+            raise CompileError(f"line {line}: global {name} is already declared")
+        if arr == "infer":
+            arr = len(init[1]) + 1
+        if name in self.funcs:
+            raise CompileError(f"line {line}: {name} is a function; a global cannot have its name")
+        v = Var(f"g_{name}", base, ptr, arr)
+        self.claim(v.label, line)
+        self.globals[name] = v
+        n = v.nbytes()
+        if init is not None and init[0] == "num" and not ptr and base == "char" and init[1] > 255:
+            raise CompileError(f"line {line}: a char global takes 0 to 255")
+        if arr is not None and init is not None:
+            if base != "char" or ptr:
+                raise CompileError(f"line {line}: a string initialises a char array")
+            if len(init[1]) + 1 > arr:
+                raise CompileError(f"line {line}: the string does not fit in {name}")
+            data = list(init[1]) + [0] * (arr - len(init[1]))
+        elif init is None:
+            self.gres.append(f"{v.label}: .res {n}")
+            return
+        elif ptr:
+            if init[0] == "str":
+                if base != "char":
+                    raise CompileError(f"line {line}: a string is a pointer to char, not to {base}")
+                self.gdata.append(f"{v.label}: .word {self.add_string(init[1])}")
+                return
+            if init[0] == "num" and init[1] == 0:
+                self.gdata.append(f"{v.label}: .word 0")
+                return
+            raise CompileError(f"line {line}: a global pointer takes a string or 0")
+        elif init[0] == "num":
+            value = init[1] & 0xFFFF
+            data = [value & 255] if base == "char" else [value & 255, value >> 8]
+        else:
+            raise CompileError(f"line {line}: a global needs a literal initialiser")
+        vals = [str(b) for b in data]
+        self.gdata.append(f"{v.label}:")
+        for i in range(0, len(vals), LINE_BYTES):
+            self.gdata.append("        .byte " + ", ".join(vals[i:i + LINE_BYTES]))
+
+    def program(self, funcs, globs):
         if "main" not in self.funcs:
             raise CompileError("no function main")
         if self.params["main"]:
             raise CompileError(f"line {self.funcs['main']}: main takes no parameters (start passes none)")
+        for d in globs:
+            self.global_var(d)
         self.lab("start")
         self.ins("lda #0")
         self.ins("sta cc_sp")
@@ -517,14 +666,16 @@ class Gen:
         for name, line in self.calls:
             if name not in self.funcs:
                 raise CompileError(f"line {line}: undefined function {name}")
-        total = sum(n for _, n in self.locals)
+        total = sum(n for _, n in self.locals) + sum(v.nbytes() for v in self.globals.values())
         if total > STATIC_MAX:
             raise CompileError(f"the program's static variables take {total} bytes; the limit is {STATIC_MAX}")
         for name in self.funcs:
             w = self.worst(name, [])
             if w > MAX_DEPTH:
                 raise CompileError(f"{name}: stack use along one call chain is {w + 1} values; cc_stk holds 32")
-        return "\n".join(self.out) + "\n" + RUNTIME + self.strings_text() + DATA + self.locals_text()
+        # every initialised byte comes before any .res: as counts the program's size on the way
+        return ("\n".join(self.out) + "\n" + RUNTIME + self.strings_text() + DATA
+                + "\n".join(self.gdata) + "\n" + self.locals_text() + "\n".join(self.gres) + "\n")
 
     def worst(self, f, path):
         """Most values pushed at once on any call chain that starts in f (no recursion allowed)."""
@@ -560,6 +711,11 @@ class Gen:
         self.locals.append((lbl, v.nbytes()))
         return v
 
+    def add_string(self, data):
+        lbl = f"s_{len(self.strings) + 1}"
+        self.strings.append((lbl, data))
+        return lbl
+
     def strings_text(self):
         out = []
         for lbl, data in self.strings:
@@ -573,9 +729,11 @@ class Gen:
         return "".join(f"{lbl}: .res {n}\n" for lbl, n in self.locals)
 
     def var(self, name, line):
-        if name not in self.vars:
-            raise CompileError(f"line {line}: undefined variable {name}")
-        return self.vars[name]
+        if name in self.vars:
+            return self.vars[name]
+        if name in self.globals:
+            return self.globals[name]
+        raise CompileError(f"line {line}: undefined variable {name}")
 
     def push(self):
         self.depth += 1
@@ -641,6 +799,22 @@ class Gen:
         kind = s[0]
         if kind == "decl":
             _, base, ptr, name, arr, init, line = s
+            if arr == "infer":
+                arr = len(init[1]) + 1
+            if arr is not None and init is not None:
+                # a char array takes a string: copied in each time the declaration runs
+                if base != "char" or ptr:
+                    raise CompileError(f"line {line}: a string initialises a char array")
+                if arr > 254:
+                    raise CompileError(f"line {line}: a local char array takes a string of at most 254 bytes")
+                if len(init[1]) + 1 > arr:
+                    raise CompileError(f"line {line}: the string does not fit in {name}")
+                v = self.declare(name, base, ptr, arr, line)
+                lbl = self.add_string(init[1])
+                for i in range(arr):
+                    self.ins(f"lda {lbl}+{i}" if i <= len(init[1]) else "lda #0")
+                    self.ins(f"sta {v.label}+{i}" if i else f"sta {v.label}")
+                return
             v = self.declare(name, base, ptr, arr, line)
             if init is not None:
                 t = self.expr(init)
@@ -765,7 +939,10 @@ class Gen:
             self.load16(v.label)
             return ("int", False)
         if kind == "str":
-            raise CompileError(f"line {e[2]}: a string literal is only an argument to puts")
+            if 0 in e[1]:
+                raise CompileError(f"line {e[2]}: a \\0 in a string would end it early; not in this slice")
+            self.address_of_label(self.add_string(e[1]))
+            return ("char", True)
         if kind == "call":
             _, name, args, line = e
             if name == "puts":
@@ -861,8 +1038,7 @@ class Gen:
             raise CompileError(f"line {line}: string literal is longer than 254 bytes (rt_puts indexes with Y)")
         if 0 in data:
             raise CompileError(f"line {line}: a \\0 in a string would end it early; not in this slice")
-        lbl = f"s_{len(self.strings) + 1}"
-        self.strings.append((lbl, data))
+        lbl = self.add_string(data)
         self.ins(f"lda #<{lbl}")
         self.ins("sta cc_ptr")
         self.ins(f"lda #>{lbl}")
@@ -876,6 +1052,8 @@ class Gen:
 BINOPS = {
     "+": ["cc_add"],
     "-": ["cc_sub"],
+    "*": ["cc_mul"],
+    "/": ["cc_div"],
     "==": ["cc_eq"],
     "!=": ["cc_eq", "cc_not"],
     "<": ["cc_lt"],
@@ -887,7 +1065,7 @@ BINOPS = {
 
 def compile_c(src):
     try:
-        funcs = Parser(lex(src)).program()
+        funcs, globs = Parser(lex(src)).program()
     except RecursionError:
         raise CompileError("expression nested too deeply for the parser") from None
     seen = set()
@@ -895,7 +1073,7 @@ def compile_c(src):
         if name in seen:
             raise CompileError(f"line {line}: function {name} is defined twice")
         seen.add(name)
-    text = Gen(funcs).program(funcs)
+    text = Gen(funcs).program(funcs, globs)
     symbols = len(re.findall(r"^[A-Za-z_][A-Za-z_0-9]*:", text, re.M)) + 1   # + cc_ptr =
     if symbols > SYMTABLE:
         raise CompileError(f"program needs {symbols} symbols; as holds {SYMTABLE} for a program")

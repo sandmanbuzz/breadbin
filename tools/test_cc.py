@@ -167,8 +167,8 @@ class Errors(unittest.TestCase):
     def test_redeclared_local(self):
         self.assertFails("int main() { int a; int a; return 0; }", "already declared")
 
-    def test_string_outside_puts(self):
-        self.assertFails('int main() { return "x"; }', "only an argument to puts")
+    def test_string_is_not_a_number(self):
+        self.assertFails('int main() { return "x"; }', "return: a pointer where a number is needed")
 
     def test_puts_needs_one_literal(self):
         self.assertFails("int main() { puts(3); return 0; }", "puts takes one string literal")
@@ -210,6 +210,49 @@ class Errors(unittest.TestCase):
 
     def test_the_null_pointer_constant_is_allowed(self):
         compile_src("int main() { int *p; p = 0; return 0; }")
+
+    def test_a_global_initialiser_must_be_a_literal(self):
+        self.assertFails("int g = 1 + 2;\nint main() { return g; }", "a global needs a literal initialiser")
+
+    def test_a_pointer_cannot_be_multiplied(self):
+        self.assertFails("int main() { int a[2]; return a * 2; }", "a pointer can only be added to or subtracted from")
+
+    def test_a_string_array_needs_a_string(self):
+        self.assertFails("int main() { char s[] = 5; return 0; }", "an array can only be initialised from a string literal")
+
+    def test_a_string_array_needs_the_size_or_a_string(self):
+        self.assertFails("int main() { char s[]; return 0; }", "needs a size or a string")
+
+    def test_a_string_is_not_a_global_pointer_to_int(self):
+        self.assertFails('int *p = "abc";\nint main() { return 0; }', "a string is a pointer to char")
+
+    def test_a_local_char_array_must_hold_its_string(self):
+        self.assertFails('int main() { char s[2] = "abc"; return 0; }', "the string does not fit in s")
+
+    def test_int_alone_and_int_star_alone_are_compile_errors(self):
+        self.assertFails("int", "expected id")
+        self.assertFails("int *", "expected id")
+        self.assertFails("char", "expected id")
+
+    def test_a_nul_in_a_string_is_refused_everywhere(self):
+        self.assertFails('char msg[] = "a\\0b";\nint main() { return 0; }', "would end it early")
+        self.assertFails('char *p = "a\\0b";\nint main() { return 0; }', "would end it early")
+
+    def test_a_char_global_takes_0_to_255(self):
+        self.assertFails("char c = 300;\nint main() { return c; }", "a char global takes 0 to 255")
+
+    def test_a_global_cannot_share_a_function_name(self):
+        self.assertFails("int f;\nint f() { return 0; }\nint main() { return 0; }", "is a function")
+
+    def test_initialised_data_comes_before_every_res(self):
+        src = ("char buf[100];\nint seed = 1;\nchar *msg = \"hi\";\nint n;\n"
+               "int main() { char local[9]; buf[0] = 1; return seed; }")
+        out = compile_src(src)
+        lines = out.split("\n")
+        # the global and local reservations (the runtime's own .res are not in question)
+        first_res = min(i for i, l in enumerate(lines) if ".res" in l and l.split(":")[0].startswith(("g_", "v_")))
+        for init_line in ("g_seed:", "g_msg: .word"):
+            self.assertLess(next(i for i, l in enumerate(lines) if l.startswith(init_line)), first_res)
 
     def test_index_needs_a_pointer(self):
         self.assertFails("int main() { int x = 1; return x[0]; }", "needs a pointer or an array")
@@ -270,11 +313,11 @@ class Errors(unittest.TestCase):
     def test_embedded_nul_is_refused(self):
         self.assertFails('int main() { puts("a\\0b"); return 0; }', "would end it early")
 
-    def test_multiplication_is_refused(self):
-        self.assertFails("int main() { return 2 * 3; }", "operator * is not in this slice")
+    def test_a_string_is_not_a_number(self):
+        self.assertFails('int main() { return "x"; }', "return: a pointer where a number is needed")
 
-    def test_division_is_refused(self):
-        self.assertFails("int main() { return 6 / 3; }", "operator / is not in this slice")
+    def test_division_by_a_pointer_is_refused(self):
+        self.assertFails("int main() { int a[2]; return 6 / a; }", "a pointer cannot be the right side of /")
 
     def test_deep_parentheses_are_a_compile_error(self):
         src = "int main() { return " + "(" * 400 + "1" + ")" * 400 + "; }"

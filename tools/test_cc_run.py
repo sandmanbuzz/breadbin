@@ -188,5 +188,54 @@ class ExecutedSlice2(unittest.TestCase):
                    'if (*p == 5) puts("Y"); else puts("N"); return 0; }')
 
 
+@unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
+class ExecutedSlice3(unittest.TestCase):
+    def check(self, src, want=b"Y"):
+        self.assertEqual(run_c(src), want, src)
+
+    def test_a_global_is_shared_by_functions(self):
+        self.check("int g = 5;\nint bump() { g = g + 1; return 0; }\n"
+                   'int main() { bump(); if (g == 6) puts("Y"); else puts("N"); return 0; }')
+
+    def test_a_local_shadows_a_global(self):
+        self.check("int g = 5;\n"
+                   'int main() { int g = 2; if (g == 2) puts("Y"); else puts("N"); return 0; }')
+
+    def test_a_global_char_array_takes_a_string(self):
+        self.check('char msg[] = "abc";\nint main() { if (msg[1] == 98) puts("Y"); else puts("N"); return 0; }')
+
+    def test_a_local_char_array_takes_a_string_each_call(self):
+        self.check('int f() { char s[] = "hi"; s[0] = s[0] + 1; return s[0]; }\n'
+                   'int main() { f(); if (f() == 105) puts("Y"); else puts("N"); return 0; }')
+
+    def test_a_char_pointer_points_at_a_string_literal(self):
+        self.check('int main() { char *p = "xyz"; if (*(p + 1) == 121) puts("Y"); else puts("N"); return 0; }')
+
+    def test_a_string_literal_can_be_assigned_to_a_char_pointer(self):
+        self.check('int main() { char *p; p = "ab"; if (*p == 97) puts("Y"); else puts("N"); return 0; }')
+
+    def test_multiplication_wraps_at_16_bits(self):
+        self.check('int main() { if (300 * 300 == 24464) puts("Y"); else puts("N"); return 0; }')
+
+    def test_multiplication_and_division(self):
+        self.check('int main() { if (7 * 6 == 42) if (42 / 6 == 7) if (7 / 2 == 3) puts("Y"); '
+                   'else puts("N"); else puts("N"); else puts("N"); return 0; }')
+
+    def test_division_of_a_large_number(self):
+        self.check('int main() { if (65535 / 3 == 21845) puts("Y"); else puts("N"); return 0; }')
+
+    def test_precedence_of_the_multiplicative_level(self):
+        self.check('int main() { if (2 + 3 * 4 == 14) if ((2 + 3) * 4 == 20) if (20 / 4 / 5 == 1) puts("Y"); '
+                   'else puts("N"); else puts("N"); else puts("N"); return 0; }')
+
+    def test_division_by_zero_gives_65535(self):
+        self.check('int main() { int z = 0; if (9 / z == 65535) puts("Y"); else puts("N"); return 0; }')
+
+    def test_a_multiplication_in_a_loop_and_a_global(self):
+        self.check("int acc = 1;\n"
+                   'int main() { int i; for (i = 1; i < 6; i = i + 1) acc = acc * i; '
+                   'if (acc == 120) puts("Y"); else puts("N"); return 0; }')
+
+
 if __name__ == "__main__":
     unittest.main()
