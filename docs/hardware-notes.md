@@ -610,3 +610,24 @@ This repeats the earlier drive-A result (no write-back observed). The write-back
 - Config restored after each run; the readback equals the baseline. Scratch file and directory removed.
 
 Under these conditions (a block write by U2 from BASIC, drive B, a 512-byte image copy on the RAM disk), the drive-written block did not reach the image file, in any of the three variants: 45 s, 300 s, or a drive reset. Q6 is closed as: no write-back of drive-modified images under these conditions. Not tried: an SD-card image (skipped by the facilitator), a different write (a full track, a directory entry), or a different host path.
+
+### 2026-11-03, R8: the hardware list on main 9ccef95 (Agent A)
+
+Build: `make` in a detached worktree at 9ccef95; `build/breadbin.d64` sha256 `743fd1ac9103fb8b`; `make size`: code and data end `$CD96`, **room below `$CF00` 361 bytes** (was 354 at 939a83f: the kernel changed since the last hardware run; BSS and CODEHI end `$FFEB`, room 14).
+
+1. **Physical 1541, the build written onto the disk:** nibbler copy (`nibcopy`), finished in 50 s; `LOAD"$",8` lists `"breadbin"` at 58 blocks. Config restored by trap.
+2. **Physical 1541 boot (list item 3, the physical drive as device 8):** `plainboot`, stock KERNAL, Software IEC off: **login after 32 s, one boot**.
+3. **Ultimate, `BREADBIN_TARGET=ultimate`, drive A on bus 8 with the physical drive renumbered to 9 in software (no hands):** `Boot.test_02_echo`, `test_13_ctrl_c_blocked_reader`, `test_07_directories`, `test_10_mv_cp`: **4 of 4 OK**; `tests.test_console` (6 tests): **6 of 6 OK**. 274 s. Drive A restored to bus 9, the physical drive back to 8 by reboot (read back: `LOAD"$",8` lists the 58-block disk), drive A's original image remounted read-only (`/Temp/breadbin.d64`); the console tests had left `/Temp/test_con.d64` mounted.
+4. **Not run:** `format` (the physical disk is not expendable on this list); the item 3 step "`mount 9 /mnt` of the other drive" (no second drive image); `tests.test_keyboard` on the Ultimate (not in the list for this run); the JiffyDOS-ROM set on hardware; more than one physical boot (one boot proves little; a series is the test if this is gating).
+5. **Changed story:** the kernel room changed (354 to 361 bytes below `$CF00`). Not checked against its commit message; the Ultimate tests above cover the boot path only.
+
+Stalls: none. Test harness note: the Ultimate test run needs `tests/` as the working directory, because a `tests` package in the Python site-packages shadows the repo's `tests` directory when run from the repo root.
+
+### 2026-11-03, R13: five-boot series on the physical 1541, tip aadea2f (Agent A)
+
+Build: the kernel and sources at aadea2f are identical to 9ccef95 (sha256 `743fd1ac9103fb8b`, `make size` room below `$CF00` 361). Count and stopping rule were set before boot 1: five boots, each must reach login within plainboot's 170 s; pass 5 of 5; the series stops at the first boot that does not, with no retry. Script: `r13series.sh` (scratch; the same shape as the earlier `physseries.sh`), stock KERNAL, Software IEC off, one configuration setup, restored by trap, read back afterwards (JiffyDOS KERNAL, Software IEC on).
+
+- **Boot 1: login after 32 s. Boot 2: 22 s. Boot 3: 22 s. Boot 4: 22 s. Boot 5: 22 s.** Result: **5 of 5 reached login**; no stall, no retry.
+- The root-mount stall mitigation (13 of 13 before the kernel changed, per CLAUDE.md) holds on this build: 5 of 5 here plus the R8 boot (one boot, 32 s).
+
+**Not run (R13 list):** `format` (the list says expendable media only; the Ultimate's emulated drive with a scratch image is the right target, not the physical disk, and needs a second drive configured: not done this turn); the other-drive mount `mount 9 /mnt` (needs a second drive image); `tests.test_keyboard` on the Ultimate (not run this turn). Also not run: the JiffyDOS-ROM set on hardware.
