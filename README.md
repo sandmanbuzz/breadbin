@@ -141,7 +141,7 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 ```sh
 tools/ci/run.sh all test-host   # the fast gate: image tools, simulators, the assembler and compiler on the host (about 45 s, 299 tests)
 tools/ci/sharded.sh             # the whole VICE suite in six containers at once (83 tests, about 13 minutes: 778 s on `3fd8112`, when it had 80)
-make test-host                  # the same host tests directly, with cc65 and py65 installed
+make && make test-host          # the same host tests directly (build first: without build/ the tests that need the kernel skip), with cc65 and py65 installed
 make test                       # boots VICE one test after another (slow: 63 VICE tests took 2,804 s in the container with every slot taken)
 ```
 
