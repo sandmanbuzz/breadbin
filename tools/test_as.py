@@ -148,3 +148,30 @@ class AsOutput(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(SKIP, SKIP)
+class AsLongLine(unittest.TestCase):
+    """as read a line into a 128-byte buffer and dropped every character past 126, silently: a
+    long .byte line lost its tail and its zero, and the program ran on into the next data."""
+
+    def image(self, n):
+        src = b's: .byte "' + b"x" * n + b'", 0\n'
+        return asim.run("as", ["/s", "/o"], {"/s": src})
+
+    def test_a_long_line_is_kept_whole(self):
+        r = self.image(150)
+        self.assertEqual(r.exit, 0, r.err)
+        b = r.files["/o"]
+        self.assertIn(b"x" * 150 + b"\x00", b[9:9 + head(b)["image"]])
+
+    def test_a_line_of_254_characters_fits(self):
+        # the line is `s: .byte "` (10) + the string + `", 0` (4): 240 characters make 254 in all
+        r = self.image(240)
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertIn(b"x" * 240 + b"\x00", r.files["/o"][9:9 + head(r.files["/o"])["image"]])
+
+    def test_a_line_of_255_characters_is_refused_loudly(self):
+        r = self.image(241)
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"line too long", r.err)

@@ -35,7 +35,7 @@ hw:     .res 2          ; end of the bytes actually stored (pc past it: a traili
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
-lbuf:   .res 128
+lbuf:   .res 256            ; up to 254 characters a line (readline refuses longer ones)
 li:     .res 1
 name:   .res 16
 nlen:   .res 1
@@ -136,7 +136,12 @@ rp_loop:
         inc lineno+1
 rp_n:   tsx
         stx errsp_
-        jsr do_line
+        lda lovf
+        beq @ok
+        lda #<s_long        ; error unwinds to line_done: the line is not assembled
+        ldx #>s_long
+        jsr error
+@ok:    jsr do_line
 line_done:
         jmp rp_loop
 rp_done:
@@ -216,6 +221,8 @@ wr:     sta r0
 
 ; readline: getc -> lbuf, lowercased outside quotes; carry set at EOF
 readline:
+        lda #0
+        sta lovf
         ldx #0
 @c:     stx li
         jsr getc
@@ -223,10 +230,13 @@ readline:
         bcs @eof
         cmp #10
         beq @end
-        cpx #127
-        bcs @c
+        cpx #254
+        bcs @over
         sta lbuf,x
         inx
+        jmp @c
+@over:  lda #1           ; past 254 characters: keep reading to the end of the line, then refuse it
+        sta lovf
         jmp @c
 @eof:   cpx #0
         bne @end
@@ -1311,6 +1321,7 @@ d_res:   .byte "res", 0
 d_text:  .byte "text", 0
 s_usage: .byte "usage: as source output", 10, 0
 s_as:    .byte "as: line ", 0
+s_long:  .byte "line too long (over 254 characters)", 0
 s_colon: .byte ": ", 0
 s_bytes: .byte " bytes, ", 0
 s_rels:  .byte " relocations", 10, 0
@@ -1371,3 +1382,4 @@ builtins:
 name2:  .res 16
 tq2:    .res 2
 errsp_: .res 1
+lovf:   .res 1             ; readline: the line was longer than it could hold
