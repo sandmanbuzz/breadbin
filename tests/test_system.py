@@ -323,6 +323,76 @@ def c1541_dir(img):
     return out
 
 
+class REURoot(unittest.TestCase):
+    """The REU as the root device: a disk image preloaded as the REU (block b at offset
+    b*256, `mkimage.py reu`), no drive. Boots from the .prg, as a web demo would."""
+
+    PRG = os.path.join(ROOT, "build", "breadbin.prg")
+    NODRIVE = ["-drive8type", "0", "-autostartprgmode", "1"]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.reu = os.path.join(self.tmp.name, "root.reu")
+        subprocess.run([sys.executable, os.path.join(ROOT, "tools", "mkimage.py"),
+                        "reu", IMAGE, self.reu], check=True, capture_output=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def boot(self, **kw):
+        return Vice(self.PRG, reu=256, reu_image=self.reu, extra=self.NODRIVE, **kw)
+
+    def test_boot_and_write(self):
+        with self.boot() as v:
+            v.wait_shell()
+            self.assertIn("reu: 4 x 64k", v.screen())
+            out = v.run("ls /bin").split()
+            for name in ["cat", "ls", "sh", "init", "grep"]:
+                self.assertIn(name, out)
+            self.assertIn("welcome to breadbin.", v.run("cat /etc/motd"))
+            v.run("echo hi there > /home/note")
+            self.assertEqual(v.run("cat /home/note"), "hi there")
+            v.run("mkdir /home/d")
+            self.assertIn("d", v.run("ls /home").split())
+            # the REU is the root, not /tmp, and there is no cache: nothing mounted over it
+            self.assertNotIn("/tmp", v.run("df"))
+            self.assertEqual(v.run("cache").split()[2], "none")
+
+    def test_write_persists_in_the_reu_image(self):
+        with self.boot() as v:
+            v.wait_shell()
+            v.run("echo kept > /home/keep")
+        with self.boot() as v:      # the emulator saved the REU on exit
+            v.wait_shell()
+            self.assertEqual(v.run("cat /home/keep"), "kept")
+
+    def test_no_reu_no_drive_cannot_mount(self):
+        with Vice(self.PRG, extra=self.NODRIVE) as v:
+            v.wait_for("cannot mount root", timeout=60)
+
+    def test_blank_reu_no_drive_cannot_mount(self):
+        with open(self.reu, "wb") as f:
+            f.write(bytes(256 * 1024))
+        with self.boot() as v:
+            v.wait_for("cannot mount root", timeout=60)
+
+    def test_stale_superblock_version_cannot_mount(self):
+        with open(self.reu, "r+b") as f:     # a superblock of another version: not ours to adopt
+            f.seek(376 * 256 + 5)
+            f.write(b"\x02")
+        with self.boot() as v:
+            v.wait_for("cannot mount root", timeout=60)
+
+    def test_drive_wins_over_reu_image(self):
+        """Classic and Expanded unchanged: with a drive the REU is /tmp, even when it holds a disk."""
+        with Vice(IMAGE, reu=256, reu_image=self.reu) as v:
+            v.wait_shell()
+            self.assertIn("/tmp", v.run("df"))
+            v.run("echo hi > /tmp/x")
+            self.assertEqual(v.run("cat /tmp/x"), "hi")
+            self.assertIn("welcome", v.run("cat /etc/motd"))
+
+
 class Cache(unittest.TestCase):
     """The REU block cache: a second boot on the same REU reads from it, a different
     disk discards it, writes stay in step."""

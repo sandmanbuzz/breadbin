@@ -38,6 +38,20 @@ class TestImage(unittest.TestCase):
     def test_size(self):
         self.assertEqual(os.path.getsize(self.out), 174848)
 
+    def test_reu_image(self):
+        """The REU root layout: block b at offset b*256, padded to 256 KB."""
+        out = os.path.join(self.tmp.name, "x.reu")
+        M.main(["reu", self.out, out])
+        with open(out, "rb") as f:
+            reu = f.read()
+        with open(self.out, "rb") as f:
+            d64 = f.read()
+        self.assertEqual(len(reu), 262144)
+        self.assertEqual(reu[376 * 256:376 * 256 + 6], b"C64FS\x01")
+        for b in (0, 357, 376, 400, 682):
+            self.assertEqual(reu[b * 256:(b + 1) * 256], d64[b * 256:(b + 1) * 256])
+        self.assertEqual(reu[len(d64):], bytes(262144 - len(d64)))
+
     def test_cbm_directory_has_boot_file(self):
         self.assertEqual(self.img.cbm_files(), [(b"BREADBIN", 0x82)])
         self.assertEqual(self.img.cbm_read(b"BREADBIN"), self.boot)
