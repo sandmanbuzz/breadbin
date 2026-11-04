@@ -5,7 +5,7 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 | Level | Command | Time (on the runner, in the container) |
 |---|---|---|
 | Fast gate (host tests) | `tools/ci/run.sh all test-host`, or `make test-host` with cc65 and py65 on the host | about 45 s after `make` (`make test-host` alone skips the 77 tests that need build/): 299 tests, none skipped (image tools, key tables, the Ultimate client against a fake server, the py65 simulators of the real kernel, `as` on the host (`tools/asim.py`), the host compiler `tools/cc.py`, and the shard-list check) |
-| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard (83 tests now) |
+| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard (89 tests now) |
 | Smoke | `tools/ci/run.sh test-smoke` | about 2 to 3 minutes: boot, echo, a three-stage pipe, Ctrl-C |
 | Targeted | `tools/ci/run.sh test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `tools/ci/run.sh test-console` | about 2.5 minutes (6 tests, 143 s in the last shard run): screen RAM, colour RAM and VIC registers read back |
@@ -83,7 +83,7 @@ tools/ci/run.sh test-only T="tests.test_system.Exec tests.test_system.Modules"
 
 When you add a test, put it in a shard (`tools/ci/shards.txt`, by cost) and run `bash tools/ci/sharded.sh --check` and the fast gate before you land: a test in no shard or in two fails both.
 
-Classes: `tests/test_system.py` has `Boot` (28 tests, split in two halves for the shards), `Persistence`, `REU`, `Cache` (9: warm boot, new disk or label discards, write-through, pristine image after writes), `Pool`, `Modules`, `Exec`, `Drives` (mount and format CBM disks, the module-is-not-a-program case), `Pipes` (tee, tail, sort), `Touch`; `tests/test_console.py`, `tests/test_keyboard.py`, and `tests/test_compiled.py` (`Compiled`: programs written in C, compiled on the host by `tools/cc.py`, assembled and run on the machine).
+Classes: `tests/test_system.py` has `Boot` (28 tests, split in two halves for the shards), `Persistence`, `REU`, `REURoot` (the REU as root device, no drive: `mkimage.py reu`, `make run-reu-root`), `Cache` (9: warm boot, new disk or label discards, write-through, pristine image after writes), `Pool`, `Modules`, `Exec`, `Drives` (mount and format CBM disks, the module-is-not-a-program case), `Pipes` (tee, tail, sort), `Touch`; `tests/test_console.py`, `tests/test_keyboard.py`, and `tests/test_compiled.py` (`Compiled`: programs written in C, compiled on the host by `tools/cc.py`, assembled and run on the machine).
 
 ## Which tests for which change
 
@@ -97,7 +97,7 @@ By test name; refine this as we learn what actually catches what.
 | File layer, pipes, signals (`file.s`) | `test_05`, `test_06`, `test_11`, `test_12`, `test_13` |
 | c64fs (`fs.s`) | `test_06`, `test_07`, `test_10`, `test_16`, `Persistence` |
 | Block layer, IEC, CBM DOS, `format`, mounts (`blk.s`, `cbm.s`) | `Drives`, `Persistence`, `REU`, `Cache`, plus a boot |
-| REU, `/tmp`, the REU block cache | `REU`, `Cache` (about 11 minutes: it boots VICE about 20 times, with a 2 MB REU image kept across boots) |
+| REU, `/tmp`, the REU block cache, the REU root device | `REU`, `REURoot`, `Cache` (about 11 minutes: it boots VICE about 20 times, with a 2 MB REU image kept across boots) |
 | Loader, `as`, `basic` (`exec.s`, `as.s`, `basic.s`) | `test_17`, `test_18`, `test_19` |
 | A single command in `src/bin/` | the test that uses it (`grep -n <name> tests/test_system.py`): `tee`, `tail` and `sort` have `Pipes`, `touch` has `Touch` |
 | The assembler (`as.s`) | `tools/test_as.py` (host: `as` runs under py65 via `tools/asim.py`, 0.1 s per program), then `Boot.test_19` and `test_27` |
