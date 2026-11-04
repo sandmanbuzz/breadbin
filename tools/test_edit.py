@@ -238,5 +238,49 @@ class Redraw(unittest.TestCase):
             self.assertIn(rows, want, "trial %d: keys %s\nscreen:\n%s" % (trial, bytes(keys).hex(), "\n".join(rows)))
 
 
+@unittest.skipIf(SKIP, SKIP)
+class Kill(unittest.TestCase):
+    def test_line_kill(self):
+        r = edit(b"one\ntwo\nthree", [DOWN, KILL, SAVE])
+        self.assertEqual(r.files[F], b"one\nthree")
+        r = edit(b"one\ntwo\nthree", [DOWN, KILL, KILL, SAVE])        # the last line, no newline
+        self.assertEqual(r.files[F], b"one\n")
+        r = edit(b"one\ntwo\nthree", [DOWN, KILL, KILL, KILL, SAVE])  # an empty last line: nothing
+        self.assertEqual(r.files[F], b"one\n")
+        self.assertEqual(r.exit, 0)
+
+    def test_kill_each_line_of_a_file(self):
+        data = b"a\nbb\nccc\n\ndddd\ne"
+        for n in range(6):
+            lines = data.split(b"\n")
+            lines = [l + b"\n" for l in lines[:-1]] + [lines[-1]]
+            r = edit(data, [DOWN] * n + [KILL, SAVE])
+            self.assertEqual(r.files[F], b"".join(lines[:n] + lines[n + 1:]), "line %d" % n)
+
+    def test_kill_only_line_and_empty_file(self):
+        self.assertEqual(edit(b"just one", [KILL, SAVE]).files[F], b"")
+        self.assertEqual(edit(b"", [KILL, SAVE]).files[F], b"")
+        self.assertEqual(edit(b"\n", [KILL, SAVE]).files[F], b"")
+        self.assertEqual(edit(b"\n\n", [KILL, SAVE]).files[F], b"\n")
+
+    def test_kill_in_the_middle_of_a_line_takes_the_whole_line(self):
+        r = edit(b"abc\ndef\nghi\n", [DOWN, RIGHT, RIGHT, KILL, SAVE])
+        self.assertEqual(r.files[F], b"abc\nghi\n")
+
+    def test_kill_across_a_page_boundary_of_the_buffer(self):
+        # text longer than 256 bytes: the move down crosses a page of text
+        lines = [(b"%03d" % i) * 30 + b"\n" for i in range(8)]       # 8 x 91 bytes
+        r = edit(b"".join(lines), [DOWN, DOWN, KILL, SAVE])
+        self.assertEqual(r.files[F], b"".join(lines[:2] + lines[3:]))
+
+    def test_kill_moves_the_text_once(self):
+        # 20 lines of 50 bytes: killing the first one moves the 950 bytes after it. Measured: 76,000 steps
+        # for the whole run when the tail moves once, 638,000 when it moved once per character.
+        data = (b"x" * 49 + b"\n") * 20
+        r = edit(data, [KILL, SAVE])
+        self.assertEqual(r.files[F], data[50:])
+        self.assertLess(r.steps, 200_000, "steps: %d" % r.steps)
+
+
 if __name__ == "__main__":
     unittest.main()
