@@ -467,5 +467,21 @@ class AsV8(unittest.TestCase):
         self.assertIn(b"too long", r.err)
 
 
+    def test_a_14_character_output_name_assembles(self):
+        # c64fs names are at most 14 characters: the temporary name must not be longer than the output's
+        r = asim.run("as", ["/s", "/abcdefghijklmn"], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertIn("/abcdefghijklmn", r.files)
+
+    def test_a_failed_rename_keeps_the_previous_output_and_the_complete_temporary(self):
+        # the rename is the last step: when it fails the previous output is untouched and the complete
+        # temporary file is kept, named in the message, so nothing is lost
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, fail_rename=1)
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertEqual(r.files.get("/o"), b"OLD")
+        self.assertTrue(r.files.get("/~as", b"")[:3] == b"CX\x01", sorted(r.files))
+        self.assertIn(b"~as", r.err)
+
+
 if __name__ == "__main__":
     unittest.main()
