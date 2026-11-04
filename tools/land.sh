@@ -5,7 +5,8 @@
 #
 # Stops before committing if the merge conflicts or the suite is red: the merge is aborted and the
 # tree is left as it was. The suite runs after make clean, on the merged tree itself, so stale build
-# output cannot make a green branch look red (or the reverse). See docs/process.md, "Landing".
+# output cannot make a green branch look red (or the reverse). The build comes first: without build/ the
+# tests that need the kernel skip (77 of 299) and the gate proves less. See docs/process.md, "Landing".
 set -eu
 
 branch=${1:?usage: land.sh BRANCH [MESSAGE]}
@@ -37,8 +38,9 @@ if ! git merge --no-ff --no-commit "$branch"; then
     exit 1
 fi
 
+# make test-host skips the tests that need a built kernel (BUILT is set only when build/ exists), so build first.
 make clean >/dev/null 2>&1 || true
-if ! make test-host; then
+if ! make >/dev/null 2>&1 || ! make test-host; then
     echo "land: host suite is red on the merged tree; aborted, nothing committed" >&2
     exit 1
 fi
