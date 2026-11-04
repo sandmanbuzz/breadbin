@@ -19,7 +19,7 @@ syp  = $23              ; symbol pointer
 obp  = $25              ; output pointer
 tq   = $27
 
-NSYM   = 220
+NSYM   = 255        ; names in the table: 35 builtins and the program's labels (one byte of count, so 255 at most)
 SYMSZ  = 18             ; name[15] value[2] flags
 OBMAX  = 8192
 RMAX   = 1024

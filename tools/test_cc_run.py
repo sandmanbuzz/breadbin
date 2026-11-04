@@ -88,7 +88,8 @@ class Executed(unittest.TestCase):
         self.assertEqual(run_c(src), b"hello, world!\n")
 
     def test_operator_grid_unsigned(self):
-        pairs = [(0, 0), (0, 1), (1, 0), (5, 5), (0x7FFF, 0x8000), (0x8000, 0x7FFF), (0xFFFF, 1), (1, 0xFFFF)]
+        pairs = [(0, 0), (0, 1), (1, 0), (5, 5), (0x7FFF, 0x8000), (0x8000, 0x7FFF), (0xFFFF, 1), (1, 0xFFFF),
+                 (0x0100, 0x0000), (0x0001, 0x0101)]   # equal low bytes, unequal high bytes
         for a, b in pairs:
             for op in ["==", "!=", "<", ">", "<=", ">="]:
                 src = ('int main() { int a = %d; int b = %d; if (a %s b) puts("Y"); else puts("N"); '
