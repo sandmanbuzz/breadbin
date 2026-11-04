@@ -479,8 +479,75 @@ class AsV8(unittest.TestCase):
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, fail_rename=1)
         self.assertEqual(r.exit, 1, r.err)
         self.assertEqual(r.files.get("/o"), b"OLD")
-        self.assertTrue(r.files.get("/~as", b"")[:3] == b"CX\x01", sorted(r.files))
-        self.assertIn(b"~as", r.err)
+        self.assertTrue(r.files.get("/~o", b"")[:3] == b"CX\x01", sorted(r.files))
+        self.assertIn(b"~o", r.err)
+
+    def test_a_user_file_at_the_temporary_name_is_not_destroyed(self):
+        # the temporary is derived from the output name; a file already there is refused, not truncated
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~o": b"USER"})
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertEqual(r.files["/~o"], b"USER")
+        self.assertIn(b"~o", r.err)
+        self.assertNotIn("/o", r.files)
+
+    def test_a_user_file_at_the_temporary_name_survives_a_failed_write(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~o": b"USER"}, fail_write=1)
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertEqual(r.files["/~o"], b"USER")
+
+    def test_an_output_named_like_the_old_temporary_keeps_its_content(self):
+        good = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}).files["/o"]
+        r = asim.run("as", ["/s", "/~as"], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/~as"], good)
+
+    def test_a_user_file_named_tilde_as_is_left_alone(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~as": b"USER"})
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/~as"], b"USER")
+
+    def test_output_name_lengths(self):
+        for n in (13, 14):
+            name = "/" + "x" * n
+            r = asim.run("as", ["/s", name], {"/s": self.SRC8})
+            self.assertEqual(r.exit, 0, (n, r.err))
+            self.assertEqual(r.files[name][:3], b"CX\x01")
+            self.assertEqual(sorted(r.files), sorted(["/s", name]))
+        r = asim.run("as", ["/s", "/" + "x" * 15], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 1)
+        self.assertIn(b"too long", r.err)
+        self.assertEqual(sorted(r.files), ["/s"])
+
+    def test_a_tilde_name_of_14_characters_does_not_collide_with_its_temporary(self):
+        name = "/" + "~" * 14
+        r = asim.run("as", ["/s", name], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files[name][:3], b"CX\x01")
+        self.assertEqual(sorted(r.files), sorted(["/s", name]))
+
+    def test_two_outputs_in_one_directory_do_not_interfere(self):
+        a = asim.run("as", ["/s", "/a"], {"/s": self.SRC8})
+        self.assertEqual(a.exit, 0, a.err)
+        files = dict(a.files)
+        files["/s"] = b"x: .byte 9\n"
+        b = asim.run("as", ["/s", "/b"], files)
+        self.assertEqual(b.exit, 0, b.err)
+        self.assertEqual(b.files["/a"], a.files["/a"])
+        self.assertNotEqual(b.files["/b"], b.files["/a"])
+        self.assertEqual(sorted(b.files), ["/a", "/b", "/s"])
+
+    def test_a_byte_of_a_label_through_an_equate_is_refused(self):
+        # k => lbl is label-derived: .byte k would be a constant 0 with no relocation
+        for use in (".byte k", ".word k"):
+            r = self.run_as("lbl: rts\nk = >lbl\n" + use + "\n")
+            self.assertEqual(r.exit, 1, (use, r.err))
+        r = self.run_as("lbl: rts\nk = <lbl\n.byte k\n")
+        self.assertEqual(r.exit, 1, r.err)
+
+    def test_a_plain_label_equate_still_relocates_in_word(self):
+        r = self.run_as("lbl: rts\nk = lbl\n.word k\n")
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(head(r.files["/o"])["relocs"], 1)
 
 
 if __name__ == "__main__":
