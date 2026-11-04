@@ -647,9 +647,13 @@ zp_check:
         lda pass
         cmp #2
         bne @ok
+        lda erel            ; a label or * is an image offset, not a runtime zero-page address
+        bne @bad
+        lda ehl             ; < and > of a label are not zero-page addresses either: write the constant
+        bne @bad
         lda ev+1
         beq @ok
-        lda #<e_zpind
+@bad:   lda #<e_zpind
         ldx #>e_zpind
         jmp error
 @ok:    rts

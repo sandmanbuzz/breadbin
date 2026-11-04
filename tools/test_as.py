@@ -210,6 +210,32 @@ class AsZeroPageAndNames(unittest.TestCase):
         self.assertNotEqual(r.exit, 0)
         self.assertIn(b"zero page", r.err)
 
+    def test_a_label_at_image_offset_zero_is_refused(self):
+        # a label is an offset in the image, not a runtime address: a small offset is not zero page
+        r = self.asm("ptr: .word 0\n        lda (ptr),y\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_label_at_a_small_image_offset_is_refused(self):
+        r = self.asm("        lda (ptr),y\n        nop\nptr: .word 0\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_res_label_is_refused(self):
+        r = self.asm("ptr: .res 2\n        lda (ptr),y\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_low_byte_of_a_label_is_refused(self):
+        r = self.asm("        lda (<lbl),y\nlbl: .word 0\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_the_program_counter_is_refused(self):
+        r = self.asm("        lda (*),y\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
     def test_a_14_character_name_is_kept_and_distinct(self):
         self.assertEqual(self.asm("abcdefghijklmn: nop\nabcdefghijklmo: nop\n").exit, 0)
 

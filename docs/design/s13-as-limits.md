@@ -18,3 +18,11 @@ the host model, not on the machine. The machine's `as` is the same program.
   the refusal for every line (as now); or refuse only when the overflow is in code, so that a comment
   past 254 is cut without a word. The second needs quote and comment state in readline.
 - **CRLF lines:** the CR is skipped, so a CRLF file has the same limit as an LF one.
+
+## Known limits of the zero-page check (R2)
+
+- `(zp),y` and `(zp,x)` accept a plain constant below 256 (`$2b`) and refuse a label, `*`, and any
+  `<` or `>` operator. A constant written with `<` or `>` is refused too; write the constant.
+- An expression that overflows 16 bits wraps before the check sees it: `ptr = $ff00 + $100` is
+  `$0000` and is accepted as zero page. Arithmetic overflow is not reported anywhere in `as`; that
+  is a separate limit to record, not a zero-page bug.
