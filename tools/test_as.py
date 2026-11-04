@@ -322,6 +322,17 @@ class AsResCount(unittest.TestCase):
         r = self.asm("        .res 39423\n")
         self.assertEqual(r.exit, 0, r.err)
 
+    def test_image_plus_res_over_the_pool_is_refused_and_the_message_says_so(self):
+        # the pool holds image + BSS: 3 bytes of image and a count under the pool size still do not fit
+        r = self.asm(".byte 1,2,3\n        .res 39423\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"image plus res", r.err)
+        self.assertNotIn("/o", r.files)
+        r = self.asm(".byte 1,2,3\n        .res 39421\n")      # 39424 in all: one byte past the last page
+        self.assertNotEqual(r.exit, 0)
+        r = self.asm(".byte 1,2,3\n        .res 39420\n")      # 39423 in all: fits
+        self.assertEqual(r.exit, 0, r.err)
+
     def test_a_label_as_the_count_is_refused(self):
         r = self.asm("n = 4\nbuf: .res n\n")          # a plain equate is a number: fine
         self.assertEqual(r.exit, 0, r.err)
