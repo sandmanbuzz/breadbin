@@ -35,7 +35,7 @@ hw:     .res 2          ; end of the bytes actually stored (pc past it: a traili
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
-lbuf:   .res 128
+lbuf:   .res 256            ; up to 254 characters a line (readline refuses longer ones)
 li:     .res 1
 name:   .res 16
 nlen:   .res 1
@@ -136,7 +136,12 @@ rp_loop:
         inc lineno+1
 rp_n:   tsx
         stx errsp_
-        jsr do_line
+        lda lovf
+        beq @ok
+        lda #<s_long        ; error unwinds to line_done: the line is not assembled
+        ldx #>s_long
+        jsr error
+@ok:    jsr do_line
 line_done:
         jmp rp_loop
 rp_done:
@@ -216,6 +221,8 @@ wr:     sta r0
 
 ; readline: getc -> lbuf, lowercased outside quotes; carry set at EOF
 readline:
+        lda #0
+        sta lovf
         ldx #0
 @c:     stx li
         jsr getc
@@ -223,10 +230,15 @@ readline:
         bcs @eof
         cmp #10
         beq @end
-        cpx #127
-        bcs @c
+        cmp #13              ; CR of a CRLF line: not a character
+        beq @c
+        cpx #254
+        bcs @over
         sta lbuf,x
         inx
+        jmp @c
+@over:  lda #1           ; past 254 characters: keep reading to the end of the line, then refuse it
+        sta lovf
         jmp @c
 @eof:   cpx #0
         bne @end
@@ -524,6 +536,7 @@ instruction:
         jsr adv
         jsr expect_x
         jsr expect_rp
+        jsr zp_check
         lda #9
         jmp emit_zp
 @ind1:  jsr expect_rp
@@ -533,6 +546,7 @@ instruction:
         bne @ind
         jsr adv
         jsr expect_y
+        jsr zp_check
         lda #10
         jmp emit_zp
 @ind:   lda #11
@@ -626,6 +640,23 @@ emit_zp:
         jsr emit_op
         lda ev
         jmp emit
+
+; zp_check: the pointer of (zp),y or (zp,x) must be in zero page; the 6502 has no other form.
+; Pass 1 values are not final (a forward reference is 0 there), so the check is made in pass 2.
+zp_check:
+        lda pass
+        cmp #2
+        bne @ok
+        lda erel            ; a label or * is an image offset, not a runtime zero-page address
+        bne @bad
+        lda ehl             ; < and > of a label are not zero-page addresses either: write the constant
+        bne @bad
+        lda ev+1
+        beq @ok
+@bad:   lda #<e_zpind
+        ldx #>e_zpind
+        jmp error
+@ok:    rts
 
 emit_abs:
         jsr need_mode
@@ -1043,11 +1074,15 @@ getname:
         jsr isidchar
         bcs @e
         cpx #14
-        bcs @skip
+        bcs @toolong        ; a name is kept whole or refused: a cut name collided with its prefix
         sta name,x
         inx
-@skip:  jsr adv
+        jsr adv
         jmp @l
+@toolong:
+        lda #<e_name
+        ldx #>e_name
+        jmp error
 @e:     stx nlen
         lda #0
 @p:     cpx #16
@@ -1311,6 +1346,7 @@ d_res:   .byte "res", 0
 d_text:  .byte "text", 0
 s_usage: .byte "usage: as source output", 10, 0
 s_as:    .byte "as: line ", 0
+s_long:  .byte "line too long (over 254 characters)", 0
 s_colon: .byte ": ", 0
 s_bytes: .byte " bytes, ", 0
 s_rels:  .byte " relocations", 10, 0
@@ -1321,6 +1357,8 @@ e_mode:  .byte "bad addressing mode", 0
 e_range: .byte "branch out of range", 0
 e_undef: .byte "undefined symbol", 0
 e_dup:   .byte "duplicate symbol", 0
+e_zpind: .byte "(zp),y and (zp,x) need a zero page pointer", 0
+e_name:  .byte "name longer than 14 characters", 0
 e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
@@ -1371,3 +1409,4 @@ builtins:
 name2:  .res 16
 tq2:    .res 2
 errsp_: .res 1
+lovf:   .res 1             ; readline: the line was longer than it could hold

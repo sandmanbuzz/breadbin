@@ -4,10 +4,16 @@
 writes no kernel bytes. The aim is to settle the language and the shape of the emitted code
 before S17 (self-host or stay in assembly) is decided. `tools/test_cc.py` is its host test.
 
-## The subset (this slice)
+## The subset (slice 2)
 
 - `int` only: 16 bit, unsigned in comparisons (`<`, `>`, `<=`, `>=` compare unsigned).
-- Functions with no parameters; `main` is the entry. Calls are by name.
+- Functions with typed parameters (`int` or `char`, passed on the software stack and stored in
+  each function's static parameter slots); `main` is the entry. Calls are by name.
+- `char`: 8 bit, zero-extended when read; a store keeps the low byte.
+- Pointers to `int` or `char` (one level), arrays of `int` or `char` (local, static storage),
+  unary `*` and `&`, indexing `a[i]`; pointer `+` and `-` scale by the element. Pointers are read
+  through `cc_ptr` ($2b, zero page).
+- `for (init; cond; step) body`, desugared to a `while` in the parser.
 - Locals declared with `int name = expr;`. They have static storage (`v_<fn>_<name>`, 2 bytes),
   so there is no recursion yet.
 - Statements: declaration, assignment, expression, `if`/`else`, `while`, `return`, blocks.
@@ -15,7 +21,8 @@ before S17 (self-host or stay in assembly) is decided. `tools/test_cc.py` is its
 - `puts("...")`: the one builtin. It prints a string literal through `sys_write`, one byte at a
   time, the way `rootfs/home/hello.s` does. String escapes: `\n \t \r \0 \\ \"`.
 
-Not yet: `char`, arrays, pointers, `for`, `* /`, parameters, globals, `#include`, `&&` `||` `!`.
+Not yet: `* /` as binary operators (`*` is only the dereference), globals, pointers to pointers,
+`char` return types, `#include`, `&&` `||` `!`.
 
 ## Emitted shape
 
@@ -42,6 +49,10 @@ Refused with a message (checked by `tools/test_cc.py`):
 - Strings longer than 254 bytes (`rt_puts` indexes with Y), strings with `\\0` (it would end
   them early), and characters above Latin-1 (`as` stores 8 bits).
 - `*` and `/`, and expressions nested too deeply for the parser.
+- Types must agree: a number is not a pointer (and the literal 0 is the null pointer); a pointer
+  points at the same base. Checked at assignment, initialisers, arguments and `return`.
+- An array of pointers; `-` of a pointer; parameters on `main` (start passes none).
+- Static variables over 8192 bytes (STATIC_MAX, a project limit the owner may change).
 - Programs needing more than 185 symbols (`as` holds 220 less its 35 builtins).
 
 Accepted, by decision, and documented here for the owner:
@@ -73,6 +84,6 @@ Accepted, by decision, and documented here for the owner:
 ## Open for S17
 
 - The compiler is about 576 lines of Python for this slice (with its tests, 769). Whether it is rewritten in its own
-  language depends on how the next slices (parameters, `char`, arrays) grow it.
+  language depends on how the next slices (globals, `&&`, `#include`) grow it.
 - The runtime routines are about 120 lines of 6502 emitted into every program. Shared routines
   in the kernel or a library would save bytes; that is a decision for S14 v1.
