@@ -12,6 +12,15 @@ set -eu
 branch=${1:?usage: land.sh BRANCH [MESSAGE]}
 msg=${2:-"Merge $branch"}
 
+# CLAUDE.md: commits go out as sandmanbuzz only; refuse before anything is merged if the identity git
+# would use (environment or config) is anything else.
+for who in GIT_AUTHOR_IDENT GIT_COMMITTER_IDENT; do
+    case "$(git var $who)" in
+        *"<344811358+sandmanbuzz@users.noreply.github.com>"*) ;;
+        *) echo "land: $who is not the sandmanbuzz identity; nothing merged" >&2; exit 1 ;;
+    esac
+done
+
 if [ -n "$(git status --porcelain)" ]; then
     echo "land: working tree is not clean; nothing merged" >&2
     exit 1
@@ -39,7 +48,10 @@ if ! git merge --no-ff --no-commit "$branch"; then
 fi
 
 # make test-host skips the tests that need a built kernel (BUILT is set only when build/ exists), so build first.
-make clean >/dev/null 2>&1 || true
+if ! make clean >/dev/null 2>&1; then
+    echo "land: make clean failed (build/ not writable?); aborted, nothing committed" >&2
+    exit 1
+fi
 if ! make >/dev/null 2>&1 || ! make test-host; then
     echo "land: host suite is red on the merged tree; aborted, nothing committed" >&2
     exit 1
