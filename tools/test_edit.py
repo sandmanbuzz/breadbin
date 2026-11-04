@@ -107,6 +107,25 @@ class Refusal(unittest.TestCase):
         self.assertEqual(edit(b"hello\n", []).exit, 0)
         self.assertEqual(edit(None, [ord("q"), SAVE]).files[F], b"q")
 
+    def test_refusal_never_sets_console_mode_1(self):
+        r = edit(b"a" * (TEXTMAX + 1), [])
+        self.assertEqual(r.exit, 1)
+        self.assertTrue(not r.conmodes or r.conmodes[-1] == 0, r.conmodes)
+        self.assertNotIn(1, r.conmodes)
+
+    def test_a_normal_quit_leaves_console_mode_0(self):
+        r = edit(b"hello\n", [QUIT])
+        self.assertEqual(r.exit, 0)
+        self.assertEqual(r.conmodes, [1, 0])
+
+    def test_a_full_buffer_says_so_and_the_save_is_unchanged(self):
+        full = (b"x" * 99 + b"\n") * (TEXTMAX // 100) + b"z" * (TEXTMAX % 100)
+        self.assertEqual(len(full), TEXTMAX)
+        r = edit(full, [ord("q")])
+        self.assertIn(" buffer full", screen_of(r.out[:r.marks[1]]).line(24))
+        r = edit(full, [ord("q"), SAVE])
+        self.assertEqual(r.files[F], full)
+
 
 @unittest.skipIf(SKIP, SKIP)
 class Redraw(unittest.TestCase):

@@ -1,7 +1,7 @@
 """Run a Breadbin CX program (build/root/bin/*) on the host under py65, with the few syscalls a
 file-to-file tool needs answered in Python. For testing programs like `as` without VICE:
 there is no kernel, no scheduler, no disk, only the program's own 6502 code and the library linked
-into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, UNLINK, RENAME, EXIT, CONMODE (a no-op); fds 1 and 2
+into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, UNLINK, RENAME, EXIT, CONMODE (recorded in r.conmodes); fds 1 and 2
 collect output. With stdin=bytes, fd 0 serves those bytes (EOF after them) and `r.marks` records len(r.out)
 at every read of fd 0, so a test can see what one key made the program draw; without it fd 0 is EBADF.
 
@@ -45,6 +45,7 @@ class Result:
         self.err = b""
         self.files = {}
         self.steps = 0
+        self.conmodes = []            # the mode argument of each CONMODE call, in order
         self.marks = []               # len(out) at each read of fd 0 (stdin=...)
         self.header = None            # the CX header of the program's image, for inspection
 
@@ -152,6 +153,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
                 else:
                     ret(True, EBADF)
             elif name == "CONMODE":
+                res.conmodes.append(cpu.a)
                 ret(False, 0)
             elif name == "READ":
                 if fd == 0 and stdin is not None:
