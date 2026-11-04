@@ -631,3 +631,36 @@ Build: the kernel and sources at aadea2f are identical to 9ccef95 (sha256 `743fd
 - The root-mount stall mitigation (13 of 13 before the kernel changed, per CLAUDE.md) holds on this build: 5 of 5 here plus the R8 boot (one boot, 32 s).
 
 **Not run (R13 list):** `format` (the list says expendable media only; the Ultimate's emulated drive with a scratch image is the right target, not the physical disk, and needs a second drive configured: not done this turn); the other-drive mount `mount 9 /mnt` (needs a second drive image); `tests.test_keyboard` on the Ultimate (not run this turn). Also not run: the JiffyDOS-ROM set on hardware.
+
+### 2026-11-04, R13b: a prg/root build mismatch gives "exec format error" on mount (Agent A)
+
+Ultimate firmware 1.1.0, JiffyDOS KERNAL. Every run used one drive A (bus 9) image at a time; `/Temp/breadbin.d64` was restored read-only after each run; scratch uploads were deleted and verified gone; the `ultimate` lock was held for each run only.
+
+- **Run 1 (all-zero d64 on drive A):** `mount 9 /mnt` gave "mount: /mnt: no such device or no disk". An all-zero image has no BAM, so this shows nothing about mount. Not a test of the format path.
+- **Run 2 (c1541-formatted blank on drive A, prg sha256 `e8932954…`, kernel hash `$6D7E`):** `mount 9 /mnt` gave "mount: /mnt: exec format error". The root disk `/Temp/breadbin.d64` carries `/lib/km/cbm` with hash `$7162`, so the prg and the root modules came from different builds. Which disk was root in this run was not checked (root follows the boot drive `$BA`).
+- **Run 3 (matched pair, prg sha256 `07f911f8…` from main `6afb2cb`, the same build's image uploaded as a new name; root forced to drive 9 with `load"*",9,1`; `$00BA` read back as 9):** login as root worked. `mount` listed "drive 9 on / (c64fs)" and "reu on /tmp (c64fs)". `mount 9 /mnt` gave "mount: /mnt: device busy", because drive 9 is the root device. No "exec format error".
+- **Reading:** a prg built from a different kernel than the root disk's modules gives "exec format error" on mount (the module hash check in `src/kernel/exec.s`, reached through `sys_mount`, `cbm_ensure` and `mod_load`). Run 3 supports this but does not prove the mismatch was the only cause, since the root disk changed between runs. The earlier root was not established.
+- **Not run:** the raw magic read-back at d64 offset 96256 (needs a blank disk on a device other than root); the other-drive mount of a formatted blank (needs a second drive); `format`; `tests.test_keyboard` (H2: no key injection on firmware 1.1.0, so this test cannot run on the Ultimate).
+- **Not changed:** the physical 1541 and bus 8 were not touched; no bus number was changed.
+
+**Rule for next time:** check the prg and root hashes before booting (`/lib/km/cbm` bytes 15-16 against `build/khash.inc`, or the hash of the module built beside the prg). A root on the same device as the target gives "device busy" on `mount`, so the other-drive test needs a second device.
+
+### 2026-11-04, R13d: format and magic read-back on drive B (bus 10): FAIL at the magic check (Agent A)
+
+Ultimate firmware 1.1.0, JiffyDOS. Root on drive A (bus 9) with the matched pair (prg sha256 `07f911f8…`, kernel hash `$7162` in both the prg and `/lib/km/cbm`), booted with `load"*",9,1`, `$00BA` read back as 9. Drive B was enabled on bus 10 with a c1541-formatted scratch image (new name, FTP-uploaded, fetched back at 174848 bytes). Bus 10 had no other device. Drive B was disabled again, drive A restored read-only to `/Temp/breadbin.d64`, both uploads deleted and verified gone, lock released after the run.
+
+- **As found:** A enabled, bus 9, JiffyDOS 1541-II ROM, `/Temp/breadbin.d64`. B disabled, bus 9, 1541 ROM, no image.
+- **`mount`:** "drive 9 on / (c64fs)", "reu on /tmp (c64fs)"; no drive 10 line.
+- **`mount 10 /mnt`:** printed nothing; straight back to the prompt. Neither the "no such device" line nor a cbm dos line.
+- **`format 10`:** prompt "erase everything on drive 10? (y/n)", answered y, 240 s wait, prompt back.
+- **Magic check:** bytes 96256..96260 of the image fetched after the run: `00 00 00 00 00` (not "C64FS"). The whole file had 171 non-zero bytes. A second fetch after B was removed gave the same zeros at that offset.
+- **Not run:** a second `mount 10 /mnt`, `ls /mnt`, `umount /mnt`, the other-drive c64fs mount.
+- **Not diagnosed.** Whether the Ultimate mounted the image on drive B at all (the agent set the config but did not record a mount call for B), and why `mount 10` is silent, are open. The next run must check drive B's mounted image in the drive table before `format`, and read the shell's answer to `mount 10` before going further.
+
+R13b is still open: the other-drive mount and the magic read-back are not proven. `format` and `test_keyboard` (H2) are not run.
+
+### 2026-11-04, R13d correction (Agent A)
+
+Retracts one reading in the R13d entry above. "`mount 10 /mnt` printed nothing; neither the 'no such device' line nor a cbm dos line" was wrong: `mount` prints nothing on success (`src/bin/mount.s:42-61`, `src/kernel/cbm.s:204-205`), so the silent line means drive 10 mounted. The run then called `format 10` with drive 10 mounted. `format` refuses a mounted drive with EBUSY and prints (`src/bin/format.s:269-273`, `src/kernel/cbm.s:238-246`), so the "prompt back after 240 s" in that run may have been that refusal, not a format. The last printed line of the format was not recorded, so this is not proven. The all-zero magic is consistent with a refused format. Also: `format 10 cbm` writes no magic (`src/bin/format.s:150-152`); the R13d run used the default `c64fs`.
+
+Rule for the next run: do not run `mount 10` before `format 10`; check drive B's mounted image in the drive table; record the last printed line of the format verbatim.
