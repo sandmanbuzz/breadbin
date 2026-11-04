@@ -346,6 +346,7 @@ class REURoot(unittest.TestCase):
         with self.boot() as v:
             v.wait_shell()
             self.assertIn("reu: 4 x 64k", v.screen())
+            self.assertIn("root on reu", v.screen())
             out = v.run("ls /bin").split()
             for name in ["cat", "ls", "sh", "init", "grep"]:
                 self.assertIn(name, out)
@@ -383,14 +384,32 @@ class REURoot(unittest.TestCase):
         with self.boot() as v:
             v.wait_for("cannot mount root", timeout=60)
 
+    def test_nblocks_beyond_the_reu_refused(self):
+        with open(self.reu, "r+b") as f:     # a disk bigger than the REU (4 banks = 1024 blocks)
+            f.seek(376 * 256 + 6)
+            f.write(b"\x00\x05")
+        with self.boot() as v:
+            v.wait_for("cannot mount root", timeout=60)
+            self.assertIn("too big", v.screen())
+
     def test_drive_wins_over_reu_image(self):
-        """Classic and Expanded unchanged: with a drive the REU is /tmp, even when it holds a disk."""
+        """Classic and Expanded unchanged: with a drive the root is the disk, and an REU that
+        holds a root image is left alone (no /tmp mkfs over it)."""
+        with open(self.reu, "rb") as f:
+            before = f.read()
         with Vice(IMAGE, reu=256, reu_image=self.reu) as v:
             v.wait_shell()
-            self.assertIn("/tmp", v.run("df"))
+            self.assertIn("reu holds a root image: /tmp not on reu", v.screen())
+            self.assertNotIn("root on reu", v.screen())
+            # /tmp is the root disk's directory, not a mount
+            self.assertNotIn("/tmp", v.run("df"))
             v.run("echo hi > /tmp/x")
             self.assertEqual(v.run("cat /tmp/x"), "hi")
             self.assertIn("welcome", v.run("cat /etc/motd"))
+        with open(self.reu, "rb") as f:
+            after = f.read()
+        self.assertEqual(before[:18 * 256], after[:18 * 256])
+        self.assertEqual(before[376 * 256:377 * 256], after[376 * 256:377 * 256])
 
 
 class Cache(unittest.TestCase):
