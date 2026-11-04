@@ -558,6 +558,24 @@ class AsV8(unittest.TestCase):
         self.assertTrue(r.files.get("/~o", b"")[:3] == b"CX\x01", sorted(r.files))
         self.assertIn(b"~o", r.err)
 
+    def test_cbm_dos_rename_does_not_replace_so_an_existing_output_is_kept_and_the_temporary_named(self):
+        # src/mod/cbm.s cbm_rename sends "R0:new=old"; CBM DOS refuses an existing new name (error 63) and the
+        # kernel maps it to EIO (src/kernel/file.s sys_rename does no existence check on this path, unlike c64fs).
+        # as must then leave the old output alone, keep the complete temporary and name it. Modelled in asim
+        # only (rename_noreplace); not observed on a drive, where DOS answering 63 is from the usual DOS
+        # behaviour and the Ultimate note in docs/hardware-notes.md (UCI), not a measurement of the CBM module.
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, rename_noreplace=True)
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertEqual(r.files.get("/o"), b"OLD")
+        self.assertEqual(r.files.get("/~o", b"")[:3], b"CX\x01")
+        self.assertIn(b"cannot rename the output", r.err)
+        self.assertIn(b"~o", r.err)
+        # a first assembly (no existing output) still works on that path
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, rename_noreplace=True)
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][:3], b"CX\x01")
+        self.assertNotIn("/~o", r.files)
+
     def test_a_user_file_at_the_temporary_name_is_not_destroyed(self):
         # the temporary is derived from the output name; a file already there is refused, not truncated
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~o": b"USER"})

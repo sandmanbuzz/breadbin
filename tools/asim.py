@@ -58,10 +58,10 @@ def cx_load(data, page):
     return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fail_rename=None, fail_read_open=None):
+def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
-    fail_rename=n makes the n-th RENAME fail; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs)."""
+    fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs)."""
     if MPU is None:
         raise RuntimeError("py65 not installed")
     with open(path or os.path.join(ROOT, "build", "root", "bin", prog), "rb") as f:
@@ -191,6 +191,8 @@ def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fa
                 renames[0] += 1
                 if renames[0] == fail_rename or toolong(new_) or toolong(old_):
                     ret(True, ENAMETOOLONG if toolong(new_) or toolong(old_) else ENOENT)
+                elif rename_noreplace and new_ in res.files and old_ in res.files:
+                    ret(True, 5)              # EIO, as cbm_rename maps any DOS error; nothing is touched
                 elif old_ in res.files:
                     res.files[new_] = res.files.pop(old_)
                     ret(False, 0)
