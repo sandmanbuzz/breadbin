@@ -3,6 +3,8 @@ import re
 import sys
 import tempfile
 import unittest
+import contextlib
+import io
 import zipfile
 from pathlib import Path
 
@@ -38,14 +40,15 @@ class TestWebdemo(unittest.TestCase):
         self.tmp.cleanup()
 
     def bundle(self, prg=None, reu=None):
-        return W.bundle(self.tool, prg or self.prg, reu or self.reu, self.d / "out")
+        with contextlib.redirect_stdout(io.StringIO()):
+            return W.bundle(self.tool, prg or self.prg, reu or self.reu, self.d / "out")
 
     def test_bundle_layout(self):
         game = self.bundle()
         out = self.d / "out"
         self.assertTrue((out / "data" / "loader.js").exists())
         self.assertTrue((out / "LICENSES" / "A.txt").exists())
-        self.assertTrue((out / "LICENSES" / "build" / "webdemo.py").exists())
+        self.assertTrue((out / "LICENSES" / "build" / "breadbin_webdemo.py").exists())
         self.assertIn(game, (out / "index.html").read_text())
         with zipfile.ZipFile(out / game) as z:
             self.assertEqual(sorted(z.namelist()), ["breadbin.prg", "breadbin.reu"])
@@ -76,7 +79,7 @@ class TestWebdemo(unittest.TestCase):
         self.bundle()
         html = (self.d / "out" / "index.html").read_text()
         self.assertNotIn(str(self.d), html)
-        self.assertNotIn("/home/", html)
+        self.assertNotIn(os.path.expanduser("~"), html)
         self.assertEqual(len(re.findall(r'EJS_gameUrl = "[^"]+"', html)), 1)
 
 
