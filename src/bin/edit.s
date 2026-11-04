@@ -7,6 +7,8 @@
 ; The screen is driven through the console: raw key mode (conmode) and
 ; the ESC = / ESC K / ESC R escapes. Rows 0-23 show text (39 columns),
 ; row 24 is the status line.
+; at_end borrow fix: upstream kpatr1981/breadbin, commit 6b66acc (MIT, Copyright 2026
+; Konstantinos Patronas; the commit is by tuksutukio). Ported unchanged in logic.
 .include "../../include/breadbin.inc"
 .import argn, print
 
@@ -560,12 +562,17 @@ redraw: jsr fix_top
 at_end: lda p
         sec
         sbc #<text
-        cmp tlen
-        bne @r
+        pha
         lda p+1
         sbc #>text
         cmp tlen+1
-@r:     rts
+        bne @no
+        pla
+        cmp tlen
+        rts
+@no:    pla
+        lda #1              ; Z clear
+        rts
 
 status: jsr out_start
         lda #ROWS
