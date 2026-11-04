@@ -74,7 +74,7 @@ ep_done: .res 1          ; this boot has given the disk a new build id (it is be
 ep_x:    .res 1
 
 .export bwrite, buf_idx_ptr, cache_attach, sys_cache
-.import mod_load, mod_unload, mod_list, p_uid, magic
+.import mod_load, mod_unload, mod_list, p_uid, magic, con_puts_ax
 
 .segment "RODATA"
 ; first linear block of each track (tracks 1..36), 16-bit
@@ -113,17 +113,45 @@ blk_init:
         jsr iec_open
         lda #1
         sta dev_present
+        lda #$ff
+        sta dev_drive+5         ; DEV_UCI is no drive, and 0 would read as the REU
         php                     ; carry: no drive answered
         jsr reu_detect
+        jsr reu_sb
         plp
-        bcc @r
+        bcc @drv
         ; No drive: if the REU holds a c64fs disk (block b at REU offset b*256, the layout
-        ; of an REU image made by `mkimage.py reu`; magic and version of the superblock),
-        ; it is the root device. There is no root_reu flag: dev_drive[0] = 0 says so, the
-        ; same as dev_drive[1] for the RAM disk, and bread/bwrite pick the REU by it.
-        lda reu_banks
+        ; of an REU image made by `mkimage.py reu`), it is the root device. There is no
+        ; root_reu flag: dev_drive[0] = 0 says so, the same as dev_drive[1] for the RAM
+        ; disk, and bread/bwrite pick the REU by it.
+        cmp #1
+        beq @adopt
+        cmp #2
+        bne @r
+        lda #<s_big
+        ldx #>s_big
+        jmp con_puts_ax         ; refused: the mount fails below
+@adopt: lda #0
+        sta dev_drive           ; dev 0 is the REU,
+        sta dev_present+1       ; and there is no /tmp RAM disk (it would overwrite the root)
+        lda #<s_ronreu
+        ldx #>s_ronreu
+        jmp con_puts_ax
+        ; A drive answered: an REU root image is not ours to format as /tmp.
+@drv:   cmp #1
+        bne @r
+        lda #0
+        sta dev_present+1       ; no mkfs, no /tmp mount: /tmp is the root disk's directory
+        lda #<s_keep
+        ldx #>s_keep
+        jmp con_puts_ax
+@r:     rts
+
+; reu_sb: A = 1 the REU holds a root image (c64fs superblock at block SB_BLOCK, version 1,
+; nblocks within the REU), 2 it has the magic but does not fit, 0 none.
+reu_sb: lda reu_banks
         cmp #3                  ; the superblock is in bank 1; the disk reaches into bank 2
-        bcc @r
+        bcc @no
         lda #<bufs              ; free this early
         sta bp
         lda #>bufs
@@ -136,16 +164,27 @@ blk_init:
         ldy #4
 @m:     lda bufs,y
         cmp magic,y
-        bne @r
+        bne @no
         dey
         bpl @m
         lda bufs+5              ; version: another one is not ours to mount
         cmp #1
-        bne @r
-        lda #0
-        sta dev_drive           ; dev 0 is the REU,
-        sta dev_present+1       ; and there is no /tmp RAM disk (it would overwrite the root)
-@r:     rts
+        bne @no
+        lda bufs+7              ; nblocks (16 bit) <= reu_banks * 256
+        cmp reu_banks
+        bcc @ok
+        bne @big
+        lda bufs+6
+        bne @big
+@ok:    lda #1
+        rts
+@big:   lda #2
+        rts
+@no:    lda #0
+        rts
+s_ronreu: .byte "root on reu", 10, 0
+s_keep: .byte "reu holds a root image: /tmp not on reu", 10, 0
+s_big:  .byte "reu root image too big for the reu", 10, 0
 
 .segment "CODE"
 ; iec_open: X = dev. Open the drive's command channel (15) and a data channel
