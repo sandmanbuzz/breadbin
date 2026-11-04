@@ -19,8 +19,9 @@ def defined_labels(text):
 
 def branch_targets(text):
     # sys_* names are predefined by `as` (the system call table), not labels of this file
+    # relative targets (*+5) name no label; sys_* names are predefined by `as`
     return [t for t in re.findall(r"^\s+(?:jmp|beq|bne|bcc|bcs)\s+(\S+)", text, re.M)
-            if not t.startswith("sys_")]
+            if not t.startswith(("sys_", "*"))]
 
 
 HELLO = """\

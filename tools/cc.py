@@ -392,12 +392,11 @@ cc_lt:                          ; acc = 1 if tmp < acc (unsigned), else 0
         sbc acc
         lda tmp+1
         sbc acc+1
-        bcc cc_lt_1
+        bcc *+11                ; borrow: the 1 below (relative: no label to spend)
         lda #0
         sta acc
         sta acc+1
         rts
-cc_lt_1:
         lda #1
         sta acc
         lda #0
@@ -406,16 +405,15 @@ cc_lt_1:
 cc_eq:                          ; acc = 1 if tmp == acc, else 0
         lda tmp
         cmp acc
-        bne cc_eq_0
+        bne *+21
         lda tmp+1
         cmp acc+1
-        bne cc_eq_0
+        bne *+13
         lda #1
         sta acc
         lda #0
         sta acc+1
         rts
-cc_eq_0:
         lda #0
         sta acc
         sta acc+1
@@ -423,12 +421,11 @@ cc_eq_0:
 cc_not:                         ; acc = 1 if acc == 0, else 0
         lda acc
         ora acc+1
-        beq cc_not_1
+        beq *+11
         lda #0
         sta acc
         sta acc+1
         rts
-cc_not_1:
         lda #1
         sta acc
         lda #0
@@ -712,6 +709,9 @@ class Gen:
         return v
 
     def add_string(self, data):
+        for lbl, old in self.strings:       # one label per distinct string
+            if old == data:
+                return lbl
         lbl = f"s_{len(self.strings) + 1}"
         self.strings.append((lbl, data))
         return lbl
@@ -834,11 +834,10 @@ class Gen:
             self.ins("rts")
         elif kind == "if":
             _, cond, then, other, _line = s
-            else_l, end_l, yes_l = self.new_label(), self.new_label(), self.new_label()
+            else_l, end_l = self.new_label(), self.new_label()
             self.test(cond)
-            self.ins(f"bne {yes_l}")
+            self.ins("bne *+5")         # true: skip the 3-byte jump to the else part (no label)
             self.ins(f"jmp {else_l}")
-            self.lab(yes_l)
             self.stmt(then)
             self.ins(f"jmp {end_l}")
             self.lab(else_l)
@@ -847,12 +846,11 @@ class Gen:
             self.lab(end_l)
         elif kind == "while":
             _, cond, body, _line = s
-            top_l, end_l, yes_l = self.new_label(), self.new_label(), self.new_label()
+            top_l, end_l = self.new_label(), self.new_label()
             self.lab(top_l)
             self.test(cond)
-            self.ins(f"bne {yes_l}")
+            self.ins("bne *+5")         # true: skip the 3-byte jump out of the loop (no label)
             self.ins(f"jmp {end_l}")
-            self.lab(yes_l)
             self.stmt(body)
             self.ins(f"jmp {top_l}")
             self.lab(end_l)

@@ -245,5 +245,22 @@ class AsZeroPageAndNames(unittest.TestCase):
         self.assertIn(b"longer than 14", r.err)
 
 
+@unittest.skipIf(SKIP, SKIP)
+class AsSymbolLimit(unittest.TestCase):
+    """The table holds 255 names, 35 of them builtins: 220 labels of a program (was 185)."""
+
+    def labels(self, n):
+        return b"".join(b"l%d: nop\n" % i for i in range(n))
+
+    def test_220_labels_fit(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.labels(220)})
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_221_labels_are_refused_loudly(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.labels(221)})
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"too many symbols", r.err)
+
+
 if __name__ == "__main__":
     unittest.main()
