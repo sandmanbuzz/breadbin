@@ -536,6 +536,7 @@ instruction:
         jsr adv
         jsr expect_x
         jsr expect_rp
+        jsr zp_check
         lda #9
         jmp emit_zp
 @ind1:  jsr expect_rp
@@ -545,6 +546,7 @@ instruction:
         bne @ind
         jsr adv
         jsr expect_y
+        jsr zp_check
         lda #10
         jmp emit_zp
 @ind:   lda #11
@@ -638,6 +640,23 @@ emit_zp:
         jsr emit_op
         lda ev
         jmp emit
+
+; zp_check: the pointer of (zp),y or (zp,x) must be in zero page; the 6502 has no other form.
+; Pass 1 values are not final (a forward reference is 0 there), so the check is made in pass 2.
+zp_check:
+        lda pass
+        cmp #2
+        bne @ok
+        lda erel            ; a label or * is an image offset, not a runtime zero-page address
+        bne @bad
+        lda ehl             ; < and > of a label are not zero-page addresses either: write the constant
+        bne @bad
+        lda ev+1
+        beq @ok
+@bad:   lda #<e_zpind
+        ldx #>e_zpind
+        jmp error
+@ok:    rts
 
 emit_abs:
         jsr need_mode
@@ -1055,11 +1074,15 @@ getname:
         jsr isidchar
         bcs @e
         cpx #14
-        bcs @skip
+        bcs @toolong        ; a name is kept whole or refused: a cut name collided with its prefix
         sta name,x
         inx
-@skip:  jsr adv
+        jsr adv
         jmp @l
+@toolong:
+        lda #<e_name
+        ldx #>e_name
+        jmp error
 @e:     stx nlen
         lda #0
 @p:     cpx #16
@@ -1334,6 +1357,8 @@ e_mode:  .byte "bad addressing mode", 0
 e_range: .byte "branch out of range", 0
 e_undef: .byte "undefined symbol", 0
 e_dup:   .byte "duplicate symbol", 0
+e_zpind: .byte "(zp),y and (zp,x) need a zero page pointer", 0
+e_name:  .byte "name longer than 14 characters", 0
 e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
