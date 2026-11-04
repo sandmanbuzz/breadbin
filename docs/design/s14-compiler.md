@@ -4,7 +4,7 @@
 writes no kernel bytes. The aim is to settle the language and the shape of the emitted code
 before S17 (self-host or stay in assembly) is decided. `tools/test_cc.py` is its host test.
 
-## The subset (slice 2)
+## The subset (slice 3)
 
 - `int` only: 16 bit, unsigned in comparisons (`<`, `>`, `<=`, `>=` compare unsigned).
 - Functions with typed parameters (`int` or `char`, passed on the software stack and stored in
@@ -21,8 +21,17 @@ before S17 (self-host or stay in assembly) is decided. `tools/test_cc.py` is its
 - `puts("...")`: the one builtin. It prints a string literal through `sys_write`, one byte at a
   time, the way `rootfs/home/hello.s` does. String escapes: `\n \t \r \0 \\ \"`.
 
-Not yet: `* /` as binary operators (`*` is only the dereference), globals, pointers to pointers,
-`char` return types, `#include`, `&&` `||` `!`.
+Slice 3 adds:
+
+- Globals: `int|char [*] name [ [n] ] [= literal]` at top level, static (`g_<name>`), initialised
+  as data (a number, a string for a char array or char pointer, or 0 for a pointer).
+- `*` and `/` as binary operators: runtime routines in the emitted program (`cc_mul`: the low 16
+  bits; `cc_div`: unsigned, and dividing by 0 gives 65535).
+- A string literal is the address of its bytes (a char pointer); a char array takes a string,
+  its size inferred when left out (a local copies it in each time the declaration runs).
+
+Not yet: pointers to pointers, `char` return types, `#include`, `&&` `||` `!`, arrays of pointers
+and string arrays of pointers (use char arrays), `*` on pointers (`p * 2` is refused).
 
 ## Emitted shape
 
@@ -48,7 +57,7 @@ Refused with a message (checked by `tools/test_cc.py`):
   and ignores case).
 - Strings longer than 254 bytes (`rt_puts` indexes with Y), strings with `\\0` (it would end
   them early), and characters above Latin-1 (`as` stores 8 bits).
-- `*` and `/`, and expressions nested too deeply for the parser.
+- Expressions nested too deeply for the parser.
 - Types must agree: a number is not a pointer (and the literal 0 is the null pointer); a pointer
   points at the same base. Checked at assignment, initialisers, arguments and `return`.
 - An array of pointers; `-` of a pointer; parameters on `main` (start passes none).
