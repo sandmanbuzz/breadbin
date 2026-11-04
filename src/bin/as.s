@@ -22,6 +22,7 @@ tq   = $27
 NSYM   = 255        ; names in the table: 35 builtins and the program's labels (one byte of count, so 255 at most)
 SYMSZ  = 18             ; name[15] value[2] flags
 OBMAX  = 8192
+POOLSZ = $9A00         ; the user pool, $0800 up to KSTART-1 (src/kernel/k.inc); test_as checks it
 RMAX   = 1024
 F_DEF  = 1
 F_REL  = 2
@@ -188,6 +189,7 @@ write_out:
         ldx #>hdr
         ldy #9
         jsr wr
+        bcs @werr              ; a full disk fails a write: say so, do not leave a short file with exit 0
         lda hw
         sta r1
         lda hw+1
@@ -198,6 +200,7 @@ write_out:
         sta r0+1
         lda fd
         jsr SYS_WRITE
+        bcs @werr
         lda nrel
         asl a
         sta r1
@@ -210,8 +213,18 @@ write_out:
         sta r0+1
         lda fd
         jsr SYS_WRITE
+        bcs @werr
         lda fd
-        jmp SYS_CLOSE
+        jsr SYS_CLOSE
+        bcs @werr              ; the close is where a buffered write can fail
+        rts
+@werr:  lda fd
+        jsr SYS_CLOSE          ; its result does not matter now: the write has failed
+        lda #<s_wrerr
+        ldx #>s_wrerr
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
 wr:     sta r0
         stx r0+1
         sty r1
@@ -446,7 +459,7 @@ d_ress: jsr expr                ; no bytes stored: zeros are filled in only if s
         ldx #>e_resrel
         jmp error
 @sign:  lda ev+1                ; a count of $9A00 (the user pool, 39424 bytes) or more cannot be loaded
-        cmp #>39424             ; a wrapped one (0-1 is $FFFF) is that big too
+        cmp #>POOLSZ            ; a wrapped one (0-1 is $FFFF) is that big too
         bcc @k
         lda #<e_resbig
         ldx #>e_resbig
@@ -1373,6 +1386,7 @@ d_res:   .byte "res", 0
 d_text:  .byte "text", 0
 s_usage: .byte "usage: as source output", 10, 0
 s_as:    .byte "as: line ", 0
+s_wrerr:  .byte "as: cannot write the output", 10, 0
 s_long:  .byte "line too long (over 254 characters)", 0
 s_colon: .byte ": ", 0
 s_bytes: .byte " bytes, ", 0
@@ -1390,7 +1404,7 @@ e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
 e_resrel: .byte "res count is an address, not a number", 0
-e_resbig: .byte "res count is too big for the pool (39424 bytes)", 0
+e_resbig: .byte "res count is too big for the pool", 0
 e_reloc: .byte "bad relocatable expression", 0
 .macro SYM n, v
         .byte n, 0
