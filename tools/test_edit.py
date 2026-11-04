@@ -218,6 +218,25 @@ class Redraw(unittest.TestCase):
                 self.assertEqual(s.line(n), want, "trial %d, row %d: start %r keys %s" % (
                     trial, n, start, bytes(keys).hex()))
 
+    def test_the_screen_is_a_window_of_the_text_after_random_edits_in_a_long_file(self):
+        # past one page the view scrolls: the rows must still be 24 consecutive lines of the saved file
+        rng = random.Random(64)
+        start = b"".join(b"line %02d %s\n" % (i, b"." * (i % 7 * 9)) for i in range(40))
+        for trial in range(12):
+            keys = []
+            for _ in range(rng.randint(10, 60)):
+                keys.append(rng.choice([DOWN] * 6 + [UP] * 4 + [KILL, RET, DEL, RIGHT, LEFT, HOME,
+                                                               ord("a"), ord("b")]))
+            r = edit(start, keys + [SAVE])
+            lines = r.files[F].decode("latin-1").split("\n")
+            if r.files[F].endswith(b"\n"):
+                lines.pop()
+            s = Screen()
+            s.feed(r.out[:r.marks[len(keys) + 1]])
+            rows = [s.line(n) for n in range(24)]
+            want = [[l[:39].rstrip() for l in (lines[n:n + 24] + [""] * 24)[:24]] for n in range(len(lines))]
+            self.assertIn(rows, want, "trial %d: keys %s\nscreen:\n%s" % (trial, bytes(keys).hex(), "\n".join(rows)))
+
 
 if __name__ == "__main__":
     unittest.main()
