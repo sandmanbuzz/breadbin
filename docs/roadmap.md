@@ -9,6 +9,25 @@ Where this fork is heading, and the first stories. Written 2026-10-30 after a fi
 - **c64fs v1 compatibility is dropped.** There are no known users. The v1 code paths and on-disk format can go. If a second filesystem returns later, it comes back as a backend behind the filesystem interface below.
 - **Everything new is detected at runtime**, not assumed, so one disk still boots everywhere.
 
+## Product push (2026-11-04, living plan)
+
+Why: the engineering is ahead of upstream, the experience is behind. A prospective user meets a shell without history, completion, `&&` or `||`, slow loads, and nothing to try without hardware. This plan spends the foundation on visible wins. It is a living plan: reorder or drop items when evidence says so. The owner has not used the product; treat QoL choices as guesses until someone uses it.
+
+Order:
+
+1. **P1: QoL bundle (target: 0 kernel bytes).** Shell history, TAB completion (upstream 4abb291), `$?` with `&&` and `||` (exit-status plumbing). Shape from upstream b64fd2d; see `docs/design/upstream-survey.md`. Done when a scripted session in VICE shows each.
+2. **P2: Web demo, also our living benchmark.** Port upstream `tools/webdemo.py` (MIT; upstream aa2f787, cache fix 9210ff2: the zip is named by content hash because EmulatorJS caches by URL). Emulator: EmulatorJS with the libretro VICE x64sc core on MEGA65 Open ROMs, built or fetched outside the repo. GPL parts are never committed here; ship LICENSES and a source offer with any hosted copy. We need no Commodore ROM, since we replace the KERNAL. Blocker: the demo has no drive emulation, so the root filesystem must come from the REU. New item "REU root device": boot the root from an REU preloaded with the image. It extends the REU block cache; demo first, Expanded tier, Classic unaffected. Hosting (itch.io or GitHub Pages) is an owner call. The demo's "try it" script (login, a few commands, edit, `as`) doubles as a smoke benchmark.
+3. **P3: Ultimate showcase.** Networking over UCI (network targets). A spike first, to measure feasibility and module bytes; then one user-facing tool (fetch a file, or a telnet client). Goal: something only an Ultimate owner can do, and proof that the module design pays.
+4. **P4: Soft launch.** A tagged 0.x and a short "why this fork" page, gated on P1 and P2. Upstream PRs only as useful chunks; the fork is likely too big to PR whole.
+
+Also in flight: fast 1541 reads (M0-8) when a lane is free. Speed is the first thing retro users judge.
+
+Working rules for this push:
+
+- Hater review gates correctness, data loss, kernel and bus changes only. Other work lands on its tests plus a quick read.
+- Governance changes are frozen unless they unblock work.
+- Kernel bytes stay scarce: measure with `make size`.
+
 ## What stops us today
 
 | Limit | Where | Why it matters |
