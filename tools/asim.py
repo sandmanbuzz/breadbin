@@ -1,7 +1,9 @@
 """Run a Breadbin CX program (build/root/bin/*) on the host under py65, with the few syscalls a
 file-to-file tool needs answered in Python. For testing programs like `as` without VICE:
 there is no kernel, no scheduler, no disk, only the program's own 6502 code and the library linked
-into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, UNLINK, RENAME, EXIT; fds 1 and 2 collect output.
+into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, UNLINK, RENAME, EXIT, CONMODE (recorded in r.conmodes); fds 1 and 2
+collect output. With stdin=bytes, fd 0 serves those bytes (EOF after them) and `r.marks` records len(r.out)
+at every read of fd 0, so a test can see what one key made the program draw; without it fd 0 is EBADF.
 
     from asim import run
     r = run("as", ["/home/x.s", "/home/x"], {"/home/x.s": b"..."})
@@ -43,6 +45,8 @@ class Result:
         self.err = b""
         self.files = {}
         self.steps = 0
+        self.conmodes = []            # the mode argument of each CONMODE call, in order
+        self.marks = []               # len(out) at each read of fd 0 (stdin=...)
         self.header = None            # the CX header of the program's image, for inspection
 
 
@@ -58,7 +62,7 @@ def cx_load(data, page):
     return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False):
+def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
     fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs)."""
@@ -148,8 +152,18 @@ def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fa
                     ret(False, 0)
                 else:
                     ret(True, EBADF)
+            elif name == "CONMODE":
+                res.conmodes.append(cpu.a)
+                ret(False, 0)
             elif name == "READ":
-                if fd not in fds or fds[fd][2]:
+                if fd == 0 and stdin is not None:
+                    res.marks.append(len(res.out))
+                    data, stdin = stdin[:r(4)], stdin[r(4):]
+                    addr = r(2)
+                    mem[addr:addr + len(data)] = list(data)
+                    mem[4], mem[5] = len(data) & 0xFF, len(data) >> 8
+                    ret(False, 0)
+                elif fd not in fds or fds[fd][2]:
                     ret(True, EBADF)
                 else:
                     f = fds[fd]
