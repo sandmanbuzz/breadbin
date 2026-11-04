@@ -644,3 +644,17 @@ Ultimate firmware 1.1.0, JiffyDOS KERNAL. Every run used one drive A (bus 9) ima
 - **Not changed:** the physical 1541 and bus 8 were not touched; no bus number was changed.
 
 **Rule for next time:** check the prg and root hashes before booting (`/lib/km/cbm` bytes 15-16 against `build/khash.inc`, or the hash of the module built beside the prg). A root on the same device as the target gives "device busy" on `mount`, so the other-drive test needs a second device.
+
+### 2026-11-04, R13d: format and magic read-back on drive B (bus 10): FAIL at the magic check (Agent A)
+
+Ultimate firmware 1.1.0, JiffyDOS. Root on drive A (bus 9) with the matched pair (prg sha256 `07f911f8…`, kernel hash `$7162` in both the prg and `/lib/km/cbm`), booted with `load"*",9,1`, `$00BA` read back as 9. Drive B was enabled on bus 10 with a c1541-formatted scratch image (new name, FTP-uploaded, fetched back at 174848 bytes). Bus 10 had no other device. Drive B was disabled again, drive A restored read-only to `/Temp/breadbin.d64`, both uploads deleted and verified gone, lock released after the run.
+
+- **As found:** A enabled, bus 9, JiffyDOS 1541-II ROM, `/Temp/breadbin.d64`. B disabled, bus 9, 1541 ROM, no image.
+- **`mount`:** "drive 9 on / (c64fs)", "reu on /tmp (c64fs)"; no drive 10 line.
+- **`mount 10 /mnt`:** printed nothing; straight back to the prompt. Neither the "no such device" line nor a cbm dos line.
+- **`format 10`:** prompt "erase everything on drive 10? (y/n)", answered y, 240 s wait, prompt back.
+- **Magic check:** bytes 96256..96260 of the image fetched after the run: `00 00 00 00 00` (not "C64FS"). The whole file had 171 non-zero bytes. A second fetch after B was removed gave the same zeros at that offset.
+- **Not run:** a second `mount 10 /mnt`, `ls /mnt`, `umount /mnt`, the other-drive c64fs mount.
+- **Not diagnosed.** Whether the Ultimate mounted the image on drive B at all (the agent set the config but did not record a mount call for B), and why `mount 10` is silent, are open. The next run must check drive B's mounted image in the drive table before `format`, and read the shell's answer to `mount 10` before going further.
+
+R13b is still open: the other-drive mount and the magic read-back are not proven. `format` and `test_keyboard` (H2) are not run.
