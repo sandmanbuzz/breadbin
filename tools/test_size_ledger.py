@@ -98,3 +98,24 @@ class Ledger(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Programs(unittest.TestCase):
+    def test_one_row_per_cx_file_with_one_header(self):
+        with tempfile.TemporaryDirectory() as d:
+            bindir = os.path.join(d, "bin")
+            os.mkdir(bindir)
+            open(os.path.join(bindir, ".keep"), "w").close()     # a placeholder, not a program
+            for name, n in (("sh", 3682), ("as", 6704)):
+                with open(os.path.join(bindir, name), "wb") as f:
+                    f.write(b"x" * n)
+            ledger = os.path.join(d, "programs.tsv")
+            rows = size_ledger.append_programs(ledger, "abc1234", bindir)
+            self.assertEqual(rows, [("abc1234", "as", 6704), ("abc1234", "sh", 3682)])
+            size_ledger.append_programs(ledger, "def5678", bindir)
+            lines = open(ledger).read().splitlines()
+            self.assertEqual(lines[0], "\t".join(size_ledger.PROGRAM_HEADER))
+            self.assertEqual(len(lines), 1 + 4)                  # header once, two rows per run
+            self.assertEqual(lines[1], "abc1234\tas\t6704")
+            self.assertEqual(lines[4], "def5678\tsh\t3682")
+
