@@ -19,7 +19,7 @@ import sys
 KEYWORDS = {"int", "if", "else", "while", "return"}
 MAX_DEPTH = 31                       # cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
-LINE_BYTES = 16                      # .byte values per emitted line (as reads at most 127 characters a line)
+LINE_BYTES = 16                      # .byte values per emitted line (as keeps at most 254 characters a line, see docs/design/s13-as-limits.md)
 SYMTABLE = 185                       # as NSYM 220 less its 35 builtins
 
 TOKEN = re.compile(r"""
