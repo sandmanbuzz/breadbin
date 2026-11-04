@@ -146,8 +146,6 @@ class AsOutput(unittest.TestCase):
         self.assertEqual((h["image"], h["bss"]), (1, 4))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 @unittest.skipIf(SKIP, SKIP)
@@ -171,7 +169,16 @@ class AsLongLine(unittest.TestCase):
         self.assertEqual(r.exit, 0, r.err)
         self.assertIn(b"x" * 240 + b"\x00", r.files["/o"][9:9 + head(r.files["/o"])["image"]])
 
+    def test_crlf_does_not_count_against_the_limit(self):
+        src = b's: .byte "' + b"x" * 240 + b'", 0\r\n'
+        r = asim.run("as", ["/s", "/o"], {"/s": src})
+        self.assertEqual(r.exit, 0, r.err)
+
     def test_a_line_of_255_characters_is_refused_loudly(self):
         r = self.image(241)
         self.assertNotEqual(r.exit, 0)
         self.assertIn(b"line too long", r.err)
+
+
+if __name__ == "__main__":
+    unittest.main()

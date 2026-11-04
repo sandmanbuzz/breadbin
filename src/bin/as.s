@@ -230,6 +230,8 @@ readline:
         bcs @eof
         cmp #10
         beq @end
+        cmp #13              ; CR of a CRLF line: not a character
+        beq @c
         cpx #254
         bcs @over
         sta lbuf,x

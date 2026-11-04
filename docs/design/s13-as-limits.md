@@ -10,3 +10,11 @@ the host model, not on the machine. The machine's `as` is the same program.
 | Symbol names | cut at 14 characters: two distinct 15-character names collide and report `duplicate symbol` | **open** (loud, but the message is misleading): the cut is a limit to state, or `as` should refuse names over 14 with the line number |
 | Symbol table | 220 entries, 35 of them builtins (NSYM) | recorded: S14 checks the count for its programs (185 left) |
 | Output | 8 KB (`OBMAX`) | recorded; S12a (tools/as-bss) moves trailing `.res` out of the stored image |
+
+## Open decisions for the owner
+
+- **A comment (or any line) past 254 characters now fails the assembly.** Before, the tail was dropped
+  silently, which did no harm to a comment. Now a long comment is a refused line. Choices: keep
+  the refusal for every line (as now); or refuse only when the overflow is in code, so that a comment
+  past 254 is cut without a word. The second needs quote and comment state in readline.
+- **CRLF lines:** the CR is skipped, so a CRLF file has the same limit as an LF one.
