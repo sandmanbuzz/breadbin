@@ -69,7 +69,7 @@ ba_dev:  .res 1
 .export mt_used, mt_pdev, mt_pino, mt_dev, mt_path, mnt_point, mnt_of_dev, mount_dev
 .import cbm_iget, cbm_lookup, cache_attach
 .import uci_iget, uci_namei, uci_xread
-.export nm_parent
+.export nm_parent, magic
 
 .segment "RODATA"
 magic:  .byte "C64FS"
