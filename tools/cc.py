@@ -26,6 +26,7 @@ MAX_DEPTH = 31                       # cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
 LINE_BYTES = 16                      # .byte values per emitted line (as keeps at most 254 characters a line)
 SYMTABLE = 185                       # as NSYM 220 less its 35 builtins
+STATIC_MAX = 8192                    # bytes of static variables a program may have (a project limit: the owner may change it)
 
 TOKEN = re.compile(r"""
     (?P<ws>\s+) | (?P<lc>//[^\n]*) | (?P<bc>/\*.*?\*/) |
@@ -165,6 +166,8 @@ class Parser:
             self.expect("op", "]")
             if n < 1:
                 raise CompileError(f"line {line}: an array needs at least one element")
+            if ptr:
+                raise CompileError(f"line {line}: an array of pointers is not in this slice")
             arr = n
         if self.at("op", "="):
             self.take()
@@ -486,9 +489,23 @@ class Gen:
             raise CompileError(f"line {line}: {lbl} clashes with {self.names[key]} (as ignores case)")
         self.names[key] = lbl
 
+    def check(self, want, got, node, line, what):
+        """Types must agree: a number is not a pointer, and a pointer must point at the same base.
+        The literal 0 is the null pointer."""
+        if want[1] == got[1]:
+            if want[1] and want[0] != got[0]:
+                raise CompileError(f"line {line}: {what}: a pointer to {got[0]} where a pointer to {want[0]} is needed")
+            return
+        if want[1] and node[0] == "num" and node[1] == 0:
+            return
+        raise CompileError(f"line {line}: {what}: a {'pointer' if got[1] else 'number'} where a "
+                           f"{'pointer' if want[1] else 'number'} is needed")
+
     def program(self, funcs):
         if "main" not in self.funcs:
             raise CompileError("no function main")
+        if self.params["main"]:
+            raise CompileError(f"line {self.funcs['main']}: main takes no parameters (start passes none)")
         self.lab("start")
         self.ins("lda #0")
         self.ins("sta cc_sp")
@@ -500,6 +517,9 @@ class Gen:
         for name, line in self.calls:
             if name not in self.funcs:
                 raise CompileError(f"line {line}: undefined function {name}")
+        total = sum(n for _, n in self.locals)
+        if total > STATIC_MAX:
+            raise CompileError(f"the program's static variables take {total} bytes; the limit is {STATIC_MAX}")
         for name in self.funcs:
             w = self.worst(name, [])
             if w > MAX_DEPTH:
@@ -623,7 +643,8 @@ class Gen:
             _, base, ptr, name, arr, init, line = s
             v = self.declare(name, base, ptr, arr, line)
             if init is not None:
-                self.expr(init)
+                t = self.expr(init)
+                self.check((v.base, v.ptr), t, init, line, "initialise")
                 self.store_scalar(v)
         elif kind == "assign":
             self.assign(s[1], s[2], s[3])
@@ -635,7 +656,7 @@ class Gen:
                 self.ins("sta acc")
                 self.ins("sta acc+1")
             else:
-                self.expr(s[1])
+                self.check(("int", False), self.expr(s[1]), s[1], s[2], "return")
             self.ins("rts")
         elif kind == "if":
             _, cond, then, other, _line = s
@@ -677,7 +698,7 @@ class Gen:
             v = self.var(lhs[1], lhs[2])
             if v.arr is not None:
                 raise CompileError(f"line {line}: cannot assign to the array {lhs[1]}")
-            self.expr(rhs)
+            self.check((v.base, v.ptr), self.expr(rhs), rhs, line, "assign")
             self.store_scalar(v)
             return
         if lhs[0] == "deref":
@@ -690,7 +711,7 @@ class Gen:
         else:
             raise CompileError(f"line {line}: cannot assign to this")
         self.push()
-        self.expr(rhs)
+        self.check((base, False), self.expr(rhs), rhs, line, "store")
         self.pop()
         self.store_through(base)
 
@@ -753,7 +774,8 @@ class Gen:
                 self.call(name, args, line)
             return ("int", False)
         if kind == "neg":
-            self.expr(e[1])
+            if self.expr(e[1])[1]:
+                raise CompileError(f"line {e[2]}: - of a pointer is not in this slice")
             self.ins("lda #0")
             self.ins("sta tmp")
             self.ins("sta tmp+1")
@@ -817,8 +839,8 @@ class Gen:
         params = self.params[name]
         if len(args) != len(params):
             raise CompileError(f"line {line}: {name} takes {len(params)} argument(s), not {len(args)}")
-        for a in args:
-            self.expr(a)
+        for a, (base, ptr, pname, _lbl) in zip(args, params):
+            self.check((base, ptr), self.expr(a), a, line, f"argument {pname} of {name}")
             self.push()
         for base, ptr, _pname, lbl in reversed(params):
             self.pop()

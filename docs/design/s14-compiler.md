@@ -49,6 +49,10 @@ Refused with a message (checked by `tools/test_cc.py`):
 - Strings longer than 254 bytes (`rt_puts` indexes with Y), strings with `\\0` (it would end
   them early), and characters above Latin-1 (`as` stores 8 bits).
 - `*` and `/`, and expressions nested too deeply for the parser.
+- Types must agree: a number is not a pointer (and the literal 0 is the null pointer); a pointer
+  points at the same base. Checked at assignment, initialisers, arguments and `return`.
+- An array of pointers; `-` of a pointer; parameters on `main` (start passes none).
+- Static variables over 8192 bytes (STATIC_MAX, a project limit the owner may change).
 - Programs needing more than 185 symbols (`as` holds 220 less its 35 builtins).
 
 Accepted, by decision, and documented here for the owner:

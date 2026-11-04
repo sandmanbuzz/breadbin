@@ -179,6 +179,38 @@ class Errors(unittest.TestCase):
     def test_array_parameters_are_refused(self):
         self.assertFails("int f(int a[]) { return 0; }\nint main() { return 0; }", "array parameters")
 
+    def test_array_of_pointers_is_refused(self):
+        self.assertFails("int main() { char *a[3]; return 0; }", "array of pointers")
+
+    def test_an_int_is_not_stored_into_a_pointer(self):
+        self.assertFails("int main() { int *p; p = 5; return 0; }", "assign: a number where a pointer is needed")
+
+    def test_a_pointer_is_not_stored_into_an_int(self):
+        self.assertFails("int main() { int *p; int x = p; return 0; }", "initialise: a pointer where a number is needed")
+
+    def test_pointer_base_must_match(self):
+        self.assertFails("int main() { int *p; char *q; q = p; return 0; }",
+                         "assign: a pointer to int where a pointer to char is needed")
+
+    def test_argument_type_is_checked(self):
+        self.assertFails("int g(int *p) { return 0; }\nint main() { return g(5); }",
+                         "argument p of g: a number where a pointer is needed")
+
+    def test_return_of_a_pointer_is_refused(self):
+        self.assertFails("int main() { int *p; return p; }", "return: a pointer where a number is needed")
+
+    def test_main_takes_no_parameters(self):
+        self.assertFails("int main(int argc) { return argc; }", "main takes no parameters")
+
+    def test_unary_minus_of_a_pointer_is_refused(self):
+        self.assertFails("int main() { int a[2]; return -a; }", "- of a pointer")
+
+    def test_static_bytes_are_bounded(self):
+        self.assertFails("int main() { char s[9000]; return 0; }", "static variables take 9000 bytes")
+
+    def test_the_null_pointer_constant_is_allowed(self):
+        compile_src("int main() { int *p; p = 0; return 0; }")
+
     def test_index_needs_a_pointer(self):
         self.assertFails("int main() { int x = 1; return x[0]; }", "needs a pointer or an array")
 
