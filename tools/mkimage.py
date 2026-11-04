@@ -8,6 +8,7 @@ own DOS never writes over c64fs.
 
 Usage:
   mkimage.py build OUT.d64 --boot BOOT.prg --root DIR [--dev NAME:MAJOR ...]
+  mkimage.py reu IMG.d64 OUT.reu
   mkimage.py ls IMG PATH
   mkimage.py cat IMG PATH
 """
@@ -385,6 +386,16 @@ def build(out, boot, root, devs):
     return img
 
 
+REU_SIZE = 256 * 1024     # the smallest REU image VICE takes (-reusize 256); 4 banks
+
+
+def reu_image(d64):
+    """The disk image as an REU image: block b at REU offset b*256 (the layout the kernel
+    uses for its REU root device), zero-padded to 256 KB."""
+    assert len(d64) == D64_SIZE
+    return bytes(d64) + bytes(REU_SIZE - len(d64))
+
+
 def load(path):
     with open(path, "rb") as f:
         return Image(f.read())
@@ -398,6 +409,9 @@ def main(argv=None):
     b.add_argument("--boot", required=True)
     b.add_argument("--root", required=True)
     b.add_argument("--dev", action="append", default=[])
+    r = sub.add_parser("reu")
+    r.add_argument("img")
+    r.add_argument("out")
     l = sub.add_parser("ls")
     l.add_argument("img")
     l.add_argument("path", nargs="?", default="/")
@@ -408,6 +422,10 @@ def main(argv=None):
     if a.cmd == "build":
         img = build(a.out, a.boot, a.root, a.dev)
         print(f"{a.out}: {FS(img).free_blocks()} blocks free")
+    elif a.cmd == "reu":
+        with open(a.out, "wb") as f:
+            f.write(reu_image(load(a.img).data))
+        print(f"{a.out}: {REU_SIZE} bytes, superblock at offset {SUPER_BLOCK * 256:#x}")
     elif a.cmd == "ls":
         fs = FS(load(a.img))
         for name, ino in fs.dir_entries(fs.lookup(a.path)):

@@ -105,7 +105,8 @@ class Mounted(unittest.TestCase):
             return f.read()
 
     def test_mount_listed(self):
-        self.assertEqual(self.s.mntinfo(3), (0, 0x80, "/u"))
+        # the UCI mount has no drive: dev_drive is $FF (0 would read as the REU)
+        self.assertEqual(self.s.mntinfo(3), (0xFF, 0x80, "/u"))
         self.assertEqual(self.s.errno(self.s.mount_uci("/mnt")), "EBUSY")
         self.assertEqual(self.s.errno(self.s.sys("MOUNT", a=9, r0=self.s.cstr("/u/Temp"))), "EBUSY")
 
