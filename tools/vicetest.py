@@ -123,11 +123,7 @@ class Target:
         result = []
 
         def done(lines):
-            idx = None
-            for i in range(len(lines) - 1, -1, -1):
-                if lines[i].endswith(want):
-                    idx = i
-                    break
+            idx = command_end_row(lines, want)
             if idx is None:
                 return False
             for j in range(idx + 1, len(lines)):
@@ -145,6 +141,24 @@ class Target:
                 return
             time.sleep(0.4)
         raise TimeoutError(f"timeout waiting for {what}:\n{self.screen()}")
+
+
+def command_end_row(lines, want):
+    """Row index where the echoed command `want` ("$ " + command) ends, or None.
+
+    The screen is 40 columns: a typed line longer than that wraps onto the next
+    row, so the echo can span several rows. Rows are joined and compared with
+    spaces removed (a wrap can fall on a space, and the screen drops trailing
+    spaces). The search runs from the bottom up, so the newest echo wins.
+    """
+    target = want.replace(" ", "")
+    for i in range(len(lines) - 1, -1, -1):
+        joined = ""
+        for k in range(i, min(len(lines), i + 8)):
+            joined += lines[k].replace(" ", "")
+            if joined.endswith(target):
+                return k
+    return None
 
 
 class Vice(Target):
