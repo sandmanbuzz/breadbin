@@ -664,3 +664,15 @@ R13b is still open: the other-drive mount and the magic read-back are not proven
 Retracts one reading in the R13d entry above. "`mount 10 /mnt` printed nothing; neither the 'no such device' line nor a cbm dos line" was wrong: `mount` prints nothing on success (`src/bin/mount.s:42-61`, `src/kernel/cbm.s:204-205`), so the silent line means drive 10 mounted. The run then called `format 10` with drive 10 mounted. `format` refuses a mounted drive with EBUSY and prints (`src/bin/format.s:269-273`, `src/kernel/cbm.s:238-246`), so the "prompt back after 240 s" in that run may have been that refusal, not a format. The last printed line of the format was not recorded, so this is not proven. The all-zero magic is consistent with a refused format. Also: `format 10 cbm` writes no magic (`src/bin/format.s:150-152`); the R13d run used the default `c64fs`.
 
 Rule for the next run: do not run `mount 10` before `format 10`; check drive B's mounted image in the drive table; record the last printed line of the format verbatim.
+
+### 2026-11-04, R13e: format and magic read-back on drive B (bus 10), other-drive mount: PASS (Agent A)
+
+Ultimate firmware 1.1.0, JiffyDOS. Root on drive A (bus 9) with the matched pair (prg sha256 `07f911f8…`, kernel hash `$7162` in the prg and in `/lib/km/cbm`), booted with `load"*",9,1`, `$00BA` read back as 9. Drive B enabled on bus 10 with a c1541-formatted blank (new name, uploaded, fetched back at 174848 bytes, equal). Drive B mounted readwrite on that image. Restored after the run: drive B disabled on bus 9 with no image, drive A on `/Temp/breadbin.d64` read-only, bus 9; both uploads deleted and verified gone; lock released.
+
+- **Format:** `format 10 c64fs`, answered y. Last printed lines: "formatting, this takes a while..." then "done". The prompt came back.
+- **Magic:** bytes 96256..96260 of the image are `C64FS` (hex `4336344653`).
+- **Other-drive mount:** `mount 10 /mnt` printed nothing (success). `mount` then listed "drive 10 on /mnt (c64fs)". `ls /mnt` printed nothing (empty, as a fresh format). `umount /mnt` printed nothing.
+- **Corrects R13d:** the earlier run's format ran with drive 10 already mounted, so it was refused (see the R13d correction entry). This run did not mount drive 10 before format.
+- **Not run:** `tests.test_keyboard` on the Ultimate (H2: no key injection on firmware 1.1.0). `format` against a mounted-and-busy drive was not tested on purpose.
+
+R13b's listed items (magic read-back, other-drive mount) are done. Shared-machine notes: the format and mount ran on the Ultimate, not the physical 1541.
