@@ -416,5 +416,50 @@ class AsV8(unittest.TestCase):
         self.assertEqual(a.files["/o"], b.files["/o"])
 
 
+    SRC8 = b"lbl: .byte 1, 2, 3\n        .word lbl\n"
+
+    def image(self, src):
+        r = self.run_as(src)
+        self.assertEqual(r.exit, 0, r.err)
+        b = r.files["/o"]
+        return b[9:9 + head(b)["image"]]
+
+    def test_an_apostrophe_in_a_string_does_not_stop_the_string(self):
+        # the lowercase pass once toggled one shared flag for ' and ": a ' inside "..." flipped it
+        self.assertEqual(self.image('.byte "don\'t PANIC"\n'), b"don't PANIC")
+
+    def test_an_apostrophe_in_a_string_leaves_the_next_operand_alone(self):
+        self.assertEqual(self.image('k = 1\n.byte "don\'t", k\n'), b"don't\x01")
+
+    def test_a_double_quote_in_single_quotes_is_a_character(self):
+        self.assertEqual(self.image(".byte '\"', 1\n"), b'"\x01')
+
+    def test_a_byte_of_a_label_in_word_is_refused(self):
+        # .word stores two bytes and relocates the second: a byte of a label cannot be relocated there
+        for src in [".word >lbl\nlbl: rts\n", ".word <lbl\nlbl: rts\n"]:
+            r = self.run_as(src)
+            self.assertEqual(r.exit, 1, src)
+            self.assertIn(b"label", r.err)
+
+    def test_a_failed_write_keeps_the_previous_output(self):
+        # the output is written under a temporary name and renamed only when complete
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, fail_write=2)
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"cannot write", r.err)
+        self.assertEqual(r.files.get("/o"), b"OLD")
+        self.assertEqual(set(r.files), {"/s", "/o"})
+
+    def test_a_failed_write_leaves_no_output_file(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_write=2)
+        self.assertNotEqual(r.exit, 0)
+        self.assertEqual(set(r.files), {"/s"})
+
+    def test_a_successful_write_replaces_the_old_output(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"})
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][:3], b"CX\x01")
+        self.assertEqual(set(r.files), {"/s", "/o"})
+
+
 if __name__ == "__main__":
     unittest.main()

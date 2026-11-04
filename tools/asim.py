@@ -1,7 +1,7 @@
 """Run a Breadbin CX program (build/root/bin/*) on the host under py65, with the few syscalls a
 file-to-file tool needs answered in Python. For testing programs like `as` without VICE:
 there is no kernel, no scheduler, no disk, only the program's own 6502 code and the library linked
-into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, EXIT; fds 1 and 2 collect output.
+into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, UNLINK, RENAME, EXIT; fds 1 and 2 collect output.
 
     from asim import run
     r = run("as", ["/home/x.s", "/home/x"], {"/home/x.s": b"..."})
@@ -166,6 +166,20 @@ def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None):
                     ret(True, EBADF)
                     continue
                 ret(False, 0)
+            elif name == "UNLINK":            # r0 = path
+                p = cstr(r(2))
+                if p in res.files:
+                    del res.files[p]
+                    ret(False, 0)
+                else:
+                    ret(True, ENOENT)
+            elif name == "RENAME":            # r0 = old, r1 = new; replaces an existing new
+                old_, new_ = cstr(r(2)), cstr(r(4))
+                if old_ in res.files:
+                    res.files[new_] = res.files.pop(old_)
+                    ret(False, 0)
+                else:
+                    ret(True, ENOENT)
             else:
                 raise RuntimeError("syscall %s not modelled (pc $%04X)" % (name, cpu.pc))
             continue
