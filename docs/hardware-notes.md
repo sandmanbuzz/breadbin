@@ -658,3 +658,9 @@ Ultimate firmware 1.1.0, JiffyDOS. Root on drive A (bus 9) with the matched pair
 - **Not diagnosed.** Whether the Ultimate mounted the image on drive B at all (the agent set the config but did not record a mount call for B), and why `mount 10` is silent, are open. The next run must check drive B's mounted image in the drive table before `format`, and read the shell's answer to `mount 10` before going further.
 
 R13b is still open: the other-drive mount and the magic read-back are not proven. `format` and `test_keyboard` (H2) are not run.
+
+### 2026-11-04, R13d correction (Agent A)
+
+Retracts one reading in the R13d entry above. "`mount 10 /mnt` printed nothing; neither the 'no such device' line nor a cbm dos line" was wrong: `mount` prints nothing on success (`src/bin/mount.s:42-61`, `src/kernel/cbm.s:204-205`), so the silent line means drive 10 mounted. The run then called `format 10` with drive 10 mounted. `format` refuses a mounted drive with EBUSY and prints (`src/bin/format.s:269-273`, `src/kernel/cbm.s:238-246`), so the "prompt back after 240 s" in that run may have been that refusal, not a format. The last printed line of the format was not recorded, so this is not proven. The all-zero magic is consistent with a refused format. Also: `format 10 cbm` writes no magic (`src/bin/format.s:150-152`); the R13d run used the default `c64fs`.
+
+Rule for the next run: do not run `mount 10` before `format 10`; check drive B's mounted image in the drive table; record the last printed line of the format verbatim.
