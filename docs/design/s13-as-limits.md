@@ -31,8 +31,8 @@ the host model, not on the machine. The machine's `as` is the same program.
 ## The output file: temporary name, unlink, rename
 
 - `as` writes the output under a temporary name in the output's own directory, then renames it over the
-  output. The name is `~` plus the first 13 characters of the output's last component (`^` instead of `~`
-  when the output's name itself starts with `~`, so the two can never be equal). A c64fs name is at most
+  output. The name is `^` plus the first 13 characters of the output's last component (`+` instead of `^`
+  when the output's name itself starts with `^`, so the two can never be equal). A c64fs name is at most
   14 characters, so a longer output name is refused (`as: output name is too long`).
 - A file already at the temporary name is never overwritten: `as` refuses (`will not overwrite the existing
   file ...; remove it and try again`), and only "no such file" from the probe counts as free.
@@ -41,11 +41,12 @@ the host model, not on the machine. The machine's `as` is the same program.
   written and closed `as` unlinks the old output (no such file is ignored), then renames.
 - **The window:** if the rename fails after the unlink, the old output is gone and the complete new file exists
   only under the temporary name. The message says so and names it (`the old output was removed first, so the
-  complete file is ~name`). If the unlink itself fails the old output is intact and the message names the
+  complete file is ^name`). If the unlink itself fails the old output is intact and the message names the
   temporary as the complete new file.
 - Measured on VICE (x64sc, 1541 as drive 9, `mount 9 /mnt`, CBM DOS module), 2026-11-04: `mv /mnt/ux /mnt/readme`
-  onto an existing name answers `mv: /mnt/ux: i/o error` and changes nothing. Also measured: a file whose name
-  contains `~` cannot be created on the CBM path (`sh: /mnt/?x: i/o error`; `^x` and `tx` work), so `as` with
-  the output on a CBM drive currently fails at the temporary's creation before it reaches the rename. The
-  unlink-then-rename step is therefore proven in asim (`rename_noreplace`) only; the temporary prefix needs a
-  CBM-legal character for it to run on a drive.
+  onto an existing name answers `mv: /mnt/ux: i/o error` and changes nothing. A name containing `~` cannot be
+  created on the CBM path (`echo hi > /mnt/~x` gives `sh: /mnt/?x: i/o error`), which is why the prefix is not
+  `~`. Created and read back on a CBM disk: `^x`, `.x`, `#x`, `@x`, `-x`, `+x` (`cat` replies `hi`); `_x` is
+  created silently but cannot be read back. The prefix is `^`, and `+` when the leaf starts with `^`.
+- The pool is `$0800-$A1FF` (`KSTART` `$A200`) = `$9A00` = 39,424 bytes. `.res` refuses an image plus BSS total of
+  exactly 39,424 as well (conservative: the loader gets one byte to spare); the message says "must be under".
