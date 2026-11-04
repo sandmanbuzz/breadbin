@@ -308,6 +308,20 @@ write_out:
         lda fd
         jsr SYS_CLOSE
         bcs @werr              ; the close is where a buffered write can fail
+        jmp @fin               ; (the rename step sits below the error path: the branches above must reach @werr)
+@werr:  lda fd
+        jsr SYS_CLOSE          ; its result does not matter now: the write has failed
+        lda #<tname
+        sta r0
+        lda #>tname
+        sta r0+1
+        jsr SYS_UNLINK         ; no half-written file is left behind
+        lda #<s_wrerr
+        ldx #>s_wrerr
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
+@fin:
         ; the complete file takes the output's name. CBM DOS ("R0:new=old") refuses a rename onto an existing name,
         ; so the old output is unlinked first (no such file is fine). THE WINDOW: if the rename then fails, the old
         ; output is already gone and the complete file survives only under its temporary name, which the message
@@ -352,18 +366,6 @@ write_out:
         jsr fputc
         lda #1
         jmp SYS_EXIT
-@werr:  lda fd
-        jsr SYS_CLOSE          ; its result does not matter now: the write has failed
-        lda #<tname
-        sta r0
-        lda #>tname
-        sta r0+1
-        jsr SYS_UNLINK         ; no half-written file is left behind
-        lda #<s_wrerr
-        ldx #>s_wrerr
-        jsr eprint
-        lda #1
-        jmp SYS_EXIT
 wr:     sta r0
         stx r0+1
         sty r1
@@ -371,7 +373,6 @@ wr:     sta r0
         sta r1+1
         lda fd
         jmp SYS_WRITE
-
 ; readline: getc -> lbuf, lowercased outside quotes; carry set at EOF
 putc:   cpx #254
         bcs @ov
