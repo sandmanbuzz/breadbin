@@ -52,7 +52,7 @@ and string arrays of pointers (use char arrays), `*` on pointers (`p * 2` is ref
 Refused with a message (checked by `tools/test_cc.py`):
 
 - Recursion, direct or mutual: locals are static, so it would give wrong answers.
-- Stack use along a call chain above 31 values (`cc_stk` holds 32 two-byte values).
+- Stack use along a call chain above 32 values (`cc_stk` holds 32 two-byte values; 32 fit exactly).
 - Names longer than 14 characters, and names that clash ignoring case (as keeps 14 characters
   and ignores case).
 - Strings longer than 254 bytes (`rt_puts` indexes with Y), strings with `\\0` (it would end
@@ -76,7 +76,7 @@ Accepted, by decision, and documented here for the owner:
   globals and functions alike.
 - `as` holds 220 program symbols (`NSYM` 255 less the 35 builtins; the count is one byte). The compiler
   counts a program's labels and refuses one that needs more (`SYMTABLE` = 220).
-- The software stack is 32 levels; deeper expressions are refused.
+- The software stack holds 32 values: a 33rd pending value (along one function or a call chain) is refused.
 - Size on `as` (findings for S13): hello assembles to 390 bytes with 71 relocations, from 153
   emitted lines and 24 labels (about 28 names with the system names). The loop program has 194
   lines and 27 labels. Both are far under the 220-symbol table, and the compiler checks the count.

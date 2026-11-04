@@ -22,7 +22,7 @@ import re
 import sys
 
 KEYWORDS = {"int", "char", "if", "else", "while", "for", "return"}
-MAX_DEPTH = 31                       # cc_stk holds 32 two-byte values
+MAX_DEPTH = 32                       # values pushed at once: cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
 LINE_BYTES = 16                      # .byte values per emitted line (as keeps at most 254 characters a line)
 SYMTABLE = 220                       # as NSYM 255 less its 35 builtins
@@ -671,7 +671,7 @@ class Gen:
         for name in self.funcs:
             w = self.worst(name, [])
             if w > MAX_DEPTH:
-                raise CompileError(f"{name}: stack use along one call chain is {w + 1} values; cc_stk holds 32")
+                raise CompileError(f"{name}: stack use along one call chain is {w} values; cc_stk holds 32")
         # every initialised byte comes before any .res: as counts the program's size on the way
         return ("\n".join(self.out) + "\n" + RUNTIME + self.strings_text() + DATA
                 + "\n".join(self.gdata) + "\n" + self.locals_text() + "\n".join(self.gres) + "\n")
@@ -683,7 +683,7 @@ class Gen:
         if f not in self._worst:
             w = self.fn_max.get(f, 0)
             for callee, _line, d in self.call_sites.get(f, []):
-                w = max(w, d + self.worst(callee, path + [f]) + 1)
+                w = max(w, d + self.worst(callee, path + [f]))
             self._worst[f] = w
         return self._worst[f]
 
@@ -1067,10 +1067,20 @@ BINOPS = {
 
 
 def compile_c(src):
+    """A long left-deep chain (a 600-term sum) recurses once per term in the parser's and the
+    code generator's walk: the limit is raised for the compile, and only a chain past it is refused."""
+    limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(max(limit, 6000))
     try:
-        funcs, globs = Parser(lex(src)).program()
+        return compile_program(src)
     except RecursionError:
-        raise CompileError("expression nested too deeply for the parser") from None
+        raise CompileError("expression nested too deeply for the compiler") from None
+    finally:
+        sys.setrecursionlimit(limit)
+
+
+def compile_program(src):
+    funcs, globs = Parser(lex(src)).program()
     seen = set()
     for name, _, _, line in funcs:
         if name in seen:
