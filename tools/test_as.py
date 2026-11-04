@@ -180,6 +180,7 @@ class AsLongLine(unittest.TestCase):
         self.assertIn(b"line too long", r.err)
 
 
+
 @unittest.skipIf(SKIP, SKIP)
 class AsZeroPageAndNames(unittest.TestCase):
     """(zp),y and (zp,x) take a zero-page pointer: the 6502 has no other form, and as used to
@@ -243,6 +244,29 @@ class AsZeroPageAndNames(unittest.TestCase):
         r = self.asm("abcdefghijklmno: nop\n")
         self.assertNotEqual(r.exit, 0)
         self.assertIn(b"longer than 14", r.err)
+
+
+@unittest.skipIf(SKIP, SKIP)
+class AsCrAndPointers(unittest.TestCase):
+    asm = AsOutput.asm
+    out = AsOutput.out
+
+    def test_zero_page_pointer_low_and_high_byte_of_a_constant_are_fine(self):
+        # (<$1234),y is the pointer at $34 and (>$1234),y the pointer at $12: fixed bytes
+        h, img, _ = self.out("lda (<$1234),y\nlda (>$1234),y\n")
+        self.assertEqual(img, b"\xb1\x34\xb1\x12")
+
+    def test_high_byte_of_a_label_is_refused_like_the_low_byte(self):
+        r = self.asm("nop\nlbl: lda (>lbl),y\n", expect_exit=1)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_cr_inside_a_string_is_kept_and_crlf_lines_still_work(self):
+        h, img, _ = self.out('.byte "a\rb", 7\r\n.byte 9\r\n.byte 1\r')
+        self.assertEqual(img, b"a\rb\x07\x09\x01")
+
+    def test_lone_cr_at_end_of_input_is_dropped(self):
+        h, img, _ = self.out(".byte 5\r")
+        self.assertEqual(img, b"\x05")
 
 
 if __name__ == "__main__":
