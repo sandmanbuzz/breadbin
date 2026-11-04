@@ -8,7 +8,7 @@ LIBSRC  := $(wildcard src/lib/*.s)
 LIBOBJ  := $(BUILD)/lib/breadbin.lib
 ROOTSRC := $(shell find rootfs -type f)
 
-.PHONY: FORCE all clean test test-host test-smoke test-only test-keyboard test-console size run run-reu
+.PHONY: FORCE all clean test test-host test-smoke test-only test-keyboard test-console size run run-reu run-reu-root
 .SECONDARY:
 all: $(BUILD)/breadbin.d64
 
@@ -51,6 +51,10 @@ $(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(ROOTSRC) tools/mkimage.py
 	cp -R rootfs/. $(BUILD)/root/
 	python3 tools/mkimage.py build $@ --boot $(BUILD)/breadbin.prg --root $(BUILD)/root --dev console:1 --dev null:0
 
+# the same disk as an REU image (block b at offset b*256, 256 KB): the REU root device
+$(BUILD)/breadbin.reu: $(BUILD)/breadbin.d64 tools/mkimage.py
+	python3 tools/mkimage.py reu $< $@
+
 test-host:
 	python3 -m unittest discover -s tools -p 'test_*.py'
 
@@ -79,6 +83,9 @@ test: all test-host
 
 run: all
 	x64sc -autostart $(BUILD)/breadbin.d64
+
+run-reu-root: $(BUILD)/breadbin.reu $(BUILD)/breadbin.prg
+	x64sc -drive8type 0 -reu -reusize 256 -reuimage $(BUILD)/breadbin.reu -autostartprgmode 1 -autostart $(BUILD)/breadbin.prg
 
 run-reu: all
 	x64sc -reu -reusize 512 -autostart $(BUILD)/breadbin.d64

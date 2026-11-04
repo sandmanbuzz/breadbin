@@ -12,4 +12,4 @@ s2-bootb-pool|tests.test_system.Boot.test_16_paths tests.test_system.Boot.test_1
 s3-pipes-touch-drives|tests.test_system.Pipes tests.test_system.Touch tests.test_system.Drives.test_cbm_module_is_not_a_program tests.test_system.Drives.test_boot_from_drive_9
 s4-keyboard-exec-cache|tests.test_keyboard tests.test_system.Exec tests.test_system.Cache.test_off_and_flush tests.test_system.Cache.test_pristine_disk_after_writes tests.test_system.Cache.test_new_disk_discards
 s5-compiled-console-modules|tests.test_compiled.Compiled tests.test_console tests.test_system.Modules tests.test_system.Cache.test_cache0_kernel_has_no_cache tests.test_system.Cache.test_no_reu tests.test_system.Drives.test_cbm_disk
-s6-cache-reu-persist-drives|tests.test_system.Cache.test_write_through tests.test_system.REU tests.test_system.Persistence tests.test_system.Drives.test_breadbin_disk tests.test_system.Drives.test_format
+s6-cache-reu-persist-drives|tests.test_system.Cache.test_write_through tests.test_system.REU tests.test_system.REURoot tests.test_system.Persistence tests.test_system.Drives.test_breadbin_disk tests.test_system.Drives.test_format
