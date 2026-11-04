@@ -223,6 +223,37 @@ class Errors(unittest.TestCase):
     def test_a_string_array_needs_the_size_or_a_string(self):
         self.assertFails("int main() { char s[]; return 0; }", "needs a size or a string")
 
+    def test_a_string_is_not_a_global_pointer_to_int(self):
+        self.assertFails('int *p = "abc";\nint main() { return 0; }', "a string is a pointer to char")
+
+    def test_a_local_char_array_must_hold_its_string(self):
+        self.assertFails('int main() { char s[2] = "abc"; return 0; }', "the string does not fit in s")
+
+    def test_int_alone_and_int_star_alone_are_compile_errors(self):
+        self.assertFails("int", "expected id")
+        self.assertFails("int *", "expected id")
+        self.assertFails("char", "expected id")
+
+    def test_a_nul_in_a_string_is_refused_everywhere(self):
+        self.assertFails('char msg[] = "a\\0b";\nint main() { return 0; }', "would end it early")
+        self.assertFails('char *p = "a\\0b";\nint main() { return 0; }', "would end it early")
+
+    def test_a_char_global_takes_0_to_255(self):
+        self.assertFails("char c = 300;\nint main() { return c; }", "a char global takes 0 to 255")
+
+    def test_a_global_cannot_share_a_function_name(self):
+        self.assertFails("int f;\nint f() { return 0; }\nint main() { return 0; }", "is a function")
+
+    def test_initialised_data_comes_before_every_res(self):
+        src = ("char buf[100];\nint seed = 1;\nchar *msg = \"hi\";\nint n;\n"
+               "int main() { char local[9]; buf[0] = 1; return seed; }")
+        out = compile_src(src)
+        lines = out.split("\n")
+        # the global and local reservations (the runtime's own .res are not in question)
+        first_res = min(i for i, l in enumerate(lines) if ".res" in l and l.split(":")[0].startswith(("g_", "v_")))
+        for init_line in ("g_seed:", "g_msg: .word"):
+            self.assertLess(next(i for i, l in enumerate(lines) if l.startswith(init_line)), first_res)
+
     def test_index_needs_a_pointer(self):
         self.assertFails("int main() { int x = 1; return x[0]; }", "needs a pointer or an array")
 

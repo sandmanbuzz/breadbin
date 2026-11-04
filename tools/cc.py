@@ -81,6 +81,8 @@ def unescape(body, line):
                 raise CompileError(f"line {line}: string literal characters must be Latin-1 (as stores 8 bits)")
             out.append(ord(c))
         i += 1
+    if 0 in out:
+        raise CompileError(f"line {line}: a \\0 in a string would end it early; not in this slice")
     return bytes(out)
 
 
@@ -130,6 +132,8 @@ class Parser:
         j = self.i + 1
         if self.t[j][:2] == ("op", "*"):
             j += 1
+        if j + 1 >= len(self.t):
+            return False            # the file ends here: decl() reports what is missing
         return self.t[j + 1][:2] == ("op", "(")
 
     def function(self):
@@ -569,7 +573,7 @@ class Gen:
         self.strings, self.locals, self.calls = [], [], []
         self.names, self.fn_max, self.call_sites, self._worst = {}, {}, {}, {}
         self.fn, self.vars = None, {}
-        self.globals, self.gdata = {}, []
+        self.globals, self.gdata, self.gres = {}, [], []
 
     def ins(self, text):
         self.out.append("        " + text)
@@ -607,10 +611,14 @@ class Gen:
             raise CompileError(f"line {line}: global {name} is already declared")
         if arr == "infer":
             arr = len(init[1]) + 1
+        if name in self.funcs:
+            raise CompileError(f"line {line}: {name} is a function; a global cannot have its name")
         v = Var(f"g_{name}", base, ptr, arr)
         self.claim(v.label, line)
         self.globals[name] = v
         n = v.nbytes()
+        if init is not None and init[0] == "num" and not ptr and base == "char" and init[1] > 255:
+            raise CompileError(f"line {line}: a char global takes 0 to 255")
         if arr is not None and init is not None:
             if base != "char" or ptr:
                 raise CompileError(f"line {line}: a string initialises a char array")
@@ -618,10 +626,12 @@ class Gen:
                 raise CompileError(f"line {line}: the string does not fit in {name}")
             data = list(init[1]) + [0] * (arr - len(init[1]))
         elif init is None:
-            self.gdata.append(f"{v.label}: .res {n}")
+            self.gres.append(f"{v.label}: .res {n}")
             return
         elif ptr:
             if init[0] == "str":
+                if base != "char":
+                    raise CompileError(f"line {line}: a string is a pointer to char, not to {base}")
                 self.gdata.append(f"{v.label}: .word {self.add_string(init[1])}")
                 return
             if init[0] == "num" and init[1] == 0:
@@ -663,8 +673,9 @@ class Gen:
             w = self.worst(name, [])
             if w > MAX_DEPTH:
                 raise CompileError(f"{name}: stack use along one call chain is {w + 1} values; cc_stk holds 32")
-        return ("\n".join(self.out) + "\n" + RUNTIME + self.strings_text() + DATA + self.locals_text()
-                + "\n".join(self.gdata) + "\n")
+        # every initialised byte comes before any .res: as counts the program's size on the way
+        return ("\n".join(self.out) + "\n" + RUNTIME + self.strings_text() + DATA
+                + "\n".join(self.gdata) + "\n" + self.locals_text() + "\n".join(self.gres) + "\n")
 
     def worst(self, f, path):
         """Most values pushed at once on any call chain that starts in f (no recursion allowed)."""
@@ -796,6 +807,8 @@ class Gen:
                     raise CompileError(f"line {line}: a string initialises a char array")
                 if arr > 254:
                     raise CompileError(f"line {line}: a local char array takes a string of at most 254 bytes")
+                if len(init[1]) + 1 > arr:
+                    raise CompileError(f"line {line}: the string does not fit in {name}")
                 v = self.declare(name, base, ptr, arr, line)
                 lbl = self.add_string(init[1])
                 for i in range(arr):
