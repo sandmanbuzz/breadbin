@@ -2,15 +2,19 @@
 
 Three levels, cheapest first. Run the cheapest one that covers your change, and the full suite at milestones. The policy is in `CLAUDE.md`: targeted tests inside a story, the full regression (stock ROMs, then the disk and bus tests with JiffyDOS ROMs, then the hardware list) at milestones.
 
-| Level | Command | Time (measured in a cloud container) |
+| Level | Command | Time (on the runner, in the container) |
 |---|---|---|
-| Host tests | `make test-host` | about 12 seconds; no emulator (includes the Ultimate client against a fake server) |
-| UCI simulator | `make test-host` with py65 installed (see below) | about 4 seconds more: the real kernel image in a 6502 emulator against a fake Command Interface |
-| Smoke | `make test-smoke` | about 2 to 3 minutes: boot, echo, a three-stage pipe, Ctrl-C |
-| Targeted | `make test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
-| Console | `xvfb-run -a make test-console` | about 3 minutes: screen RAM, colour RAM and VIC registers read back |
-| Keyboard | `xvfb-run -a -s "-screen 0 1280x1024x24" make test-keyboard` | about 1.5 minutes: real keystrokes through VICE's keyboard matrix |
-| Full | `make test` | about 49 minutes for 63 VICE tests: 2,917 s on 9693358 under host VICE (EXIT 0, gate 1), and 2,899 s on 9693358 in a container run with no VICE lock (tuning data only). The older 55-test run, 2,511 s on 4778b1a (`docs/wip.md`), was a different tree and host; it is not comparable |
+| Fast gate (host tests) | `tools/ci/run.sh all test-host`, or `make test-host` with cc65 and py65 on the host | about 45 s: 289 tests, none skipped (image tools, key tables, the Ultimate client against a fake server, the py65 simulators of the real kernel, `as` on the host (`tools/asim.py`), the host compiler `tools/cc.py`, and the shard-list check) |
+| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard (80 tests now) |
+| Smoke | `tools/ci/run.sh test-smoke` | about 2 to 3 minutes: boot, echo, a three-stage pipe, Ctrl-C |
+| Targeted | `tools/ci/run.sh test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
+| Console | `tools/ci/run.sh test-console` | about 2.5 minutes (6 tests, 143 s in the last shard run): screen RAM, colour RAM and VIC registers read back |
+| Keyboard | `tools/ci/run.sh test-keyboard` | about 4 minutes (7 tests, 232 s): real keystrokes through VICE's keyboard matrix |
+| Full suite, sharded | `tools/ci/sharded.sh` | six containers at once under one `with-lock -x`, about 10 to 13 minutes: 74 tests took 605 s on `27fa473` and 628 s on `bb09283` (stock ROMs); the 80-test layout on `3fd8112` took 778 s (80 of 80, shards 601 to 768 s: the shard list is unbalanced again and the runs now take longer per test than before, so a rebalance by cost is due). Fails on any non-zero shard, any skip, or a total that differs from the discovered count |
+| Full suite, JiffyDOS ROMs | `BREADBIN_CI_JIFFY=<dir> tools/ci/sharded.sh` | the same run: 74 of 74 in 562 s on `2048e78`. `BREADBIN_VICE_PRINT_ARGS=1` prints the emulator command line, so `-kernal JiffyDOS-C64.bin -dos1541 JiffyDOS_1541-II.bin` can be seen |
+| Full suite, serial (the reference) | `BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test` | 63 VICE tests in 2,804 s on the runner, every slot taken (about 47 minutes). The older 55-test figure, 2,511 s on 4778b1a (the Mac), is not comparable |
+
+The commands in the first column are the container ones: the container is the only toolchain (`docs/process.md`). The host recipes further down (`xvfb-run make ...`) are history from the Mac. Run a timing you will quote with every slot (`BREADBIN_CI_EXCLUSIVE=1`, or `tools/with-lock -x` around the sharded driver, which takes them itself).
 
 The keyboard tests inject real X key events with `xdotool` (`apt install xdotool xvfb`). The other system tests type into VICE's key buffer with `keybuf`, which bypasses the matrix scan, so they cannot catch a bug in it. The system tests drive VICE (`x64sc`) through its monitor, so they need the C64 ROMs (`tools/setup-vice-roms.sh`) and, on a machine without a display, a virtual one: `xvfb-run -a make test-smoke`.
 
@@ -66,26 +70,20 @@ python3 -m unittest tests.test_system.Boot.test_02_echo
 
 This runs the monitor-driven tests (`Boot`, `test_console`) with no X server. `test_keyboard` needs `xdotool` and an X display, which macOS does not have. A VICE window appears on the desktop while a test runs. On 2026-10-31 this ran `test_07`, `test_10`, `test_13`, `test_14`, `test_24` and `test_console` (11 tests, about 7.5 minutes) green on the stage-2 kernel.
 
-## In a container (any host, including a Mac)
+## In a container (the default way)
 
-`tools/ci/run.sh` runs the same tests in a disposable container with its own VICE (3.9), Xvfb and `xdotool`, so the keyboard and console tests run on a Mac and parallel runs do not collide (`docs/ci.md`: the image, the lease broker). It copies the repo at start, so edit freely while it runs.
+`tools/ci/run.sh` runs the tests in a disposable container with its own VICE (3.9), Xvfb and `xdotool`, so parallel runs do not collide (`docs/ci.md`: the image, the slots, the sharded suite). It copies the repo at start, so edit freely while it runs, and it takes one `vice` slot (six at once on the runner; `BREADBIN_CI_EXCLUSIVE=1` takes them all).
 
 ```sh
-tools/with-lock -- tools/ci/run.sh test        # whole suite: host tests + every VICE class, about 50 minutes
-tools/ci/run.sh test-keyboard                  # 7 tests, ~4 minutes
+tools/ci/run.sh all test-host                  # the fast gate, about 45 s
+tools/ci/sharded.sh                            # the whole VICE suite, six containers, about 10 minutes
+BREADBIN_CI_JIFFY=<dir> tools/ci/sharded.sh    # the same with the JiffyDOS ROMs (dir holds JiffyDOS-C64.bin, JiffyDOS_1541-II.bin)
 tools/ci/run.sh test-only T="tests.test_system.Exec tests.test_system.Modules"
 ```
 
-Classes in `tests/test_system.py`: `Boot` (26), `Persistence`, `REU`, `Cache` (9: warm boot, new disk or label discards, write-through, pristine image after writes), `Pool`, `Modules`, `Exec`, `Drives` (mount and format CBM disks, the module-is-not-a-program case). Take the lock for VICE runs: two at once disturb each other's timing.
+When you add a test, put it in a shard (`tools/ci/shards.txt`, by cost) and run `bash tools/ci/sharded.sh --check` and the fast gate before you land: a test in no shard or in two fails both.
 
-## Windowless VICE on macOS
-
-`-console` (VICE's console mode) starts without a window, so a test run no longer steals focus,
-and it used about a third less CPU. The monitor-driven tests pass with it:
-
-```sh
-BREADBIN_VICE_ARGS="$BREADBIN_VICE_ARGS -console" python3 -m unittest tests.test_system.Cache
-```
+Classes: `tests/test_system.py` has `Boot` (28 tests, split in two halves for the shards), `Persistence`, `REU`, `Cache` (9: warm boot, new disk or label discards, write-through, pristine image after writes), `Pool`, `Modules`, `Exec`, `Drives` (mount and format CBM disks, the module-is-not-a-program case), `Pipes` (tee, tail, sort), `Touch`; `tests/test_console.py`, `tests/test_keyboard.py`, and `tests/test_compiled.py` (`Compiled`: programs written in C, compiled on the host by `tools/cc.py`, assembled and run on the machine).
 
 ## Which tests for which change
 
@@ -101,7 +99,9 @@ By test name; refine this as we learn what actually catches what.
 | Block layer, IEC, CBM DOS, `format`, mounts (`blk.s`, `cbm.s`) | `Drives`, `Persistence`, `REU`, `Cache`, plus a boot |
 | REU, `/tmp`, the REU block cache | `REU`, `Cache` (about 11 minutes: it boots VICE about 20 times, with a 2 MB REU image kept across boots) |
 | Loader, `as`, `basic` (`exec.s`, `as.s`, `basic.s`) | `test_17`, `test_18`, `test_19` |
-| A single command in `src/bin/` | the test that uses it (`grep -n <name> tests/test_system.py`) |
+| A single command in `src/bin/` | the test that uses it (`grep -n <name> tests/test_system.py`): `tee`, `tail` and `sort` have `Pipes`, `touch` has `Touch` |
+| The assembler (`as.s`) | `tools/test_as.py` (host: `as` runs under py65 via `tools/asim.py`, 0.1 s per program), then `Boot.test_19` and `test_27` |
+| The compiler (`tools/cc.py`, through slice 3) | `tools/test_cc.py`, `tools/test_cc_run.py` (host; programs run on a 6502 simulator), then `tests.test_compiled.Compiled` on the machine |
 | Image tools, key tables (`tools/`) | `make test-host` |
 | UCI v1 (`src/mod/uci.s` = `/lib/km/uci`, the stubs in `src/kernel/uci.s`, the `bmi` sites in `file.s`, `fs.s`, `exec.s`, `cbm.s`) | `make test-host` with py65 (`tools/test_uci_sim.py`), plus `Drives`, `REU`, `Pool`, `Modules` and a smoke run in VICE |
 | Anything that adds or removes kernel code | `make size`, and quote the numbers in the commit message |
