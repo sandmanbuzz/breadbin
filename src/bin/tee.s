@@ -1,8 +1,9 @@
 ; Ported from upstream Breadbin (https://github.com/kpatr1981/breadbin, MIT; Copyright 2026 Konstantinos Patronas),
 ; commit 04f3a47 (feat: tee, tail and sort). Adapted: none; the program is taken as upstream wrote it.
 ; tee [-a] file...: copy stdin to stdout and into the files (-a appends)
+; Gaps closed locally (2026-11-03): more than MAXF files is an error (nothing is copied); a write error is reported and exits 1.
 .include "../../include/breadbin.inc"
-.import argn, open_or_die
+.import argn, open_or_die, eprint
 MAXF = 4
 idx   = $23
 n     = $24
@@ -16,6 +17,7 @@ len   = $2a             ; 2
         sta flags
         lda #0
         sta n
+        sta wst
         lda #1
         sta idx
         jsr argn
@@ -36,14 +38,28 @@ len   = $2a             ; 2
 @files: lda idx
         jsr argn
         bcs copy
+        pha                 ; argn's pointer (A, X) survives the count check
+        txa
+        pha
+        lda n
+        cmp #MAXF
+        bcs toomany
+        pla
+        tax
+        pla
         ldy flags
         jsr open_or_die
         ldx n
         sta fds,x
         inc n
         inc idx
-        cpx #MAXF-1
-        bcc @files
+        jmp @files
+
+toomany: lda #<msg_many
+        ldx #>msg_many
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
 
 copy:   lda #<buf
         sta r0
@@ -64,15 +80,23 @@ copy:   lda #<buf
         beq done
         lda #1
         jsr out
+        bcs werr
         ldx #0
 @f:     cpx n
         beq copy
         stx xs
         lda fds,x
         jsr out
+        bcs werr
         ldx xs
         inx
         jmp @f
+werr:   lda #<msg_write
+        ldx #>msg_write
+        jsr eprint
+        lda #1
+        sta wst
+        jmp done
 done:   ldx #0
 @c:     cpx n
         beq @x
@@ -82,7 +106,7 @@ done:   ldx #0
         ldx xs
         inx
         jmp @c
-@x:     lda #0
+@x:     lda wst             ; 1 after a write error, else 0
         jmp SYS_EXIT
 
 ; out: A = fd; write the len bytes in buf
@@ -98,6 +122,11 @@ out:    sta fd
         lda fd
         jmp SYS_WRITE
 
+.segment "RODATA"
+msg_many:  .byte "tee: too many files", 10, 0
+msg_write: .byte "tee: write error", 10, 0
+
 .segment "BSS"
 fds:    .res MAXF
+wst:    .res 1
 buf:    .res 256

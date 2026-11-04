@@ -703,6 +703,19 @@ class Pipes(unittest.TestCase):
         self.v.run("echo c >> /home/tl")
         self.assertEqual(self.v.run("tail -1 /home/tl").strip(), "c")
 
+    def test_sort_empty_file(self):
+        self.v.run("cat /dev/null > /home/se")
+        self.assertEqual(self.v.run("sort /home/se").strip(), "")
+
+    def test_tee_four_files_all_get_the_text(self):
+        # short names: a command line longer than 40 columns wraps and the harness misses the prompt
+        self.v.run("echo four | tee /a1 /a2 /a3 /a4")
+        self.assertIn("four", self.v.run("cat /a4"))
+
+    def test_tee_more_than_four_files_is_an_error(self):
+        out = self.v.run("echo x | tee /b1 /b2 /b3 /b4 /b5")
+        self.assertIn("too many files", out)
+
     def test_tail_more_than_the_ring(self):
         # six copies of /etc/help: 2448 bytes, over the 2 KB ring, so the wrap is exercised
         self.v.run("cat /etc/help > /home/big")
