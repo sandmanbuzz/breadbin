@@ -34,6 +34,14 @@ the host model, not on the machine. The machine's `as` is the same program.
   output. The name is `^` plus the first 13 characters of the output's last component (`+` instead of `^`
   when the output's name itself starts with `^`, so the two can never be equal). A c64fs name is at most
   14 characters, so a longer output name is refused (`as: output name is too long`).
+- An output whose last component is empty (ends in `/`, or is empty) is refused (`as: output name is empty`), and so
+  is one whose last component contains `*`, `?`, `:`, `,` or `=` (`as: output name has a character CBM DOS treats
+  specially`): the unlink of the old output sends the name to CBM DOS in a scratch command, where those are
+  wildcards or command syntax and would scratch unrelated files. Both refusals happen before any file is touched.
+  (Directory parts are not checked: only the leaf goes into the scratch command.)
+- Known wording limit: on CBM, scratch of a missing file reports success (files scratched: 0), so on a first
+  assembly with no old output the unlink succeeds and a failed rename then says "the old output was removed first"
+  although there was none. The file is still named correctly; only that sentence can be wrong on CBM.
 - A file already at the temporary name is never overwritten: `as` refuses (`will not overwrite the existing
   file ...; remove it and try again`), and only "no such file" from the probe counts as free.
 - A failed write or close removes the temporary and leaves the old output exactly as it was.
