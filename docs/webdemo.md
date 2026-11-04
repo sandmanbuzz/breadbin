@@ -31,3 +31,7 @@ Any hosted copy must ship `LICENSES/` as is. Hosting is the owner's call.
 
 The core has no drive, so the kernel is the autostarted `.prg` and the root is the REU
 (`root on reu` at boot). Writes live in the page's RAM until it is closed.
+
+Status: no real bundle has been built, because the external emulator kit is absent on the build machine;
+`tools/test_webdemo.py` ran only against a fake kit. Boot time to a shell prompt is unmeasured; the measured
+figure is time to the `login:` screen with `root on reu` shown: 2.4 s real time, 1.2 s in warp.
