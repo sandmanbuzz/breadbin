@@ -36,7 +36,7 @@ hw:     .res 2          ; end of the bytes actually stored (pc past it: a traili
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
-tname:  .res 90         ; the output name with ~ appended: the file is written under it, then renamed
+tname:  .res 90         ; the output name with ^ prepended: the file is written under it, then renamed
 tlead:  .res 1          ; where the output's last path component starts in tname
 tend:   .res 1
 qkind:  .res 1          ; the quote character open in the line being lowercased, or 0
@@ -163,7 +163,7 @@ rp_done:
         jmp SYS_CLOSE
 
 write_out:
-        ; the output is written as its temporary name (~ + the name, in the same directory) in its own directory and renamed over outp only when complete:
+        ; the output is written as its temporary name (^ + the name, in the same directory; CBM DOS cannot create a name containing ~, VICE-measured, and ^ works) in its own directory and renamed over outp only when complete:
         ; a failed write leaves the previous output as it was, and no short file under the real name
         lda outp
         sta r0
@@ -192,16 +192,16 @@ write_out:
         cmp #15                 ; a c64fs name is at most 14 characters
         bcc @lok
         jmp @long
-@lok:        lda tlead               ; the temporary is ~ and the first 13 characters of the output's name (^ if
-        clc                     ; the name starts with ~, so it can never equal the output), same directory
+@lok:        lda tlead               ; the temporary is ^ and the first 13 characters of the output's name (+ if
+        clc                     ; the name starts with ^, so it can never equal the output), same directory
         adc #14
         sta tend
         ldy tlead
         lda (r0),y
-        ldx #'~'
-        cmp #'~'
-        bne @pf
         ldx #'^'
+        cmp #'^'
+        bne @pf
+        ldx #'+'
 @pf:    txa
         ldx tlead
         sta tname,x
@@ -615,7 +615,7 @@ d_ress: jsr expr                ; no bytes stored: zeros are filled in only if s
         lda #<e_resrel
         ldx #>e_resrel
         jmp error
-@sign:  lda pc                  ; image + BSS is what the loader must fit in the pool ($9A00 = 39424 bytes): the sum is checked,
+@sign:  lda pc                  ; image + BSS is what the loader must fit in the pool ($9A00 = 39424 bytes; a total of exactly $9A00 is refused too, conservatively: the pool must be left a byte): the sum is checked,
         clc                     ; and it is the sum the message names (a wrapped count, 0-1 is $FFFF, carries out or is far over)
         adc ev
         tax
@@ -691,6 +691,8 @@ instruction:
         cmp #' '
         beq @acc
         cmp #';'
+        beq @acc
+        cmp #9                  ; TAB
         bne @nacc
 @acc:   jsr adv
         lda #1
@@ -1607,7 +1609,7 @@ e_str:   .byte "unterminated string", 0
 e_junk:  .byte "junk after the statement", 0
 e_chr:   .byte "unterminated character", 0
 e_acc:   .byte "a is the accumulator, not a symbol name", 0
-e_resbig: .byte "image plus res is too big for the pool", 0
+e_resbig: .byte "image plus res is too big for the pool (must be under 39424 bytes)", 0
 e_reloc: .byte "bad relocatable expression", 0
 .macro SYM n, v
         .byte n, 0

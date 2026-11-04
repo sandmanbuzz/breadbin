@@ -330,6 +330,10 @@ class AsMalformed(unittest.TestCase):
         self.refused("lda (5),y z\n", b"junk after the statement", 1)
         self.refused("asl a b\n", b"junk after the statement", 1)
 
+    def test_accumulator_operand_may_be_followed_by_a_tab(self):
+        r = self.asm("asl a\t; x\nasl a\t\nlsr a\t;y\n")
+        self.assertEqual(r.files["/o"][9:], b"\x0a\x0a\x4a")
+
     def test_trailing_junk_after_a_directive_is_refused(self):
         self.refused(".byte 1 2\n", b"junk after the statement", 1)
         self.refused(".word 1 2\n", b"junk after the statement", 1)
@@ -555,15 +559,15 @@ class AsV8(unittest.TestCase):
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, fail_rename=1)
         self.assertEqual(r.exit, 1, r.err)
         self.assertNotIn("/o", r.files)
-        self.assertTrue(r.files.get("/~o", b"")[:3] == b"CX\x01", sorted(r.files))
-        self.assertIn(b"~o", r.err)
+        self.assertTrue(r.files.get("/^o", b"")[:3] == b"CX\x01", sorted(r.files))
+        self.assertIn(b"^o", r.err)
         self.assertIn(b"old output was removed", r.err)
 
     def test_a_failed_rename_with_no_old_output_does_not_claim_a_removal(self):
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_rename=1)
         self.assertEqual(r.exit, 1, r.err)
         self.assertNotIn(b"removed", r.err)
-        self.assertIn(b"~o", r.err)
+        self.assertIn(b"^o", r.err)
 
     def test_reassembly_onto_an_existing_output_replaces_it_where_rename_refuses_to_replace(self):
         # src/mod/cbm.s cbm_rename sends "R0:new=old"; CBM DOS refuses an existing new name (error 63; kernel EIO).
@@ -572,43 +576,49 @@ class AsV8(unittest.TestCase):
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, rename_noreplace=True)
         self.assertEqual(r.exit, 0, r.err)
         self.assertEqual(r.files["/o"][:3], b"CX\x01")
-        self.assertNotIn("/~o", r.files)
+        self.assertNotIn("/^o", r.files)
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, rename_noreplace=True)
         self.assertEqual(r.exit, 0, r.err)
         self.assertEqual(r.files["/o"][:3], b"CX\x01")
-        self.assertNotIn("/~o", r.files)
+        self.assertNotIn("/^o", r.files)
+
+    def test_a_caret_output_name_gets_the_plus_temporary(self):
+        r = asim.run("as", ["/s", "/^o"], {"/s": self.SRC8}, fail_rename=1)
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertTrue(r.files.get("/+o", b"")[:3] == b"CX\x01", sorted(r.files))
+        self.assertIn(b"+o", r.err)
 
     def test_a_user_file_at_the_temporary_name_is_not_destroyed(self):
         # the temporary is derived from the output name; a file already there is refused, not truncated
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~o": b"USER"})
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/^o": b"USER"})
         self.assertEqual(r.exit, 1, r.err)
-        self.assertEqual(r.files["/~o"], b"USER")
-        self.assertIn(b"~o", r.err)
+        self.assertEqual(r.files["/^o"], b"USER")
+        self.assertIn(b"^o", r.err)
         self.assertIn(b"remove it and try again", r.err)
         self.assertNotIn("/o", r.files)
 
     def test_a_probe_error_other_than_absent_is_refused(self):
         # only ENOENT means the temporary name is free; any other error from the probe must not be treated as absent
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_read_open=("/~o", 5))
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_read_open=("/^o", 5))
         self.assertEqual(r.exit, 1, r.err)
         self.assertNotIn("/o", r.files)
-        self.assertNotIn("/~o", r.files)
+        self.assertNotIn("/^o", r.files)
 
     def test_a_user_file_at_the_temporary_name_survives_a_failed_write(self):
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~o": b"USER"}, fail_write=1)
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/^o": b"USER"}, fail_write=1)
         self.assertEqual(r.exit, 1, r.err)
-        self.assertEqual(r.files["/~o"], b"USER")
+        self.assertEqual(r.files["/^o"], b"USER")
 
     def test_an_output_named_like_the_old_temporary_keeps_its_content(self):
         good = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}).files["/o"]
-        r = asim.run("as", ["/s", "/~as"], {"/s": self.SRC8})
+        r = asim.run("as", ["/s", "/^as"], {"/s": self.SRC8})
         self.assertEqual(r.exit, 0, r.err)
-        self.assertEqual(r.files["/~as"], good)
+        self.assertEqual(r.files["/^as"], good)
 
-    def test_a_user_file_named_tilde_as_is_left_alone(self):
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~as": b"USER"})
+    def test_a_user_file_named_caret_as_is_left_alone(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/^as": b"USER"})
         self.assertEqual(r.exit, 0, r.err)
-        self.assertEqual(r.files["/~as"], b"USER")
+        self.assertEqual(r.files["/^as"], b"USER")
 
     def test_output_name_lengths(self):
         for n in (13, 14):
@@ -622,8 +632,8 @@ class AsV8(unittest.TestCase):
         self.assertIn(b"too long", r.err)
         self.assertEqual(sorted(r.files), ["/s"])
 
-    def test_a_tilde_name_of_14_characters_does_not_collide_with_its_temporary(self):
-        name = "/" + "~" * 14
+    def test_a_caret_name_of_14_characters_does_not_collide_with_its_temporary(self):
+        name = "/" + "^" * 14
         r = asim.run("as", ["/s", name], {"/s": self.SRC8})
         self.assertEqual(r.exit, 0, r.err)
         self.assertEqual(r.files[name][:3], b"CX\x01")
