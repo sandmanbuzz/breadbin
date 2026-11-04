@@ -585,8 +585,8 @@ class AsV8(unittest.TestCase):
     def test_a_caret_output_name_gets_the_plus_temporary(self):
         r = asim.run("as", ["/s", "/^o"], {"/s": self.SRC8}, fail_rename=1)
         self.assertEqual(r.exit, 1, r.err)
-        self.assertTrue(r.files.get("/+o", b"")[:3] == b"CX\x01", sorted(r.files))
-        self.assertIn(b"+o", r.err)
+        self.assertTrue(r.files.get("/+^o", b"")[:3] == b"CX\x01", sorted(r.files))
+        self.assertIn(b"+^o", r.err)
 
     def test_a_user_file_at_the_temporary_name_is_not_destroyed(self):
         # the temporary is derived from the output name; a file already there is refused, not truncated
