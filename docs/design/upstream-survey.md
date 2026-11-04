@@ -93,3 +93,50 @@ Upstream branches with commits that are not on upstream `main`: `feat/format-v2`
 
 The `fix/edit` port candidates (`6b66acc`, `62cb12f`, `1a3843b`) are user-program fixes with no kernel cost; they are the next cheap ports after the three in the plan.
 
+
+## Status and triage, 2026-11-04 (upstream 712cc60)
+
+Fork point: `aa58d27` (merge-base of our main and upstream main). Upstream has 40 commits on main since then, plus 14 on unmerged branches. This section adds our local status (HAVE, PARTIAL, MISSING, checked by grep against main, not built) and a verdict and priority per group. The verdicts above still describe each commit; this table groups them and ranks them.
+
+Upstream's kernel lives under the KERNAL ROM. Ours replaces the KERNAL, so upstream kernel diffs never apply raw. Every port is reworked against our tree and carries the "Ported from upstream" header. Kernel byte figures are estimates.
+
+Verdicts: ACCEPT (port it), SHAPE-OF (take the idea, write our own), INSPO (read for ideas, no work planned), REJECT.
+
+| group | upstream SHAs | local status | verdict | priority | note |
+|---|---|---|---|---|---|
+| edit fixes (branch fix/edit) | `c27f6c5` `62cb12f` `1a3843b`, tests `a73842c` | MISSING (the at_end fix `6b66acc` is HAVE) | ACCEPT | P1 | Refusing a file over 8 KB prevents data loss; also no flicker, fast ^K. Port into our `edit.s`, which may have diverged. |
+| console underscore | `1573734` | MISSING | ACCEPT | P2 | 2 kernel bytes. Check `keytab.inc` for `$a4`. |
+| TAB completion | `4abb291` `ecabba9` | MISSING | ACCEPT | P2 | 0 kernel bytes. Check the `sh` pool footprint first. |
+| bus CLK pulse at talk turnaround | `ff69a25` | MISSING | ACCEPT AS EXPERIMENT | P1 | About 3 bytes. Hardware question: does it bear on the 1541 root-mount stall? The 1581 benefit is incidental. |
+| shell `$?` `&&` `\|\|`, history | `b64fd2d` | MISSING | SHAPE-OF | P2 | Already on our feature priority list, 0 kernel bytes. RESTORE kill is covered by our CP3 spec. `2>` needs a kernel flag: weigh the bytes. The fsck part is REJECT (c64fs only). |
+| jiffy clock during disk I/O | `d2e3423` | MISSING (unverified) | SHAPE-OF | P3 | Our `iec.s` and IRQ entry differ. Measure the drift first. |
+| fast 1541 reads | `7bc197a` | MISSING | SHAPE-OF under M0-8 | P3 | Read the file headers for licence and origin before any reuse. |
+| exec in place, streaming `as` | `37a0ce8` | PARTIAL (`SP_EXEC`, ENOTDIR exist) | INSPO | - | Verify the ENOTDIR and passwd fixes apply to us. |
+| write-back cache, sync | `6d45c40` | MISSING | INSPO | - | Reset can lose data. Our cache is write-through by design. |
+| job control, process groups | `acec2b5` `64d5f31` | MISSING | INSPO | - | Design only. Costs kernel space. |
+| file times, format 2 | `0451759` `5f2a9ec` `4b8ae22` `9478ed0` | MISSING | INSPO | - | Idea only. c64fs v1 is dropped and CBM DOS has no times. |
+| test hooks | `1095f03` (BB_HANGDUMP), `0482f6f` (per-run scratch names) | MISSING | INSPO | - | For our test infrastructure. |
+| save areas under ROM, library in kernel | `70b9870` | MISSING by choice | REJECT | - | Kernel space; our layout differs (split user library, pool). |
+| 1581 | `bf712c2` | MISSING | REJECT | - | Non-1541 devices are not milestone work. |
+| c64fs-only | `2ff35e5` `84f0981` `5eb72f0` | n/a | REJECT | - | c64fs v1 is dropped. |
+| GeoRAM, fsck | - | MISSING | REJECT | - | The core never requires an REU; fsck is c64fs only. |
+| tee, tail, sort, touch | `04f3a47` `4cc3c7e` | HAVE | done | - | Already ported. |
+
+Docs, tests, build and version commits are skipped by the rule above.
+
+### Backlog
+
+Ordered by usefulness to us, then great idea, then parity.
+
+P1:
+- edit fixes: 8 KB refuse first (data loss), then the flicker fix, then ^K block move; port the tests `a73842c` with them.
+- CLK pulse at talk turnaround: run as a hardware experiment on the 1541 root-mount stall.
+
+P2:
+- Shell `$?` `&&` `||` and history (0 kernel bytes; follow the feature priority table).
+- TAB completion (measure `sh` pool pages first).
+- Console underscore (2 kernel bytes).
+
+P3:
+- Jiffy clock across disk I/O (measure drift first).
+- Fast 1541 reads under M0-8 (check licence and origin first).
