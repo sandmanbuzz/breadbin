@@ -155,7 +155,7 @@ rp_done:
         jmp SYS_CLOSE
 
 write_out:
-        ; the output is written as ~as in its own directory and renamed over outp only when complete:
+        ; the output is written as its temporary name (~ + the name, in the same directory) in its own directory and renamed over outp only when complete:
         ; a failed write leaves the previous output as it was, and no short file under the real name
         lda outp
         sta r0
