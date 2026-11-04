@@ -25,6 +25,7 @@ HEADER = """\
 r0 = $f0
 r1 = $f2
 cc_ptr = $2b
+optr = $fc
 """
 # the program starts at the origin, so the stand-ins for the system calls follow it
 STUBS = """\
@@ -33,10 +34,12 @@ sys_exit:
 sys_write:
         ldy #0
         lda (r0),y
-        ldy $fe
-        sta $0400,y
-        inc $fe
-        rts
+        ldy #0
+        sta (optr),y            ; the output pointer is 16 bits: a program may write more than 255 bytes
+        inc optr
+        bne @n
+        inc optr+1
+@n:     rts
 """
 CFG = """\
 MEMORY { RAM: start = $0800, size = $7000, file = %O; }
@@ -67,14 +70,16 @@ def run_c(src, steps=3000000):
     for i, b in enumerate(image):
         mem[ORG + i] = b
     mpu.pc = ORG
-    mem[0x00fe] = 0
+    mem[0x00fc] = OUT & 0xFF           # optr: where the next byte goes
+    mem[0x00fd] = OUT >> 8
     for _ in range(steps):
         if mem[mpu.pc] == 0x00:            # BRK: sys_exit reached
             break
         mpu.step()
     else:
         raise AssertionError("program did not reach sys_exit")
-    return bytes(mem[OUT:OUT + mem[0x00fe]])
+    end = mem[0x00fc] | mem[0x00fd] << 8
+    return bytes(mem[OUT:end])
 
 
 def unsigned_ops(a, b):
@@ -120,6 +125,13 @@ class Executed(unittest.TestCase):
         src = "int main() { int n = 0; int i = 0; while (i < 3) {\n%s    i = i + 1; }\n" % body
         src += "if (n == %d) puts(\"Y\"); else puts(\"N\"); return 0; }\n" % (3 * sum(i % 7 for i in range(60)))
         self.assertEqual(run_c(src), b"Y")
+
+    def test_output_longer_than_255_bytes_is_counted_in_full(self):
+        # 300 bytes in two puts (one string is at most 254 bytes): a one-byte count would check
+        # only the first 44 of them
+        a, b = "0123456789" * 15, "abcdefghij" * 15
+        src = 'int main() { puts("%s"); puts("%s"); return 0; }' % (a, b)
+        self.assertEqual(run_c(src), (a + b).encode("latin-1"))
 
     def test_deep_expression_within_the_stack(self):
         expr = "1+(" * 30 + "1" + ")" * 30          # 31 values pushed at once: the limit
@@ -193,6 +205,9 @@ class ExecutedSlice2(unittest.TestCase):
 class ExecutedSlice3(unittest.TestCase):
     def check(self, src, want=b"Y"):
         self.assertEqual(run_c(src), want, src)
+
+    def test_a_negative_int_global_starts_at_its_value(self):
+        self.check('int g = -5;\nint main() { if (g == 65531) puts("Y"); else puts("N"); return 0; }')
 
     def test_a_global_is_shared_by_functions(self):
         self.check("int g = 5;\nint bump() { g = g + 1; return 0; }\n"
