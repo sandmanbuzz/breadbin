@@ -3,7 +3,8 @@
 ; tail [-n] [file]: the last n (10) lines. Keeps the last 2 KB of the input
 ; in a ring, so lines further back than that are gone.
 .include "../../include/breadbin.inc"
-.import argn, open_or_die, getc, set_input, parse_dec
+.import argn, open_or_die, getc, set_input, parse_dec, eprint
+.importzp lval
 RING = 2048
 n     = $23
 idx   = $24
@@ -26,7 +27,14 @@ first = $2e
         lda (q),y
         cmp #'-'
         bne @file
-        lda q
+        ldy #1              ; more than three digits is an error before parse_dec (it keeps 16 bits and would wrap)
+@cl:    lda (q),y
+        beq @len
+        iny
+        cpy #5
+        bcc @cl
+        bcs @big
+@len:   lda q
         clc
         adc #1
         ldx q+1
@@ -34,7 +42,14 @@ first = $2e
         inx
 @pd:    jsr parse_dec
         bcs @file
-        sta n
+        ldx lval+1          ; a count of 256 or more is an error, not a wrap
+        beq @small
+@big:   lda #<msg_big
+        ldx #>msg_big
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
+@small: sta n
         inc idx
 @file:  lda idx
         jsr argn
@@ -231,3 +246,6 @@ qinc:   inc q
 .segment "BSS"
 len:    .res 2          ; bytes to print
 ring:   .res RING
+
+.segment "RODATA"
+msg_big: .byte "tail: count too large (255 at most)", 10, 0

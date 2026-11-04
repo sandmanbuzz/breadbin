@@ -27,26 +27,25 @@ len   = $2a             ; 2
         ldy #0
         lda (p),y
         cmp #'-'
-        bne @files
+        bne @chk
         iny
         lda (p),y
         cmp #'a'
-        bne @files
+        bne @chk
+        iny                 ; the option is exactly "-a": "-ab" is a file name's flag, not -a
+        lda (p),y
+        bne @chk
         lda #(O_WRONLY | O_CREAT | O_APPEND)
         sta flags
         inc idx
+@chk:   lda argc            ; more files than MAXF is an error, before anything is opened or truncated
+        sec
+        sbc idx
+        cmp #MAXF+1
+        bcs toomany
 @files: lda idx
         jsr argn
         bcs copy
-        pha                 ; argn's pointer (A, X) survives the count check
-        txa
-        pha
-        lda n
-        cmp #MAXF
-        bcs toomany
-        pla
-        tax
-        pla
         ldy flags
         jsr open_or_die
         ldx n
