@@ -36,7 +36,7 @@ hw:     .res 2          ; end of the bytes actually stored (pc past it: a traili
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
-tname:  .res 90         ; the output name with ~ appended: the file is written under it, then renamed
+tname:  .res 90         ; the output name with ^ prepended: the file is written under it, then renamed
 tlead:  .res 1          ; where the output's last path component starts in tname
 tend:   .res 1
 qkind:  .res 1          ; the quote character open in the line being lowercased, or 0
@@ -148,6 +148,14 @@ rp_n:   tsx
         ldx #>s_long
         jsr error
 @ok:    jsr do_line
+        jsr skipsp              ; nothing but a comment may follow a statement
+        jsr peek
+        beq line_done
+        cmp #';'
+        beq line_done
+        lda #<e_junk
+        ldx #>e_junk
+        jsr error
 line_done:
         jmp rp_loop
 rp_done:
@@ -155,7 +163,7 @@ rp_done:
         jmp SYS_CLOSE
 
 write_out:
-        ; the output is written as its temporary name (~ + the name, in the same directory) in its own directory and renamed over outp only when complete:
+        ; the output is written as its temporary name (^ + the name, in the same directory; CBM DOS cannot create a name containing ~, VICE-measured, and ^ works) in its own directory and renamed over outp only when complete:
         ; a failed write leaves the previous output as it was, and no short file under the real name
         lda outp
         sta r0
@@ -181,19 +189,40 @@ write_out:
         tya
         sec
         sbc tlead
-        cmp #15                 ; a c64fs name is at most 14 characters
+        bne @nz
+        lda #<e_outempty        ; an output that ends in / (or is empty) names no file
+        ldx #>e_outempty
+        jmp @refuse
+@nz:    cmp #15                 ; a c64fs name is at most 14 characters
         bcc @lok
         jmp @long
-@lok:        lda tlead               ; the temporary is ~ and the first 13 characters of the output's name (^ if
-        clc                     ; the name starts with ~, so it can never equal the output), same directory
+@lok:   ldy tlead               ; CBM DOS reads * ? : , = in the unlink's scratch command as wildcards or commands
+@sc:    lda (r0),y
+        beq @scd
+        cmp #'*'
+        beq @bd
+        cmp #'?'
+        beq @bd
+        cmp #':'
+        beq @bd
+        cmp #','
+        beq @bd
+        cmp #'='
+        beq @bd
+        iny
+        bne @sc
+        beq @scd
+@bd:    jmp @bad
+@scd:   lda tlead               ; the temporary is ^ and the first 13 characters of the output's name (+ if
+        clc                     ; the name starts with ^, so it can never equal the output), same directory
         adc #14
         sta tend
         ldy tlead
         lda (r0),y
-        ldx #'~'
-        cmp #'~'
-        bne @pf
         ldx #'^'
+        cmp #'^'
+        bne @pf
+        ldx #'+'
 @pf:    txa
         ldx tlead
         sta tname,x
@@ -236,14 +265,17 @@ write_out:
 @free:  lda #(O_WRONLY | O_CREAT | O_TRUNC)
         jsr SYS_OPEN
         bcc @ok
-        ldx outp
-        ldy outp+1
+        ldx #<tname             ; the temporary is what could not be created
+        ldy #>tname
         jsr perr
         lda #1
         jmp SYS_EXIT
+@bad:   lda #<e_outbad
+        ldx #>e_outbad
+        jmp @refuse
 @long:  lda #<e_outname
         ldx #>e_outname
-        jsr eprint
+@refuse: jsr eprint
         lda #1
         jmp SYS_EXIT
 @ok:    sta fd
@@ -300,28 +332,7 @@ write_out:
         lda fd
         jsr SYS_CLOSE
         bcs @werr              ; the close is where a buffered write can fail
-        lda #<tname             ; the complete file takes the output's name (c64fs replaces an existing one)
-        sta r0
-        lda #>tname
-        sta r0+1
-        lda outp
-        sta r1
-        lda outp+1
-        sta r1+1
-        jsr SYS_RENAME
-        bcs @rnerr
-        rts
-@rnerr: lda #<s_rnerr           ; the complete file is kept: it is named in the message
-        ldx #>s_rnerr
-        jsr eprint
-        lda #<tname
-        ldx #>tname
-        jsr eprint
-        lda #10
-        ldy #2
-        jsr fputc
-        lda #1
-        jmp SYS_EXIT
+        jmp @fin               ; (the rename step sits below the error path: the branches above must reach @werr)
 @werr:  lda fd
         jsr SYS_CLOSE          ; its result does not matter now: the write has failed
         lda #<tname
@@ -334,6 +345,51 @@ write_out:
         jsr eprint
         lda #1
         jmp SYS_EXIT
+@fin:
+        ; the complete file takes the output's name. CBM DOS ("R0:new=old") refuses a rename onto an existing name,
+        ; so the old output is unlinked first (no such file is fine). THE WINDOW: if the rename then fails, the old
+        ; output is already gone and the complete file survives only under its temporary name, which the message
+        ; names. A failed write never gets here, so then the old output is intact.
+        lda #0
+        sta tend                ; tend (free now): 1 once the old output has been removed
+        lda outp
+        sta r0
+        lda outp+1
+        sta r0+1
+        jsr SYS_UNLINK
+        bcc @rm
+        cmp #ENOENT             ; no old output: nothing to remove
+        beq @rn
+        lda #<s_unerr           ; the old output could not be removed: it is intact, the complete file is the temporary
+        ldx #>s_unerr
+        jmp @rnmsg
+@rm:    inc tend
+@rn:    lda #<tname
+        sta r0
+        lda #>tname
+        sta r0+1
+        lda outp
+        sta r1
+        lda outp+1
+        sta r1+1
+        jsr SYS_RENAME
+        bcs @rnerr
+        rts
+@rnerr: lda #<s_rnerr
+        ldx #>s_rnerr
+        ldy tend
+        beq @rnmsg
+        lda #<s_rnerr2          ; the old output was removed before the rename failed
+        ldx #>s_rnerr2
+@rnmsg: jsr eprint              ; the complete file is kept: it is named in the message
+        lda #<tname
+        ldx #>tname
+        jsr eprint
+        lda #10
+        ldy #2
+        jsr fputc
+        lda #1
+        jmp SYS_EXIT
 wr:     sta r0
         stx r0+1
         sty r1
@@ -341,7 +397,6 @@ wr:     sta r0
         sta r1+1
         lda fd
         jmp SYS_WRITE
-
 ; readline: getc -> lbuf, lowercased outside quotes; carry set at EOF
 putc:   cpx #254
         bcs @ov
@@ -517,8 +572,11 @@ d_bytes:
         bne @e
         jsr adv
 @s:     jsr peek
-        beq @r
-        jsr adv
+        bne @sc
+        lda #<e_str             ; the line ended inside the string
+        ldx #>e_str
+        jmp error
+@sc:    jsr adv
         cmp #'"'
         beq @next
         jsr emit
@@ -581,25 +639,21 @@ d_ress: jsr expr                ; no bytes stored: zeros are filled in only if s
         lda #<e_resrel
         ldx #>e_resrel
         jmp error
-@sign:  lda ev+1                ; a count of $9A00 (the user pool, 39424 bytes) or more cannot be loaded
-        cmp #>POOLSZ            ; a wrapped one (0-1 is $FFFF) is that big too
-        bcc @k
-        lda #<e_resbig
-        ldx #>e_resbig
-        jmp error
-@k:     lda pc
-        clc
+@sign:  lda pc                  ; image + BSS is what the loader must fit in the pool ($9A00 = 39424 bytes; a total of exactly $9A00 is refused too, conservatively: the pool must be left a byte): the sum is checked,
+        clc                     ; and it is the sum the message names (a wrapped count, 0-1 is $FFFF, carries out or is far over)
         adc ev
         tax
         lda pc+1
         adc ev+1
-        bcs @big                ; pc is left as it was, so hw never passes it
-        sta pc+1
+        bcs @bigp
+        cmp #>POOLSZ
+        bcc @k
+@bigp:  lda #<e_resbig
+        ldx #>e_resbig
+        jmp error
+@k:     sta pc+1                ; pc is left as it was on an error, so hw never passes it
         stx pc
         rts
-@big:   lda #<e_big
-        ldx #>e_big
-        jmp error
 
 ; ---- instructions ----
 instruction:
@@ -661,6 +715,8 @@ instruction:
         cmp #' '
         beq @acc
         cmp #';'
+        beq @acc
+        cmp #9                  ; TAB
         bne @nacc
 @acc:   jsr adv
         lda #1
@@ -1087,12 +1143,14 @@ term:   lda #0
         cmp #'%'
         beq @bin
         cmp #$27
-        beq @chr
-        cmp #'*'
+        bne @nq
+        jmp @chr
+@nq:    cmp #'*'
         beq @pc
         jsr isdigit
-        bcc @dec
-        jsr isidstart
+        bcs @nd
+        jmp @dec
+@nd:    jsr isidstart
         bcs @nsym
         jmp @sym
 @nsym:  lda #<e_syntax
@@ -1109,12 +1167,16 @@ term:   lda #0
         rts
 @chr:   jsr adv
         jsr peek
+        beq @chre               ; the line ended after the quote
         sta tv
         jsr adv
         jsr peek
         cmp #$27
-        bne @r0
+        bne @chre
         jmp adv
+@chre:  lda #<e_chr
+        ldx #>e_chr
+        jmp error
 @hex:   jsr adv
 @hl:    jsr peek
         jsr hexval
@@ -1286,6 +1348,16 @@ lookup: lda #<symtab
 define: sta tv
         stx tv+1
         sty trel
+        lda nlen                ; `a` in an operand is the accumulator: a symbol of that name could never be used
+        cmp #1
+        bne @nota
+        lda name
+        cmp #'a'
+        bne @nota
+        lda #<e_acc
+        ldx #>e_acc
+        jmp error
+@nota:
         jsr lookup
         bcc @have
         ; new symbol (pass 1)
@@ -1532,6 +1604,8 @@ s_usage: .byte "usage: as source output", 10, 0
 s_as:    .byte "as: line ", 0
 s_wrerr:  .byte "as: cannot write the output", 10, 0
 s_rnerr:  .byte "as: cannot rename the output; the complete file is left as ", 0
+s_rnerr2: .byte "as: cannot rename the output; the old output was removed first, so the complete file is ", 0
+s_unerr:  .byte "as: cannot remove the old output; it is unchanged, the complete new file is ", 0
 s_exists: .byte "as: will not overwrite the existing file ", 0
 s_rmretry: .byte "; remove it and try again", 10, 0
 s_long:  .byte "line too long (over 254 characters)", 0
@@ -1553,9 +1627,15 @@ e_fwd:   .byte "res count not known yet", 0
 e_eqfwd: .byte "forward reference in =: define the symbol first", 0
 e_eqbyte: .byte "a byte of a label cannot be an = value: use .byte <lbl, >lbl", 0
 e_outname: .byte "as: output name is too long", 10, 0
+e_outbad: .byte "as: output name has a character CBM DOS treats specially (* ? : , =)", 10, 0
+e_outempty: .byte "as: output name is empty", 10, 0
 e_wordb: .byte "a byte of a label in .word: use .byte <lbl, >lbl", 0
 e_resrel: .byte "res count is an address, not a number", 0
-e_resbig: .byte "res count is too big for the pool", 0
+e_str:   .byte "unterminated string", 0
+e_junk:  .byte "junk after the statement", 0
+e_chr:   .byte "unterminated character", 0
+e_acc:   .byte "a is the accumulator, not a symbol name", 0
+e_resbig: .byte "image plus res is too big for the pool (must be under 39424 bytes)", 0
 e_reloc: .byte "bad relocatable expression", 0
 .macro SYM n, v
         .byte n, 0

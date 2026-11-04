@@ -300,6 +300,74 @@ class AsCrAndPointers(unittest.TestCase):
 
 
 @unittest.skipIf(SKIP, SKIP)
+class AsMalformed(unittest.TestCase):
+    """Malformed input is refused with a message that names the line, never assembled into something else."""
+
+    def asm(self, src):
+        return asim.run("as", ["/s", "/o"], {"/s": src.encode()})
+
+    def refused(self, src, text, line=None):
+        r = self.asm(src)
+        self.assertEqual(r.exit, 1, (src, r.out, r.err))
+        self.assertIn(text, r.err)
+        if line:
+            self.assertIn(b"line %d:" % line, r.err)
+        self.assertNotIn("/o", r.files)
+
+    def test_unterminated_string_in_byte_is_refused(self):
+        self.refused('nop\n.byte "abc\n', b"unterminated string", 2)
+
+    def test_unterminated_string_in_text_is_refused(self):
+        self.refused('.text "abc\n.byte 9\n', b"unterminated string", 1)
+
+    def test_terminated_strings_still_assemble(self):
+        r = self.asm('.byte "ab", 1 ; c\n.text "x;y"\n')
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][9:], b"ab\x01x;y")
+
+    def test_trailing_junk_after_an_instruction_is_refused(self):
+        self.refused("nop\nlda #1 junk\n", b"junk after the statement", 2)
+        self.refused("lda (5),y z\n", b"junk after the statement", 1)
+        self.refused("asl a b\n", b"junk after the statement", 1)
+
+    def test_accumulator_operand_may_be_followed_by_a_tab(self):
+        r = self.asm("asl a\t; x\nasl a\t\nlsr a\t;y\n")
+        self.assertEqual(r.files["/o"][9:], b"\x0a\x0a\x4a")
+
+    def test_trailing_junk_after_a_directive_is_refused(self):
+        self.refused(".byte 1 2\n", b"junk after the statement", 1)
+        self.refused(".word 1 2\n", b"junk after the statement", 1)
+        self.refused('.byte "a" "b"\n', b"junk after the statement", 1)
+        self.refused("x = 5 6\n", b"junk after the statement", 1)
+        self.refused("lab: nop nop\n", b"", 1)
+
+    def test_comments_and_blanks_after_a_statement_are_fine(self):
+        r = self.asm("lda #1 ; c\nnop   \n.byte 1,2 ;x\nlab: ; only\nx = 5 ; five\n")
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][9:], b"\xa9\x01\xea\x01\x02")
+
+    def test_a_label_named_a_is_refused(self):
+        # `a` in an operand is the accumulator: a symbol of that name could never be used
+        self.refused("a: nop\n", b"a is the accumulator", 1)
+        self.refused("a = 5\n", b"a is the accumulator", 1)
+        r = self.asm("ab: nop\nlda #1\njmp ab\nfoo_a: nop\n")   # names that merely contain or start with a are fine
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_a_lone_quote_is_refused_and_emits_nothing(self):
+        r = self.asm("lda #1\nlda #'\n")
+        self.assertEqual(r.exit, 1, (r.out, r.err))
+        self.assertIn(b"line 2:", r.err)
+        self.assertIn(b"unterminated character", r.err)
+        self.assertNotIn("/o", r.files)
+
+    def test_an_unclosed_character_is_refused_and_a_closed_one_is_fine(self):
+        self.refused("lda #'a\n", b"unterminated character", 1)
+        r = self.asm("lda #'a'\n")
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][9:], b"\xa9a")
+
+
+@unittest.skipIf(SKIP, SKIP)
 class AsResCount(unittest.TestCase):
     """.res takes a count that is a number: not a negative one (the 16-bit pc would wrap to a huge BSS)
     and not an address (a label's value is an image offset, not a count)."""
@@ -320,6 +388,17 @@ class AsResCount(unittest.TestCase):
 
     def test_a_count_just_under_the_pool_size_is_fine(self):
         r = self.asm("        .res 39423\n")
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_image_plus_res_over_the_pool_is_refused_and_the_message_says_so(self):
+        # the pool holds image + BSS: 3 bytes of image and a count under the pool size still do not fit
+        r = self.asm(".byte 1,2,3\n        .res 39423\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"image plus res", r.err)
+        self.assertNotIn("/o", r.files)
+        r = self.asm(".byte 1,2,3\n        .res 39421\n")      # 39424 in all: one byte past the last page
+        self.assertNotEqual(r.exit, 0)
+        r = self.asm(".byte 1,2,3\n        .res 39420\n")      # 39423 in all: fits
         self.assertEqual(r.exit, 0, r.err)
 
     def test_a_label_as_the_count_is_refused(self):
@@ -474,46 +553,105 @@ class AsV8(unittest.TestCase):
         self.assertEqual(r.exit, 0, r.err)
         self.assertIn("/abcdefghijklmn", r.files)
 
-    def test_a_failed_rename_keeps_the_previous_output_and_the_complete_temporary(self):
-        # the rename is the last step: when it fails the previous output is untouched and the complete
-        # temporary file is kept, named in the message, so nothing is lost
+    def test_a_failed_rename_after_the_unlink_leaves_the_complete_temporary_and_says_so(self):
+        # the old output is unlinked before the rename (CBM DOS cannot rename over it), so when the rename fails the
+        # old output is gone and the complete temporary is the file: the message names it and says so
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, fail_rename=1)
         self.assertEqual(r.exit, 1, r.err)
-        self.assertEqual(r.files.get("/o"), b"OLD")
-        self.assertTrue(r.files.get("/~o", b"")[:3] == b"CX\x01", sorted(r.files))
-        self.assertIn(b"~o", r.err)
+        self.assertNotIn("/o", r.files)
+        self.assertTrue(r.files.get("/^o", b"")[:3] == b"CX\x01", sorted(r.files))
+        self.assertIn(b"^o", r.err)
+        self.assertIn(b"old output was removed", r.err)
+
+    def test_a_failed_rename_with_no_old_output_does_not_claim_a_removal(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_rename=1)
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertNotIn(b"removed", r.err)
+        self.assertIn(b"^o", r.err)
+
+    def test_reassembly_onto_an_existing_output_replaces_it_where_rename_refuses_to_replace(self):
+        # src/mod/cbm.s cbm_rename sends "R0:new=old"; CBM DOS refuses an existing new name (error 63; kernel EIO).
+        # as unlinks the old output first, so the rename lands. Modelled in asim only (rename_noreplace); the VICE
+        # answer is recorded in docs/design/s13-as-limits.md.
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, rename_noreplace=True)
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][:3], b"CX\x01")
+        self.assertNotIn("/^o", r.files)
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, rename_noreplace=True)
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][:3], b"CX\x01")
+        self.assertNotIn("/^o", r.files)
+
+    def test_an_output_leaf_with_a_cbm_special_character_is_refused_and_touches_nothing(self):
+        # the unlink of the old output sends its raw name to CBM DOS as a scratch command: * ? : , = would be wildcards
+        # or commands and scratch unrelated files
+        for leaf in ("a*", "x?", "a:b", "a,b", "a=b"):
+            files = {"/s": self.SRC8, "/ab": b"KEEP", "/xy": b"KEEP"}
+            r = asim.run("as", ["/s", "/" + leaf], files)
+            self.assertEqual(r.exit, 1, (leaf, r.err))
+            self.assertIn(b"treats specially", r.err, leaf)
+            self.assertEqual(r.files, files, leaf)
+
+    def test_a_special_character_in_a_directory_part_is_not_a_leaf_problem(self):
+        r = asim.run("as", ["/s", "/d*/o"], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_an_output_with_an_empty_leaf_is_refused_and_touches_nothing(self):
+        for out in ("/d/", "/", ""):
+            files = {"/s": self.SRC8, "/d/x": b"KEEP"}
+            r = asim.run("as", ["/s", out], files)
+            self.assertEqual(r.exit, 1, (out, r.err))
+            self.assertIn(b"as: output name", r.err, out)
+            self.assertEqual(r.files, files, out)
+
+    def test_a_failed_temporary_create_names_the_temporary(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_create="/^o")
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertIn(b"^o", r.err)
+
+    def test_a_first_assembly_with_no_old_output_ignores_the_unlinks_enoent_and_renames(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][:3], b"CX\x01")
+        self.assertNotIn("/^o", r.files)
+
+    def test_a_caret_output_name_gets_the_plus_temporary(self):
+        r = asim.run("as", ["/s", "/^o"], {"/s": self.SRC8}, fail_rename=1)
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertTrue(r.files.get("/+^o", b"")[:3] == b"CX\x01", sorted(r.files))
+        self.assertIn(b"+^o", r.err)
 
     def test_a_user_file_at_the_temporary_name_is_not_destroyed(self):
         # the temporary is derived from the output name; a file already there is refused, not truncated
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~o": b"USER"})
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/^o": b"USER"})
         self.assertEqual(r.exit, 1, r.err)
-        self.assertEqual(r.files["/~o"], b"USER")
-        self.assertIn(b"~o", r.err)
+        self.assertEqual(r.files["/^o"], b"USER")
+        self.assertIn(b"^o", r.err)
         self.assertIn(b"remove it and try again", r.err)
         self.assertNotIn("/o", r.files)
 
     def test_a_probe_error_other_than_absent_is_refused(self):
         # only ENOENT means the temporary name is free; any other error from the probe must not be treated as absent
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_read_open=("/~o", 5))
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_read_open=("/^o", 5))
         self.assertEqual(r.exit, 1, r.err)
         self.assertNotIn("/o", r.files)
-        self.assertNotIn("/~o", r.files)
+        self.assertNotIn("/^o", r.files)
 
     def test_a_user_file_at_the_temporary_name_survives_a_failed_write(self):
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~o": b"USER"}, fail_write=1)
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/^o": b"USER"}, fail_write=1)
         self.assertEqual(r.exit, 1, r.err)
-        self.assertEqual(r.files["/~o"], b"USER")
+        self.assertEqual(r.files["/^o"], b"USER")
 
     def test_an_output_named_like_the_old_temporary_keeps_its_content(self):
         good = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}).files["/o"]
-        r = asim.run("as", ["/s", "/~as"], {"/s": self.SRC8})
+        r = asim.run("as", ["/s", "/^as"], {"/s": self.SRC8})
         self.assertEqual(r.exit, 0, r.err)
-        self.assertEqual(r.files["/~as"], good)
+        self.assertEqual(r.files["/^as"], good)
 
-    def test_a_user_file_named_tilde_as_is_left_alone(self):
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~as": b"USER"})
+    def test_a_user_file_named_caret_as_is_left_alone(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/^as": b"USER"})
         self.assertEqual(r.exit, 0, r.err)
-        self.assertEqual(r.files["/~as"], b"USER")
+        self.assertEqual(r.files["/^as"], b"USER")
 
     def test_output_name_lengths(self):
         for n in (13, 14):
@@ -527,8 +665,8 @@ class AsV8(unittest.TestCase):
         self.assertIn(b"too long", r.err)
         self.assertEqual(sorted(r.files), ["/s"])
 
-    def test_a_tilde_name_of_14_characters_does_not_collide_with_its_temporary(self):
-        name = "/" + "~" * 14
+    def test_a_caret_name_of_14_characters_does_not_collide_with_its_temporary(self):
+        name = "/" + "^" * 14
         r = asim.run("as", ["/s", name], {"/s": self.SRC8})
         self.assertEqual(r.exit, 0, r.err)
         self.assertEqual(r.files[name][:3], b"CX\x01")
