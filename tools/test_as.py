@@ -429,7 +429,7 @@ class AsV8(unittest.TestCase):
         self.assertEqual(self.image('.byte "don\'t PANIC"\n'), b"don't PANIC")
 
     def test_an_apostrophe_in_a_string_leaves_the_next_operand_alone(self):
-        self.assertEqual(self.image('k = 1\n.byte "don\'t", k\n'), b"don't\x01")
+        self.assertEqual(self.image('Foo = 1\n.byte "don\'t", Foo\n'), b"don't\x01")
 
     def test_a_double_quote_in_single_quotes_is_a_character(self):
         self.assertEqual(self.image(".byte '\"', 1\n"), b'"\x01')
