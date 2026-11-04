@@ -180,5 +180,44 @@ class AsLongLine(unittest.TestCase):
         self.assertIn(b"line too long", r.err)
 
 
+@unittest.skipIf(SKIP, SKIP)
+class AsZeroPageAndNames(unittest.TestCase):
+    """(zp),y and (zp,x) take a zero-page pointer: the 6502 has no other form, and as used to
+    assemble an absolute pointer silently. Names are kept to 14 characters: a longer name is refused,
+    not cut (a cut name collided with its prefix)."""
+
+    def asm(self, src):
+        return asim.run("as", ["/s", "/o"], {"/s": src.encode()})
+
+    def test_indirect_y_with_a_zero_page_pointer_is_fine(self):
+        self.assertEqual(self.asm("ptr = $2b\n        lda (ptr),y\n").exit, 0)
+
+    def test_indirect_y_with_an_absolute_pointer_is_refused(self):
+        r = self.asm("ptr = $1234\n        lda (ptr),y\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_indirect_x_with_an_absolute_pointer_is_refused(self):
+        r = self.asm("ptr = $1234\n        lda (ptr,x)\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_forward_zero_page_pointer_is_fine(self):
+        self.assertEqual(self.asm("        lda (ptr),y\nptr = $2b\n").exit, 0)
+
+    def test_a_forward_absolute_pointer_is_refused(self):
+        r = self.asm("        lda (ptr),y\nptr = $1234\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_14_character_name_is_kept_and_distinct(self):
+        self.assertEqual(self.asm("abcdefghijklmn: nop\nabcdefghijklmo: nop\n").exit, 0)
+
+    def test_a_15_character_name_is_refused_not_cut(self):
+        r = self.asm("abcdefghijklmno: nop\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"longer than 14", r.err)
+
+
 if __name__ == "__main__":
     unittest.main()
