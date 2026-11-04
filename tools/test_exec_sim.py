@@ -34,8 +34,10 @@ def kstart():
 
 @unittest.skipIf(SKIP, SKIP)
 class ExecSim(unittest.TestCase):
+    IMAGE = None                                     # a subclass can boot a different disk image
+
     def setUp(self):
-        self.s = Sim(None)
+        self.s = Sim(None, image=self.IMAGE)
         s, m, L = self.s, self.s.mem.b, self.s.lbl
         self.m, self.L = m, L
         for i in range(OLD_LEN):                     # the caller's own image
@@ -138,6 +140,96 @@ class ExecSim(unittest.TestCase):
         self.assertEqual(m[L["free_pages"]], base_free)     # old and new image both returned
         for i in range(OLD_LEN):
             self.assertEqual(m[L["pg_used"] + OLD_PAGE - 8 + i], 0)
+
+
+def cx_file(img_size, bss_size):
+    """A CX v1 file whose header declares `img_size` bytes of image (all `rts`) and `bss_size` of BSS."""
+    assert img_size >= 1
+    return b"CX\x01" + img_size.to_bytes(2, "little") + bss_size.to_bytes(2, "little") + \
+        (0).to_bytes(2, "little") + b"\x60" * img_size
+
+
+class _OversizeImage:
+    """A disk image with programs whose headers declare a BSS the pool cannot hold, built once."""
+    PROGRAMS = {}
+    path = None
+
+    @classmethod
+    def build(cls):
+        if cls.path:
+            return cls.path
+        import shutil
+        import subprocess
+        import tempfile
+        tmp = tempfile.mkdtemp(prefix="bigbss-")
+        root = os.path.join(tmp, "root")
+        shutil.copytree(os.path.join(BUILD, "root"), root)
+        for name, (img, bss) in cls.PROGRAMS.items():
+            with open(os.path.join(root, "bin", name), "wb") as f:
+                f.write(cx_file(img, bss))
+        out = os.path.join(tmp, "bigbss.d64")
+        subprocess.run([sys.executable, os.path.join(ROOT, "tools", "mkimage.py"), "build", out,
+                        "--boot", os.path.join(BUILD, "breadbin.prg"), "--root", root,
+                        "--dev", "console:1", "--dev", "null:0"], check=True, capture_output=True)
+        cls.path = out
+        return out
+
+
+class Oversize(_OversizeImage):
+    PROGRAMS = {
+        "bss40000": (1, 40000),        # more than the whole pool (39,424 bytes)
+        "bssffff": (1, 0xFFFF),        # img + bss = 65,536: the 16-bit sum carries
+        "carry": (600, 65000),         # img + bss carries too
+        "frag": (1, 95 * 256),         # 96 pages: free pages in total (144), but no contiguous run that long
+        "fit": (1, 94 * 256 - 64),     # 94 pages with the arguments: exactly the longest free run in the simulator
+    }
+
+
+@unittest.skipIf(SKIP, SKIP)
+class ExecOversizeBss(ExecSim):
+    """exec of a program whose header declares more BSS than there is memory: a clean ENOMEM, nothing
+    loaded, nothing zero-filled, the caller untouched (the unverified 'oversize BSS' nit from the S12a
+    review; as can now write a big BSS into the header, so exec is the one that must refuse it)."""
+    @classmethod
+    def setUpClass(cls):
+        cls.IMAGE = Oversize.build()
+
+    def user_memory(self):
+        # the pool, without the simulator's own scratch pages ($80-$87: the path string lives there)
+        return bytes(self.m[0x0800:0x8000]) + bytes(self.m[0x8800:kstart() << 8])
+
+    def test_a_bss_larger_than_the_pool_is_enomem_and_changes_nothing(self):
+        for name in ("bss40000", "bssffff", "carry", "frag"):
+            with self.subTest(name):
+                self.setUp()
+                for i in range(0x0800, kstart() << 8, 256):         # dirty memory: a zero-fill would show
+                    self.m[i:i + 256] = bytes([0xFF]) * 256
+                self.m[0x20:0x40] = bytes(range(0xA0, 0xC0))
+                before, mem = self.state(), self.user_memory()
+                self.assertEqual(self.errno_of(self.exec("/bin/" + name)), "ENOMEM")
+                self.assertEqual(self.state(), before)
+                self.assertEqual(self.user_memory(), mem)
+
+    def test_the_longest_free_run_fits_and_its_bss_is_zeroed(self):
+        for i in range(0x0800, kstart() << 8, 256):
+            self.m[i:i + 256] = bytes([0xFF]) * 256
+        # the simulator's free runs: $08-$1F (24), $22-$7F (94: the caller holds $20-$21, the test's
+        # scratch pages are $80-$87), $88 to the pool's end (26). The longest is 94 pages from $22.
+        used = self.m[self.L["pg_used"]:self.L["pg_used"] + kstart() - 8]
+        runs, start = [], None
+        for i, u in enumerate(list(used) + [1]):
+            if not u and start is None:
+                start = i
+            elif u and start is not None:
+                runs.append((i - start, start + 8))
+                start = None
+        self.assertEqual(max(runs), (94, 0x22), runs)
+        self.exec("/bin/fit", until=0x2200)
+        st = self.state()
+        self.assertEqual(st["p_mpage"], 0x22)
+        self.assertEqual(st["p_mlen"], 94)
+        bss = bytes(self.m[0x2200 + 1:0x2200 + 1 + 94 * 256 - 64])
+        self.assertEqual(bss, bytes(len(bss)), "the BSS must be zero at load, not whatever the pages held")
 
 
 if __name__ == "__main__":
