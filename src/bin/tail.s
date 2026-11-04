@@ -27,7 +27,14 @@ first = $2e
         lda (q),y
         cmp #'-'
         bne @file
-        lda q
+        ldy #1              ; more than three digits is an error before parse_dec (it keeps 16 bits and would wrap)
+@cl:    lda (q),y
+        beq @len
+        iny
+        cpy #5
+        bcc @cl
+        bcs @big
+@len:   lda q
         clc
         adc #1
         ldx q+1
@@ -35,9 +42,9 @@ first = $2e
         inx
 @pd:    jsr parse_dec
         bcs @file
-        ldx lval+1          ; parse_dec keeps 16 bits; a count of 256 or more is an error, not a wrap
+        ldx lval+1          ; a count of 256 or more is an error, not a wrap
         beq @small
-        lda #<msg_big
+@big:   lda #<msg_big
         ldx #>msg_big
         jsr eprint
         lda #1

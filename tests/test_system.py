@@ -720,6 +720,10 @@ class Pipes(unittest.TestCase):
     def test_tail_count_256_is_an_error(self):
         self.assertIn("too large", self.v.run("tail -256 /etc/help"))
 
+    def test_tail_count_1000_is_an_error(self):
+        # four digits: parse_dec keeps 16 bits, so the value check alone would not be the whole guard
+        self.assertIn("too large", self.v.run("tail -1000 /etc/help"))
+
     def test_sort_empty_file(self):
         self.v.run("cat /dev/null > /home/se")
         self.assertEqual(self.v.run("sort /home/se").strip(), "")
