@@ -62,7 +62,7 @@ Refused with a message (checked by `tools/test_cc.py`):
   points at the same base. Checked at assignment, initialisers, arguments and `return`.
 - An array of pointers; `-` of a pointer; parameters on `main` (start passes none).
 - Static variables over 8192 bytes (STATIC_MAX, a project limit the owner may change).
-- Programs needing more than 185 symbols (`as` holds 220 less its 35 builtins).
+- Programs needing more than 220 symbols (`as` holds 255, less its 35 builtins).
 
 Accepted, by decision, and documented here for the owner:
 
