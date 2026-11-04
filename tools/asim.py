@@ -1,7 +1,7 @@
 """Run a Breadbin CX program (build/root/bin/*) on the host under py65, with the few syscalls a
 file-to-file tool needs answered in Python. For testing programs like `as` without VICE:
 there is no kernel, no scheduler, no disk, only the program's own 6502 code and the library linked
-into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, EXIT; fds 1 and 2 collect output.
+into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, UNLINK, RENAME, EXIT; fds 1 and 2 collect output.
 
     from asim import run
     r = run("as", ["/home/x.s", "/home/x"], {"/home/x.s": b"..."})
@@ -29,6 +29,11 @@ with open(os.path.join(ROOT, "include", "breadbin.inc")) as _f:
 ENOENT = 2
 EBADF = 9
 ENOSPC = 28
+ENAMETOOLONG = 36
+
+
+def toolong(path):
+    return any(len(c) > 14 for c in path.split("/"))
 
 
 class Result:
@@ -53,9 +58,10 @@ def cx_load(data, page):
     return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None):
+def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fail_rename=None, fail_read_open=None):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
-    fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would."""
+    fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
+    fail_rename=n makes the n-th RENAME fail; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs)."""
     if MPU is None:
         raise RuntimeError("py65 not installed")
     with open(path or os.path.join(ROOT, "build", "root", "bin", prog), "rb") as f:
@@ -84,6 +90,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None):
     cpu = MPU(memory=mem, pc=base)
     fds = {}
     writes = [0]
+    renames = [0]
     next_fd = [3]
 
     def cstr(addr):
@@ -117,7 +124,13 @@ def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None):
                 break
             elif name == "OPEN":
                 path_, flags = cstr(r(2)), cpu.a
+                if flags & 0x03 and toolong(path_):
+                    ret(True, ENAMETOOLONG)
+                    continue
                 if flags & 0x03 == 0:             # read
+                    if fail_read_open and path_ == fail_read_open[0]:
+                        ret(True, fail_read_open[1])
+                        continue
                     if path_ not in res.files:
                         ret(True, ENOENT)
                     else:
@@ -166,6 +179,23 @@ def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None):
                     ret(True, EBADF)
                     continue
                 ret(False, 0)
+            elif name == "UNLINK":            # r0 = path
+                p = cstr(r(2))
+                if p in res.files:
+                    del res.files[p]
+                    ret(False, 0)
+                else:
+                    ret(True, ENOENT)
+            elif name == "RENAME":            # r0 = old, r1 = new; replaces an existing new
+                old_, new_ = cstr(r(2)), cstr(r(4))
+                renames[0] += 1
+                if renames[0] == fail_rename or toolong(new_) or toolong(old_):
+                    ret(True, ENAMETOOLONG if toolong(new_) or toolong(old_) else ENOENT)
+                elif old_ in res.files:
+                    res.files[new_] = res.files.pop(old_)
+                    ret(False, 0)
+                else:
+                    ret(True, ENOENT)
             else:
                 raise RuntimeError("syscall %s not modelled (pc $%04X)" % (name, cpu.pc))
             continue

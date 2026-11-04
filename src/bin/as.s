@@ -36,6 +36,10 @@ hw:     .res 2          ; end of the bytes actually stored (pc past it: a traili
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
+tname:  .res 90         ; the output name with ~ appended: the file is written under it, then renamed
+tlead:  .res 1          ; where the output's last path component starts in tname
+tend:   .res 1
+qkind:  .res 1          ; the quote character open in the line being lowercased, or 0
 lbuf:   .res 256            ; up to 254 characters a line (readline refuses longer ones)
 li:     .res 1
 name:   .res 16
@@ -151,16 +155,95 @@ rp_done:
         jmp SYS_CLOSE
 
 write_out:
+        ; the output is written as its temporary name (~ + the name, in the same directory) in its own directory and renamed over outp only when complete:
+        ; a failed write leaves the previous output as it was, and no short file under the real name
         lda outp
         sta r0
         lda outp+1
         sta r0+1
-        lda #(O_WRONLY | O_CREAT | O_TRUNC)
+        ldx #0                  ; x: where the last component starts (0 when there is none)
+        ldy #0
+@cn:    lda (r0),y
+        beq @cdone
+        cpy #74
+        bcc @cok
+        jmp @long
+@cok:   sta tname,y
+        cmp #'/'
+        bne @ns
+        tya
+        clc
+        adc #1
+        tax
+@ns:    iny
+        bne @cn
+@cdone: stx tlead
+        tya
+        sec
+        sbc tlead
+        cmp #15                 ; a c64fs name is at most 14 characters
+        bcc @lok
+        jmp @long
+@lok:        lda tlead               ; the temporary is ~ and the first 13 characters of the output's name (^ if
+        clc                     ; the name starts with ~, so it can never equal the output), same directory
+        adc #14
+        sta tend
+        ldy tlead
+        lda (r0),y
+        ldx #'~'
+        cmp #'~'
+        bne @pf
+        ldx #'^'
+@pf:    txa
+        ldx tlead
+        sta tname,x
+        inx
+@cp:    lda (r0),y
+        beq @ce
+        sta tname,x
+        iny
+        inx
+        cpx tend
+        bcc @cp
+@ce:    lda #0
+        sta tname,x
+        lda #<tname
+        sta r0
+        lda #>tname
+        sta r0+1
+        lda #O_RDONLY           ; no O_EXCL exists: probe first, and never write over a file that is there
+        jsr SYS_OPEN
+        bcs @probe
+        jsr SYS_CLOSE
+        lda #<s_exists
+        ldx #>s_exists
+        jsr eprint
+        lda #<tname
+        ldx #>tname
+        jsr eprint
+        lda #<s_rmretry
+        ldx #>s_rmretry
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
+@probe: cmp #ENOENT             ; only "no such file" means the name is free; any other error is refused
+        beq @free
+        ldx #<tname
+        ldy #>tname
+        jsr perr
+        lda #1
+        jmp SYS_EXIT
+@free:  lda #(O_WRONLY | O_CREAT | O_TRUNC)
         jsr SYS_OPEN
         bcc @ok
         ldx outp
         ldy outp+1
         jsr perr
+        lda #1
+        jmp SYS_EXIT
+@long:  lda #<e_outname
+        ldx #>e_outname
+        jsr eprint
         lda #1
         jmp SYS_EXIT
 @ok:    sta fd
@@ -217,9 +300,35 @@ write_out:
         lda fd
         jsr SYS_CLOSE
         bcs @werr              ; the close is where a buffered write can fail
+        lda #<tname             ; the complete file takes the output's name (c64fs replaces an existing one)
+        sta r0
+        lda #>tname
+        sta r0+1
+        lda outp
+        sta r1
+        lda outp+1
+        sta r1+1
+        jsr SYS_RENAME
+        bcs @rnerr
         rts
+@rnerr: lda #<s_rnerr           ; the complete file is kept: it is named in the message
+        ldx #>s_rnerr
+        jsr eprint
+        lda #<tname
+        ldx #>tname
+        jsr eprint
+        lda #10
+        ldy #2
+        jsr fputc
+        lda #1
+        jmp SYS_EXIT
 @werr:  lda fd
         jsr SYS_CLOSE          ; its result does not matter now: the write has failed
+        lda #<tname
+        sta r0
+        lda #>tname
+        sta r0+1
+        jsr SYS_UNLINK         ; no half-written file is left behind
         lda #<s_wrerr
         ldx #>s_wrerr
         jsr eprint
@@ -275,19 +384,24 @@ readline:
 @end:   lda #0
         sta lbuf,x
         ldx #0
-        ldy #0
+        lda #0
+        sta qkind
 @lc:    lda lbuf,x
         beq @done
-        cmp #'"'
-        beq @q
-        cmp #$27
-        bne @nq
-@q:     tya
-        eor #1
-        tay
-        jmp @nx
-@nq:    cpy #0
+        ldy qkind           ; the quote character that is open, 0 outside quotes
+        beq @out
+        cmp qkind           ; inside a quote only the same quote character closes it
         bne @nx
+        lda #0
+        sta qkind
+        beq @nx
+@out:   cmp #'"'
+        beq @open
+        cmp #$27
+        bne @plain
+@open:  sta qkind
+        jmp @nx
+@plain: 
         cmp #'A'
         bcc @nx
         cmp #'Z'+1
@@ -338,6 +452,8 @@ do_line:
         jsr save_name
         jsr expr
         jsr restore_name
+        jsr eqfwd               ; a forward value is not known yet: a label alias would be a plain constant
+        jsr eqbyte
         lda erel
         beq @abs
         ldy #F_REL
@@ -426,7 +542,14 @@ d_bytes:
 
 d_words:
 @l:     jsr expr
-        lda erel
+        lda ehl                 ; a byte of a label: .word relocates both bytes, so it cannot hold one
+        beq @nb
+        lda erl                 ; erl: the label-ness before < or > cleared erel
+        beq @nb
+        lda #<e_wordb
+        ldx #>e_wordb
+        jmp error
+@nb:    lda erel
         beq @w
         lda pc
         clc
@@ -1321,11 +1444,32 @@ name_is:
         bne @l
 @r:     rts
 
+; eqbyte: an = value that is a byte of a label (<lbl, >lbl) is an error: the label-ness would be lost
+eqbyte: lda ehl
+        beq @r
+        lda erl
+        beq @r
+        lda #<e_eqbyte
+        ldx #>e_eqbyte
+        jmp error
+@r:     rts
+
+; eqfwd: an = value that uses a symbol not yet defined is an error (the value would not be settled)
+eqfwd:  lda efwd
+        beq @r
+        lda #<e_eqfwd
+        ldx #>e_eqfwd
+        jmp error
+@r:     rts
+
 ; error: print "as: line N: message" (A/X) and skip the rest of the line
 error:  pha
         txa
         pha
-        inc errs
+        inc errs         ; saturates: 256 errors must not wrap to 0 and read as success
+        bne @cnt
+        dec errs
+@cnt:
         lda #<s_as
         ldx #>s_as
         jsr eprint
@@ -1387,6 +1531,9 @@ d_text:  .byte "text", 0
 s_usage: .byte "usage: as source output", 10, 0
 s_as:    .byte "as: line ", 0
 s_wrerr:  .byte "as: cannot write the output", 10, 0
+s_rnerr:  .byte "as: cannot rename the output; the complete file is left as ", 0
+s_exists: .byte "as: will not overwrite the existing file ", 0
+s_rmretry: .byte "; remove it and try again", 10, 0
 s_long:  .byte "line too long (over 254 characters)", 0
 s_colon: .byte ": ", 0
 s_bytes: .byte " bytes, ", 0
@@ -1403,6 +1550,10 @@ e_name:  .byte "name longer than 14 characters", 0
 e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
+e_eqfwd: .byte "forward reference in =: define the symbol first", 0
+e_eqbyte: .byte "a byte of a label cannot be an = value: use .byte <lbl, >lbl", 0
+e_outname: .byte "as: output name is too long", 10, 0
+e_wordb: .byte "a byte of a label in .word: use .byte <lbl, >lbl", 0
 e_resrel: .byte "res count is an address, not a number", 0
 e_resbig: .byte "res count is too big for the pool", 0
 e_reloc: .byte "bad relocatable expression", 0
