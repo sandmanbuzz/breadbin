@@ -167,8 +167,8 @@ class Errors(unittest.TestCase):
     def test_redeclared_local(self):
         self.assertFails("int main() { int a; int a; return 0; }", "already declared")
 
-    def test_string_outside_puts(self):
-        self.assertFails('int main() { return "x"; }', "only an argument to puts")
+    def test_string_is_not_a_number(self):
+        self.assertFails('int main() { return "x"; }', "return: a pointer where a number is needed")
 
     def test_puts_needs_one_literal(self):
         self.assertFails("int main() { puts(3); return 0; }", "puts takes one string literal")
@@ -210,6 +210,18 @@ class Errors(unittest.TestCase):
 
     def test_the_null_pointer_constant_is_allowed(self):
         compile_src("int main() { int *p; p = 0; return 0; }")
+
+    def test_a_global_initialiser_must_be_a_literal(self):
+        self.assertFails("int g = 1 + 2;\nint main() { return g; }", "a global needs a literal initialiser")
+
+    def test_a_pointer_cannot_be_multiplied(self):
+        self.assertFails("int main() { int a[2]; return a * 2; }", "a pointer can only be added to or subtracted from")
+
+    def test_a_string_array_needs_a_string(self):
+        self.assertFails("int main() { char s[] = 5; return 0; }", "an array can only be initialised from a string literal")
+
+    def test_a_string_array_needs_the_size_or_a_string(self):
+        self.assertFails("int main() { char s[]; return 0; }", "needs a size or a string")
 
     def test_index_needs_a_pointer(self):
         self.assertFails("int main() { int x = 1; return x[0]; }", "needs a pointer or an array")
@@ -270,11 +282,11 @@ class Errors(unittest.TestCase):
     def test_embedded_nul_is_refused(self):
         self.assertFails('int main() { puts("a\\0b"); return 0; }', "would end it early")
 
-    def test_multiplication_is_refused(self):
-        self.assertFails("int main() { return 2 * 3; }", "operator * is not in this slice")
+    def test_a_string_is_not_a_number(self):
+        self.assertFails('int main() { return "x"; }', "return: a pointer where a number is needed")
 
-    def test_division_is_refused(self):
-        self.assertFails("int main() { return 6 / 3; }", "operator / is not in this slice")
+    def test_division_by_a_pointer_is_refused(self):
+        self.assertFails("int main() { int a[2]; return 6 / a; }", "a pointer cannot be the right side of /")
 
     def test_deep_parentheses_are_a_compile_error(self):
         src = "int main() { return " + "(" * 400 + "1" + ")" * 400 + "; }"
