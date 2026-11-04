@@ -44,6 +44,21 @@ int main() {
 }
 """
 
+CHARP = """\
+char *msg = "pointer";
+int total = 0;
+int twice(int n) { return n * 2; }
+int main() {
+  char *p;
+  p = msg;
+  total = total + twice(21) / 3;
+  if (*p == 112) puts("p\\n"); else puts("np\\n");
+  if (*(p + 2) == 105) puts("i\\n"); else puts("ni\\n");
+  if (total == 14) puts("mul\\n"); else puts("nomul\\n");
+  return 0;
+}
+"""
+
 OPS = """\
 int f() { return 3 - 1; }
 int main() {
@@ -80,6 +95,7 @@ PROGRAMS = {
     "ccloop": LOOP,
     "ccops": OPS,
     "ccslice2": SLICE2,
+    "ccchar": CHARP,
 }
 
 
@@ -115,6 +131,9 @@ class Compiled(unittest.TestCase):
         # the screen is 40 columns: a long line wraps at a space, and the space is lost at the
         # break, so compare with all whitespace removed on both sides (no character may be lost)
         self.assertEqual("".join(self.out("ccops").split()), "eqsubge" + "".join(LONG_LINE.split()))
+
+    def test_a_global_char_pointer_multiplication_and_division(self):
+        self.assertEqual(self.out("ccchar").split(), ["p", "i", "mul"])
 
     def test_parameters_arrays_pointers_char_and_for(self):
         self.assertEqual(self.out("ccslice2").split(), ["sum", "sub", "char"])
