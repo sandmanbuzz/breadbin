@@ -103,7 +103,7 @@ Small, specific questions with an empty context are the sweet spot: one question
 
 ## Landing (on local main)
 
-Local main is the shared truth; nothing lands on it without the land lock, and nothing is pushed without the user's go. To land a branch: `tools/with-lock -r land -- sh <script>` (or the same git commands inside the lock), with `make test-host` run on the branch first. When the landing changes the kernel, the figures go in the ledger too: `make size | python3 tools/size_ledger.py --commit "$(git rev-parse --short HEAD)"` appends the row to `docs/size-ledger.tsv`.
+Local main is the shared truth; nothing lands on it without the land lock, and nothing is pushed without the user's go. To land a branch: `tools/with-lock -r land -- sh tools/land.sh BRANCH [MESSAGE]`. The script merges with `--no-commit`, runs `make clean` and then `make test-host` on the merged tree, and commits only if the suite is green; on a conflict or a red suite it aborts the merge and commits nothing. Do not chain a commit on a grep of the test output. Stale build output in the primary clone made the suite look red on 2026-11-04 (46 failures in `test_as`, `test_uci_sim` and the filesystem tests); `make clean` and a rerun gave 299 OK, 77 skipped, and a clean `git archive` export of the same merge gave the same result. Host-suite flakes other sessions have seen may have this cause: if one recurs after `make clean`, record it here. When the landing changes the kernel, the figures go in the ledger too: `make size | python3 tools/size_ledger.py --commit "$(git rev-parse --short HEAD)"` appends the row to `docs/size-ledger.tsv`.
 
 ## Handoff
 
