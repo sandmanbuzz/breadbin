@@ -58,10 +58,10 @@ def cx_load(data, page):
     return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fail_rename=None):
+def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fail_rename=None, fail_read_open=None):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
-    fail_rename=n makes the n-th RENAME fail. Names: a component over 14 characters is ENAMETOOLONG (c64fs)."""
+    fail_rename=n makes the n-th RENAME fail; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs)."""
     if MPU is None:
         raise RuntimeError("py65 not installed")
     with open(path or os.path.join(ROOT, "build", "root", "bin", prog), "rb") as f:
@@ -128,6 +128,9 @@ def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None, fa
                     ret(True, ENAMETOOLONG)
                     continue
                 if flags & 0x03 == 0:             # read
+                    if fail_read_open and path_ == fail_read_open[0]:
+                        ret(True, fail_read_open[1])
+                        continue
                     if path_ not in res.files:
                         ret(True, ENOENT)
                     else:
