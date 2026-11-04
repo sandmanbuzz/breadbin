@@ -44,6 +44,7 @@ ev:     .res 2          ; expression value
 erel:   .res 1          ; relocatable symbol count (signed)
 efwd:   .res 1          ; used a symbol not yet defined in this pass
 ehl:    .res 1          ; 0 none, 1 <, 2 >
+ehad:   .res 1          ; 1 if the expression had a label or * (before < and > cleared erel)
 tv:     .res 2
 trel:   .res 1
 esign:  .res 1
@@ -230,11 +231,12 @@ readline:
         bcs @eof
         cmp #10
         beq @end
-        cmp #13              ; CR of a CRLF line: not a character
-        beq @c
         cpx #254
-        bcs @over
-        sta lbuf,x
+        bcc @st
+        bne @over           ; past the limit
+        cmp #13             ; a CR may take the last slot: it is dropped at the end of the line
+        bne @over
+@st:    sta lbuf,x
         inx
         jmp @c
 @over:  lda #1           ; past 254 characters: keep reading to the end of the line, then refuse it
@@ -244,7 +246,16 @@ readline:
         bne @end
         sec
         rts
-@end:   lda #0
+@end:   cpx #0              ; a CR at the end of the line (CRLF) is not part of it
+        beq @term
+        txa
+        tay
+        dey
+        lda lbuf,y
+        cmp #13
+        bne @term
+        dex
+@term:  lda #0
         sta lbuf,x
         ldx #0
         ldy #0
@@ -649,7 +660,7 @@ zp_check:
         bne @ok
         lda erel            ; a label or * is an image offset, not a runtime zero-page address
         bne @bad
-        lda ehl             ; < and > of a label are not zero-page addresses either: write the constant
+        lda ehad            ; a label's low byte is not a zero-page address; a constant's is
         bne @bad
         lda ev+1
         beq @ok
@@ -892,7 +903,9 @@ expr:   lda #0
 @op:    sta esign
         jsr adv
         jmp @terms
-@end:   lda ehl
+@end:   lda erel
+        sta ehad
+        lda ehl
         beq @chk
         cmp #1
         bne @hb
