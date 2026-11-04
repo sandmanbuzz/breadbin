@@ -44,7 +44,7 @@ ev:     .res 2          ; expression value
 erel:   .res 1          ; relocatable symbol count (signed)
 efwd:   .res 1          ; used a symbol not yet defined in this pass
 ehl:    .res 1          ; 0 none, 1 <, 2 >
-ehad:   .res 1          ; 1 if the expression had a label or * (before < and > cleared erel)
+erl:    .res 1          ; the expression used a label or * (erel before < or > cleared it)
 tv:     .res 2
 trel:   .res 1
 esign:  .res 1
@@ -221,41 +221,45 @@ wr:     sta r0
         jmp SYS_WRITE
 
 ; readline: getc -> lbuf, lowercased outside quotes; carry set at EOF
+putc:   cpx #254
+        bcs @ov
+        sta lbuf,x
+        inx
+        rts
+@ov:  lda #1           ; past 254 characters: keep reading to the end of the line, then refuse it
+        sta lovf
+        rts
+
 readline:
         lda #0
         sta lovf
+        sta lcr
         ldx #0
 @c:     stx li
         jsr getc
         ldx li
         bcs @eof
         cmp #10
-        beq @end
-        cpx #254
-        bcc @st
-        bne @over           ; past the limit
-        cmp #13             ; a CR may take the last slot: it is dropped at the end of the line
-        bne @over
-@st:    sta lbuf,x
-        inx
+        beq @end            ; a CR held just before the LF is the CRLF's, and is dropped
+        pha
+        lda lcr
+        beq @np
+        lda #13             ; a CR followed by anything else is a character (a string may hold one)
+        jsr putc
+@np:    pla
+        ldy #0
+        sty lcr
+        cmp #13
+        bne @st
+        inc lcr             ; hold it: the next byte says whether it was a CRLF's
         jmp @c
-@over:  lda #1           ; past 254 characters: keep reading to the end of the line, then refuse it
-        sta lovf
+@st:    jsr putc
         jmp @c
 @eof:   cpx #0
         bne @end
         sec
         rts
-@end:   cpx #0              ; a CR at the end of the line (CRLF) is not part of it
-        beq @term
-        txa
-        tay
-        dey
-        lda lbuf,y
-        cmp #13
-        bne @term
-        dex
-@term:  lda #0
+@end:   lda #0
         sta lbuf,x
         ldx #0
         ldy #0
@@ -658,10 +662,9 @@ zp_check:
         lda pass
         cmp #2
         bne @ok
-        lda erel            ; a label or * is an image offset, not a runtime zero-page address
-        bne @bad
-        lda ehad            ; a label's low byte is not a zero-page address; a constant's is
-        bne @bad
+        lda erel            ; a label or * is an image offset, not a runtime zero-page address,
+        ora erl             ; also under < or > (write the constant); but <$1234 and >$1234 are plain
+        bne @bad            ; constants: (<$1234),y is the pointer at $34
         lda ev+1
         beq @ok
 @bad:   lda #<e_zpind
@@ -904,7 +907,7 @@ expr:   lda #0
         jsr adv
         jmp @terms
 @end:   lda erel
-        sta ehad
+        sta erl
         lda ehl
         beq @chk
         cmp #1
@@ -1422,4 +1425,5 @@ builtins:
 name2:  .res 16
 tq2:    .res 2
 errsp_: .res 1
+lcr:    .res 1             ; readline: a CR is held (it ends a CRLF line, or is a character if more follows)
 lovf:   .res 1             ; readline: the line was longer than it could hold
