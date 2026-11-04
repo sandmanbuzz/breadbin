@@ -549,28 +549,30 @@ class AsV8(unittest.TestCase):
         self.assertEqual(r.exit, 0, r.err)
         self.assertIn("/abcdefghijklmn", r.files)
 
-    def test_a_failed_rename_keeps_the_previous_output_and_the_complete_temporary(self):
-        # the rename is the last step: when it fails the previous output is untouched and the complete
-        # temporary file is kept, named in the message, so nothing is lost
+    def test_a_failed_rename_after_the_unlink_leaves_the_complete_temporary_and_says_so(self):
+        # the old output is unlinked before the rename (CBM DOS cannot rename over it), so when the rename fails the
+        # old output is gone and the complete temporary is the file: the message names it and says so
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, fail_rename=1)
         self.assertEqual(r.exit, 1, r.err)
-        self.assertEqual(r.files.get("/o"), b"OLD")
+        self.assertNotIn("/o", r.files)
         self.assertTrue(r.files.get("/~o", b"")[:3] == b"CX\x01", sorted(r.files))
         self.assertIn(b"~o", r.err)
+        self.assertIn(b"old output was removed", r.err)
 
-    def test_cbm_dos_rename_does_not_replace_so_an_existing_output_is_kept_and_the_temporary_named(self):
-        # src/mod/cbm.s cbm_rename sends "R0:new=old"; CBM DOS refuses an existing new name (error 63) and the
-        # kernel maps it to EIO (src/kernel/file.s sys_rename does no existence check on this path, unlike c64fs).
-        # as must then leave the old output alone, keep the complete temporary and name it. Modelled in asim
-        # only (rename_noreplace); not observed on a drive, where DOS answering 63 is from the usual DOS
-        # behaviour and the Ultimate note in docs/hardware-notes.md (UCI), not a measurement of the CBM module.
-        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, rename_noreplace=True)
+    def test_a_failed_rename_with_no_old_output_does_not_claim_a_removal(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_rename=1)
         self.assertEqual(r.exit, 1, r.err)
-        self.assertEqual(r.files.get("/o"), b"OLD")
-        self.assertEqual(r.files.get("/~o", b"")[:3], b"CX\x01")
-        self.assertIn(b"cannot rename the output", r.err)
+        self.assertNotIn(b"removed", r.err)
         self.assertIn(b"~o", r.err)
-        # a first assembly (no existing output) still works on that path
+
+    def test_reassembly_onto_an_existing_output_replaces_it_where_rename_refuses_to_replace(self):
+        # src/mod/cbm.s cbm_rename sends "R0:new=old"; CBM DOS refuses an existing new name (error 63; kernel EIO).
+        # as unlinks the old output first, so the rename lands. Modelled in asim only (rename_noreplace); the VICE
+        # answer is recorded in docs/design/s13-as-limits.md.
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/o": b"OLD"}, rename_noreplace=True)
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertEqual(r.files["/o"][:3], b"CX\x01")
+        self.assertNotIn("/~o", r.files)
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, rename_noreplace=True)
         self.assertEqual(r.exit, 0, r.err)
         self.assertEqual(r.files["/o"][:3], b"CX\x01")

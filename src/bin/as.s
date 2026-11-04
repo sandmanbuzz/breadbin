@@ -308,7 +308,25 @@ write_out:
         lda fd
         jsr SYS_CLOSE
         bcs @werr              ; the close is where a buffered write can fail
-        lda #<tname             ; the complete file takes the output's name (c64fs replaces an existing one)
+        ; the complete file takes the output's name. CBM DOS ("R0:new=old") refuses a rename onto an existing name,
+        ; so the old output is unlinked first (no such file is fine). THE WINDOW: if the rename then fails, the old
+        ; output is already gone and the complete file survives only under its temporary name, which the message
+        ; names. A failed write never gets here, so then the old output is intact.
+        lda #0
+        sta tend                ; tend (free now): 1 once the old output has been removed
+        lda outp
+        sta r0
+        lda outp+1
+        sta r0+1
+        jsr SYS_UNLINK
+        bcc @rm
+        cmp #ENOENT             ; no old output: nothing to remove
+        beq @rn
+        lda #<s_unerr           ; the old output could not be removed: it is intact, the complete file is the temporary
+        ldx #>s_unerr
+        jmp @rnmsg
+@rm:    inc tend
+@rn:    lda #<tname
         sta r0
         lda #>tname
         sta r0+1
@@ -319,9 +337,13 @@ write_out:
         jsr SYS_RENAME
         bcs @rnerr
         rts
-@rnerr: lda #<s_rnerr           ; the complete file is kept: it is named in the message
+@rnerr: lda #<s_rnerr
         ldx #>s_rnerr
-        jsr eprint
+        ldy tend
+        beq @rnmsg
+        lda #<s_rnerr2          ; the old output was removed before the rename failed
+        ldx #>s_rnerr2
+@rnmsg: jsr eprint              ; the complete file is kept: it is named in the message
         lda #<tname
         ldx #>tname
         jsr eprint
@@ -1555,6 +1577,8 @@ s_usage: .byte "usage: as source output", 10, 0
 s_as:    .byte "as: line ", 0
 s_wrerr:  .byte "as: cannot write the output", 10, 0
 s_rnerr:  .byte "as: cannot rename the output; the complete file is left as ", 0
+s_rnerr2: .byte "as: cannot rename the output; the old output was removed first, so the complete file is ", 0
+s_unerr:  .byte "as: cannot remove the old output; it is unchanged, the complete new file is ", 0
 s_exists: .byte "as: will not overwrite the existing file ", 0
 s_rmretry: .byte "; remove it and try again", 10, 0
 s_long:  .byte "line too long (over 254 characters)", 0
