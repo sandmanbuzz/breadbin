@@ -7,6 +7,11 @@
 The ledger is tab-separated with a header. Columns: commit, KSTART (the first kernel page, from k.inc), code and data
 end, room below $CF00, BSS and CODEHI end, room below $FFFA, the module totals (code, rodata, data, codehi, init, bss,
 total) and the INIT bytes. Nothing is computed twice: every figure is what `tools/size.py` printed.
+
+Programs have their own ledger, one row per program per commit (docs/program-size-ledger.tsv): the size of each CX file
+in build/root/bin, so a review can see which program grew:
+
+    python3 tools/size_ledger.py --commit HASH --programs build/root/bin          (appends to docs/program-size-ledger.tsv)
 """
 import argparse
 import os
@@ -65,13 +70,40 @@ def append(ledger, commit, kstart, fig):
         f.write(line_for(commit, kstart, fig))
 
 
+PROGRAM_HEADER = ["commit", "program", "cx_bytes"]
+
+
+def program_rows(commit, bindir):
+    """One (commit, program, bytes) row per CX file in the directory, sorted by name (dot files are not programs)."""
+    return [(commit, name, os.path.getsize(os.path.join(bindir, name)))
+            for name in sorted(os.listdir(bindir))
+            if not name.startswith(".") and os.path.isfile(os.path.join(bindir, name))]
+
+
+def append_programs(ledger, commit, bindir):
+    rows = program_rows(commit, bindir)
+    new = not os.path.exists(ledger) or os.path.getsize(ledger) == 0
+    with open(ledger, "a") as f:
+        if new:
+            f.write("\t".join(PROGRAM_HEADER) + "\n")
+        for c, name, n in rows:
+            f.write("\t".join([c, name, str(n)]) + "\n")
+    return rows
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--commit", required=True, help="the commit the size output is for")
     ap.add_argument("--size-file", help="the make size output (default: stdin)")
     ap.add_argument("--ledger", default=os.path.join(os.path.dirname(__file__), "..", "docs", "size-ledger.tsv"))
     ap.add_argument("--kernel-inc", default=os.path.join(os.path.dirname(__file__), "..", "src", "kernel", "k.inc"))
+    ap.add_argument("--programs", help="a directory of CX programs (build/root/bin): append their sizes instead")
+    ap.add_argument("--program-ledger", default=os.path.join(os.path.dirname(__file__), "..", "docs",
+                                                              "program-size-ledger.tsv"))
     a = ap.parse_args(argv)
+    if a.programs:
+        rows = append_programs(a.program_ledger, a.commit, a.programs)
+        return "".join("\t".join([c, n, str(b)]) + "\n" for c, n, b in rows)
     text = open(a.size_file).read() if a.size_file else sys.stdin.read()
     kstart = parse_kstart(open(a.kernel_inc).read())
     fig = parse_size(text)
