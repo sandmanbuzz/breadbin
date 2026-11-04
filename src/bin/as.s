@@ -338,6 +338,7 @@ do_line:
         jsr save_name
         jsr expr
         jsr restore_name
+        jsr eqfwd               ; a forward value is not known yet: a label alias would be a plain constant
         lda erel
         beq @abs
         ldy #F_REL
@@ -1321,6 +1322,14 @@ name_is:
         bne @l
 @r:     rts
 
+; eqfwd: an = value that uses a symbol not yet defined is an error (the value would not be settled)
+eqfwd:  lda efwd
+        beq @r
+        lda #<e_eqfwd
+        ldx #>e_eqfwd
+        jmp error
+@r:     rts
+
 ; error: print "as: line N: message" (A/X) and skip the rest of the line
 error:  pha
         txa
@@ -1406,6 +1415,7 @@ e_name:  .byte "name longer than 14 characters", 0
 e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
+e_eqfwd: .byte "forward reference in =: define the symbol first", 0
 e_resrel: .byte "res count is an address, not a number", 0
 e_resbig: .byte "res count is too big for the pool", 0
 e_reloc: .byte "bad relocatable expression", 0
