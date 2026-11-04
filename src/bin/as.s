@@ -581,25 +581,21 @@ d_ress: jsr expr                ; no bytes stored: zeros are filled in only if s
         lda #<e_resrel
         ldx #>e_resrel
         jmp error
-@sign:  lda ev+1                ; a count of $9A00 (the user pool, 39424 bytes) or more cannot be loaded
-        cmp #>POOLSZ            ; a wrapped one (0-1 is $FFFF) is that big too
-        bcc @k
-        lda #<e_resbig
-        ldx #>e_resbig
-        jmp error
-@k:     lda pc
-        clc
+@sign:  lda pc                  ; image + BSS is what the loader must fit in the pool ($9A00 = 39424 bytes): the sum is checked,
+        clc                     ; and it is the sum the message names (a wrapped count, 0-1 is $FFFF, carries out or is far over)
         adc ev
         tax
         lda pc+1
         adc ev+1
-        bcs @big                ; pc is left as it was, so hw never passes it
-        sta pc+1
+        bcs @bigp
+        cmp #>POOLSZ
+        bcc @k
+@bigp:  lda #<e_resbig
+        ldx #>e_resbig
+        jmp error
+@k:     sta pc+1                ; pc is left as it was on an error, so hw never passes it
         stx pc
         rts
-@big:   lda #<e_big
-        ldx #>e_big
-        jmp error
 
 ; ---- instructions ----
 instruction:
@@ -1555,7 +1551,7 @@ e_eqbyte: .byte "a byte of a label cannot be an = value: use .byte <lbl, >lbl", 
 e_outname: .byte "as: output name is too long", 10, 0
 e_wordb: .byte "a byte of a label in .word: use .byte <lbl, >lbl", 0
 e_resrel: .byte "res count is an address, not a number", 0
-e_resbig: .byte "res count is too big for the pool", 0
+e_resbig: .byte "image plus res is too big for the pool", 0
 e_reloc: .byte "bad relocatable expression", 0
 .macro SYM n, v
         .byte n, 0
