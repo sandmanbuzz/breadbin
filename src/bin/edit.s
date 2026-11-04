@@ -7,10 +7,16 @@
 ; The screen is driven through the console: raw key mode (conmode) and
 ; the ESC = / ESC K / ESC R escapes. Rows 0-23 show text (39 columns),
 ; row 24 is the status line.
-; at_end borrow fix: upstream kpatr1981/breadbin, commit 6b66acc (MIT, Copyright 2026
-; Konstantinos Patronas; the commit is by tuksutukio). Ported unchanged in logic.
+; Ported from upstream Breadbin (kpatr1981/breadbin, MIT, Copyright 2026 Konstantinos
+; Patronas; the commits are by tuksutukio), branch fix/edit; the behaviour, not the diffs:
+;   6b66acc  at_end borrow fix (ported unchanged in logic)
+;   62cb12f  a file over the buffer (TEXTMAX, 12 KB here; 8 KB upstream) is refused with
+;            "edit: file too big" and exit 1, instead of being cut short by the next save
+;   c27f6c5  a cursor key only moves the cursor unless the view scrolls, and the status line is
+;            drawn when it changes, not on every key (a full redraw per key flickers at 1 MHz)
+;   1a3843b  ^K moves the rest of the text down once, not once per deleted character
 .include "../../include/breadbin.inc"
-.import argn, print
+.import argn, print, eprint
 
 TEXTMAX = 12288
 ROWS    = 24
@@ -51,7 +57,10 @@ start:  lda #0
         sta warned
         sta msg+1
         sta fname+1
+        lda #$ff
+        sta st_shown
         lda #1
+        sta need
         jsr argn
         bcs @new
         sta fname
@@ -98,7 +107,7 @@ main:   jsr getkey
         cmp #$7f
         bcs main
 @ins:   jsr insert
-        jmp @draw
+        jmp @edited
 @quit:  lda dirty
         beq @bye
         lda warned
@@ -133,8 +142,10 @@ main:   jsr getkey
         jmp main
 @dok:   jsr cur_dec
         jsr delete
-        jmp @draw
+        jmp @edited
 @kill:  jsr kill_line
+@edited:
+        inc need
         jmp @draw
 @hmove: jsr calc_col
         lda cx
@@ -190,9 +201,31 @@ load:   lda fname
         sta tlen
         lda r1+1
         sta tlen+1
+        cmp #>TEXTMAX
+        bcc @c              ; short of a full buffer: all of it
+        lda #<key           ; a full buffer: is there more?
+        sta r0
+        lda #>key
+        sta r0+1
+        lda #1
+        sta r1
+        lda #0
+        sta r1+1
+        lda fd
+        jsr SYS_READ
+        bcs @c
+        lda r1
+        bne @big
 @c:     lda fd
         jsr SYS_CLOSE
 @r:     rts
+@big:   lda fd              ; saving would cut the file short: refuse it
+        jsr SYS_CLOSE
+        lda #<s_big
+        ldx #>s_big
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
 
 save:   lda fname+1
         bne @have
@@ -300,23 +333,65 @@ delete: jsr ptr_cur         ; q = text + cur
         sta dirty
         rts
 
-; kill_line: delete the line the cursor is on (including its newline)
+; kill_line: delete the line the cursor is on (including its newline),
+; moving the rest of the text down once rather than once per character
 kill_line:
         jsr line_start_cur
-@l:     lda cur
-        cmp tlen
-        bne @n
-        lda cur+1
-        cmp tlen+1
-        beq @r
-@n:     jsr ptr_cur
+        jsr ptr_end         ; p = text + tlen, q = text + cur
+        lda p
+        sta t16             ; t16 = the end of the text
+        lda p+1
+        sta t16+1
+        lda q
+        sta p
+        lda q+1
+        sta p+1
         ldy #0
-        lda (q),y
-        pha
-        jsr delete
-        pla
-        cmp #K_RET
-        bne @l
+@scan:  lda p               ; p = past the line's newline, or the end
+        cmp t16
+        bne @s
+        lda p+1
+        cmp t16+1
+        beq @cut
+@s:     lda (p),y
+        inc p
+        bne @s2
+        inc p+1
+@s2:    cmp #K_RET
+        bne @scan
+@cut:   lda p               ; tlen -= p - q
+        sec
+        sbc q
+        sta tmp
+        lda p+1
+        sbc q+1
+        sta tmp+1
+        ora tmp
+        beq @r              ; an empty last line: nothing to delete
+        lda tlen
+        sec
+        sbc tmp
+        sta tlen
+        lda tlen+1
+        sbc tmp+1
+        sta tlen+1
+        lda #1
+        sta dirty
+@mv:    lda p               ; text from p down to q
+        cmp t16
+        bne @m
+        lda p+1
+        cmp t16+1
+        beq @r
+@m:     lda (p),y
+        sta (q),y
+        inc p
+        bne @m2
+        inc p+1
+@m2:    inc q
+        bne @mv
+        inc q+1
+        jmp @mv
 @r:     lda #0
         sta want
         rts
@@ -510,8 +585,24 @@ fix_top:
         jmp @below
 @r:     rts
 
-redraw: jsr fix_top
+; redraw: text rows only if the text changed or the view scrolled, the status
+; line only if it changed (a full redraw per key flickers at 1 MHz)
+redraw: lda top
+        sta otop
+        lda top+1
+        sta otop+1
+        jsr fix_top
         jsr calc_col
+        lda need
+        bne @text
+        lda top
+        cmp otop
+        bne @text
+        lda top+1
+        cmp otop+1
+        beq @stat
+@text:  lda #0
+        sta need
         lda top
         clc
         adc #<text
@@ -550,8 +641,18 @@ redraw: jsr fix_top
         lda row
         cmp #ROWS
         bne @row
+@stat:  lda msg+1
+        bne @st
+        lda dirty
+        cmp st_shown
+        beq @cur
+@st:    lda #$ff
+        ldx msg+1
+        bne @sv
+        lda dirty
+@sv:    sta st_shown
         jsr status
-        ; place the cursor
+@cur:   ; place the cursor
         jsr out_start
         lda cy
         sta row
@@ -706,8 +807,12 @@ m_saved:   .byte " saved", 0
 m_err:     .byte " cannot save file", 0
 m_noname:  .byte " no file name: run edit file", 0
 m_full:    .byte " buffer full", 0
+s_big:     .byte "edit: file too big", 10, 0
 m_unsaved: .byte " unsaved changes! ^x again quits", 0
 
 .segment "BSS"
 cx_tmp: .res 1
+need:   .res 1          ; the text changed: redraw its rows
+otop:   .res 2
+st_shown: .res 1       ; dirty as shown on the status line, $ff = a message
 ox:     .res 1
