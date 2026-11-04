@@ -378,6 +378,43 @@ class AsWriteErrors(unittest.TestCase):
         self.assertNotEqual(r.exit, 0)
         self.assertIn(b"cannot write", r.err)
 
+@unittest.skipIf(SKIP, SKIP)
+class AsV8(unittest.TestCase):
+    """Review V8 (agent C, on main 433ed4e): defects found by whole-file reads and by asim."""
+
+    def run_as(self, src):
+        return asim.run("as", ["/s", "/o"], {"/s": src.encode()})
+
+    def test_256_errors_fail_the_assembly(self):
+        # the error count is one byte: 256 errors used to wrap to 0 and read as success
+        r = self.run_as("lda nosuch\n" * 256)
+        self.assertEqual(r.exit, 1, r.err[-120:])
+
+    def test_forward_equate_of_a_label_is_refused(self):
+        # `x = fin` with fin later: the value and the relocation flag were not carried into pass 2
+        r = self.run_as(" lda x\nx = fin\nfin: rts\n")
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertIn(b"forward", r.err)
+
+    def test_forward_equate_used_by_a_branch_is_refused(self):
+        # n is 2 bytes in pass 1 and 3 in pass 2: the jmp landed in the middle of an instruction
+        r = self.run_as(" jmp e\nn = k\n lda n\ne: rts\nk = $1234\n")
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertIn(b"forward", r.err)
+
+    def test_forward_equate_as_a_res_count_is_refused(self):
+        # the res-count rule must not be bypassed through an equate
+        r = self.run_as("n = bigc\n.res n\n.byte 7\nbigc = 300\n")
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertIn(b"forward", r.err)
+
+    def test_backward_equate_of_a_label_is_the_label(self):
+        a = self.run_as("fin: rts\n x = fin\n lda x\n")
+        b = self.run_as("fin: rts\n lda fin\n")
+        self.assertEqual(a.exit, 0, a.err)
+        self.assertEqual(b.exit, 0, b.err)
+        self.assertEqual(a.files["/o"], b.files["/o"])
+
 
 if __name__ == "__main__":
     unittest.main()
