@@ -28,6 +28,7 @@ with open(os.path.join(ROOT, "include", "breadbin.inc")) as _f:
             SYS[0xCF00 + 3 * int(_m.group(2))] = _m.group(1)
 ENOENT = 2
 EBADF = 9
+ENOSPC = 28
 
 
 class Result:
@@ -52,8 +53,9 @@ def cx_load(data, page):
     return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None):
-    """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes."""
+def run(prog, args, files=None, limit=40_000_000, path=None, fail_write=None):
+    """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
+    fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would."""
     if MPU is None:
         raise RuntimeError("py65 not installed")
     with open(path or os.path.join(ROOT, "build", "root", "bin", prog), "rb") as f:
@@ -81,6 +83,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None):
     mem[0x20], mem[0x21], mem[0x22] = top & 0xFF, top >> 8, len(ptrs)
     cpu = MPU(memory=mem, pc=base)
     fds = {}
+    writes = [0]
     next_fd = [3]
 
     def cstr(addr):
@@ -144,6 +147,10 @@ def run(prog, args, files=None, limit=40_000_000, path=None):
                     mem[4], mem[5] = len(data) & 0xFF, len(data) >> 8
                     ret(False, 0)
             elif name == "WRITE":
+                writes[0] += 1
+                if writes[0] == fail_write:
+                    ret(True, ENOSPC)
+                    continue
                 addr, cnt = r(2), r(4)
                 data = bytes(mem[addr:addr + cnt])
                 if fd == 1:
