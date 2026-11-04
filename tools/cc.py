@@ -1,33 +1,39 @@
 #!/usr/bin/env python3
-"""S14 host-side reference: a small C subset compiled to `as` source (no kernel bytes, no device).
+"""S14 host-side reference: a C subset compiled to `as` source (no kernel bytes, no device).
 
   python3 tools/cc.py prog.c > prog.s        then on the C64:  as prog.s prog
 
-Subset (first slice): `int` only (16 bit), functions with no parameters, local `int` variables
-(static storage: no recursion yet), `= + - == != < > <= >=`, unary minus, calls, `if`/`else`,
-`while`, `return`, blocks, decimal and 0x numbers, and `puts("...")` (the one builtin, prints a
-string literal through sys_write one byte at a time, as hello.s does).
+Subset: `int` (16 bit) and `char` (8 bit, zero-extended when read), pointers to int or char,
+arrays of int or char (local, static storage), functions with parameters (passed on the
+software stack and stored in each function's static parameter slots), local variables, unary
+`- * &`, `+ - == != < > <= >=`, indexing `a[i]`, calls, `if`/`else`, `while`, `for`, `return`,
+blocks, decimal and 0x numbers, and `puts("...")` (the one builtin: prints a string literal).
 
-Not in this slice: char, arrays, pointers, `for`, `*` `/`, parameters, globals, `#include`.
-Emitted code: `as` syntax (labels, .byte, .res, `#<`, `(zp),y`), symbols at most 15 characters.
+Not in this slice: `* /` as binary operators (`*` is only the dereference), globals, pointers to
+pointers, `char` return types, `#include`, recursion (static locals), `&&` `||` `!`.
+
+Emitted code: `as` syntax (labels, .byte, .res, `#<`, `(zp),y`); symbols at most 14 characters.
 Calling convention: the value of an expression is in `acc` (16 bit, lo then hi); a binary
 operator pushes the left value on a memory stack (`cc_stk`, 32 levels) and pops it into `tmp`.
+A call evaluates its arguments onto the same stack, pops them into the callee's parameter
+slots, then calls. Pointers are dereferenced through `cc_ptr`, which is in zero page ($2b).
 """
 import re
 import sys
 
-KEYWORDS = {"int", "if", "else", "while", "return"}
+KEYWORDS = {"int", "char", "if", "else", "while", "for", "return"}
 MAX_DEPTH = 31                       # cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
-LINE_BYTES = 16                      # .byte values per emitted line (as reads at most 127 characters a line)
+LINE_BYTES = 16                      # .byte values per emitted line (as keeps at most 254 characters a line)
 SYMTABLE = 185                       # as NSYM 220 less its 35 builtins
+STATIC_MAX = 8192                    # bytes of static variables a program may have (a project limit: the owner may change it)
 
 TOKEN = re.compile(r"""
     (?P<ws>\s+) | (?P<lc>//[^\n]*) | (?P<bc>/\*.*?\*/) |
     (?P<num>0[xX][0-9a-fA-F]+|[0-9]+) |
     (?P<str>"(?:\\.|[^"\\\n])*") |
     (?P<id>[A-Za-z_][A-Za-z_0-9]*) |
-    (?P<op>==|!=|<=|>=|[-+*/<>=(){};,])
+    (?P<op>==|!=|<=|>=|[-+*/<>=(){};,&\[\]])
 """, re.X | re.S)
 
 ESCAPES = {"n": 10, "t": 9, "r": 13, "0": 0, "\\": 92, '"': 34}
@@ -79,6 +85,7 @@ def unescape(body, line):
 
 
 LEVELS = [("==", "!="), ("<", ">", "<=", ">="), ("+", "-")]
+TYPES = ("int", "char")
 
 
 class Parser:
@@ -105,6 +112,9 @@ class Parser:
             raise CompileError(f"line {tok[2]}: expected {want}, got {got!r}")
         return tok
 
+    def at_type(self):
+        return self.at("kw") and self.peek()[1] in TYPES
+
     def program(self):
         funcs = []
         while not self.at("eof"):
@@ -115,10 +125,23 @@ class Parser:
         self.expect("kw", "int")
         name, line = self.expect("id")[1], self.peek()[2]
         self.expect("op", "(")
+        params = []
         if not self.at("op", ")"):
-            raise CompileError(f"line {line}: parameters are not in this slice")
+            while True:
+                pline = self.peek()[2]
+                base = self.expect("kw")[1]
+                if base not in TYPES:
+                    raise CompileError(f"line {pline}: expected a parameter type")
+                ptr = self.at("op", "*") and bool(self.take())
+                pname = self.expect("id")[1]
+                if self.at("op", "["):
+                    raise CompileError(f"line {pline}: array parameters are not in this slice")
+                params.append((base, ptr, pname, pline))
+                if not self.at("op", ","):
+                    break
+                self.take()
         self.expect("op", ")")
-        return name, self.block(), line
+        return name, params, self.block(), line
 
     def block(self):
         self.expect("op", "{")
@@ -130,17 +153,44 @@ class Parser:
         self.take()
         return stmts
 
+    def decl(self):
+        """`int|char [*] name [ [n] ] [= expr]` (without the ';')."""
+        line = self.peek()[2]
+        base = self.take()[1]
+        ptr = self.at("op", "*") and bool(self.take())
+        name = self.expect("id")[1]
+        arr, init = None, None
+        if self.at("op", "["):
+            self.take()
+            n = self.expect("num")[1]
+            self.expect("op", "]")
+            if n < 1:
+                raise CompileError(f"line {line}: an array needs at least one element")
+            if ptr:
+                raise CompileError(f"line {line}: an array of pointers is not in this slice")
+            arr = n
+        if self.at("op", "="):
+            self.take()
+            if arr is not None:
+                raise CompileError(f"line {line}: an array cannot be initialised in this slice")
+            init = self.expr()
+        return ("decl", base, ptr, name, arr, init, line)
+
+    def simple(self):
+        """An assignment or an expression statement, without the ';'."""
+        line = self.peek()[2]
+        e = self.expr()
+        if self.at("op", "="):
+            self.take()
+            return ("assign", e, self.expr(), line)
+        return ("expr", e, line)
+
     def stmt(self):
         line = self.peek()[2]
-        if self.at("kw", "int"):
-            self.take()
-            name = self.expect("id")[1]
-            init = None
-            if self.at("op", "="):
-                self.take()
-                init = self.expr()
+        if self.at_type():
+            s = self.decl()
             self.expect("op", ";")
-            return ("decl", name, init, line)
+            return s
         if self.at("kw", "if"):
             self.take()
             cond = self.paren_expr()
@@ -154,6 +204,8 @@ class Parser:
             self.take()
             cond = self.paren_expr()
             return ("while", cond, self.stmt(), line)
+        if self.at("kw", "for"):
+            return self.for_stmt(line)
         if self.at("kw", "return"):
             self.take()
             value = None if self.at("op", ";") else self.expr()
@@ -161,15 +213,35 @@ class Parser:
             return ("return", value, line)
         if self.at("op", "{"):
             return ("block", self.block(), line)
-        if self.at("id") and self.peek(1)[:2] == ("op", "="):
-            name = self.take()[1]
-            self.take()
-            value = self.expr()
-            self.expect("op", ";")
-            return ("assign", name, value, line)
-        value = self.expr()
+        s = self.simple()
         self.expect("op", ";")
-        return ("expr", value, line)
+        return s
+
+    def for_stmt(self, line):
+        """for (init; cond; step) body  ==  { init; while (cond) { body; step; } }"""
+        self.take()
+        self.expect("op", "(")
+        init = None
+        if self.at_type():
+            init = self.decl()
+            self.expect("op", ";")
+        elif not self.at("op", ";"):
+            init = self.simple()
+            self.expect("op", ";")
+        else:
+            self.take()
+        cond = ("num", 1, line)
+        if not self.at("op", ";"):
+            cond = self.expr()
+        self.expect("op", ";")
+        step = None
+        if not self.at("op", ")"):
+            step = self.simple()
+        self.expect("op", ")")
+        body = self.stmt()
+        inner = [body] + ([step] if step else [])
+        loop = ("while", cond, ("block", inner, line), line)
+        return ("block", ([init] if init else []) + [loop], line)
 
     def paren_expr(self):
         self.expect("op", "(")
@@ -196,7 +268,22 @@ class Parser:
         if self.at("op", "-"):
             line = self.take()[2]
             return ("neg", self.unary(), line)
-        return self.primary()
+        if self.at("op", "*"):
+            line = self.take()[2]
+            return ("deref", self.unary(), line)
+        if self.at("op", "&"):
+            line = self.take()[2]
+            return ("addr", self.unary(), line)
+        return self.postfix()
+
+    def postfix(self):
+        e = self.primary()
+        while self.at("op", "["):
+            line = self.take()[2]
+            i = self.expr()
+            self.expect("op", "]")
+            e = ("index", e, i, line)
+        return e
 
     def primary(self):
         kind, value, line = self.take()
@@ -346,7 +433,6 @@ rt_puts_1:
 rt_puts_done:
         rts
 """
-
 DATA = """\
 ; --- data ---
 cc_ptr = $2b           ; zero page: (zp),y in rt_puts needs a zero-page pointer (program ZP is $23-$2f)
@@ -358,10 +444,28 @@ cc_sp:  .res 1
 cc_stk: .res 64
 """
 
+class Var:
+    """A variable: its label, element base ('int' or 'char'), pointer flag and array length."""
+
+    def __init__(self, label, base, ptr, arr):
+        self.label, self.base, self.ptr, self.arr = label, base, ptr, arr
+
+    def elem(self):
+        return 2 if self.base == "int" else 1
+
+    def nbytes(self):
+        if self.arr is not None:
+            return self.elem() * self.arr
+        if self.ptr:
+            return 2
+        return self.elem()
+
 
 class Gen:
     def __init__(self, funcs):
-        self.funcs = {name: line for name, _, line in funcs}
+        self.funcs = {name: line for name, _, _, line in funcs}
+        self.params = {name: [(base, ptr, pname, f"v_{name}_{pname}") for base, ptr, pname, _ in params]
+                       for name, params, _, _ in funcs}
         self.out, self.n, self.depth = [], 0, 0
         self.strings, self.locals, self.calls = [], [], []
         self.names, self.fn_max, self.call_sites, self._worst = {}, {}, {}, {}
@@ -377,26 +481,6 @@ class Gen:
         self.n += 1
         return f"{prefix}{self.n}"
 
-    def program(self, funcs):
-        if "main" not in self.funcs:
-            raise CompileError("no function main")
-        self.lab("start")
-        self.ins("lda #0")
-        self.ins("sta cc_sp")
-        self.ins("jsr fn_main")
-        self.ins("lda #0")
-        self.ins("jmp sys_exit")
-        for name, body, line in funcs:
-            self.function(name, body, line)
-        for name, line in self.calls:
-            if name not in self.funcs:
-                raise CompileError(f"line {line}: undefined function {name}")
-        for name in self.funcs:
-            w = self.worst(name, [])
-            if w > MAX_DEPTH:
-                raise CompileError(f"{name}: stack use along one call chain is {w + 1} values; cc_stk holds 32")
-        return "\n".join(self.out) + "\n" + RUNTIME + self.strings_text() + DATA + self.locals_text()
-
     def claim(self, lbl, line):
         if len(lbl) > SYMMAX:
             raise CompileError(f"line {line}: {lbl} is longer than {SYMMAX} characters (as limit)")
@@ -405,16 +489,42 @@ class Gen:
             raise CompileError(f"line {line}: {lbl} clashes with {self.names[key]} (as ignores case)")
         self.names[key] = lbl
 
-    def function(self, name, body, line):
-        self.fn, self.vars = name, {}
-        self.claim("fn_" + name, line)
-        self.lab("fn_" + name)
-        for s in body:
-            self.stmt(s)
+    def check(self, want, got, node, line, what):
+        """Types must agree: a number is not a pointer, and a pointer must point at the same base.
+        The literal 0 is the null pointer."""
+        if want[1] == got[1]:
+            if want[1] and want[0] != got[0]:
+                raise CompileError(f"line {line}: {what}: a pointer to {got[0]} where a pointer to {want[0]} is needed")
+            return
+        if want[1] and node[0] == "num" and node[1] == 0:
+            return
+        raise CompileError(f"line {line}: {what}: a {'pointer' if got[1] else 'number'} where a "
+                           f"{'pointer' if want[1] else 'number'} is needed")
+
+    def program(self, funcs):
+        if "main" not in self.funcs:
+            raise CompileError("no function main")
+        if self.params["main"]:
+            raise CompileError(f"line {self.funcs['main']}: main takes no parameters (start passes none)")
+        self.lab("start")
         self.ins("lda #0")
-        self.ins("sta acc")
-        self.ins("sta acc+1")
-        self.ins("rts")
+        self.ins("sta cc_sp")
+        self.ins("jsr fn_main")
+        self.ins("lda #0")
+        self.ins("jmp sys_exit")
+        for name, params, body, line in funcs:
+            self.function(name, params, body, line)
+        for name, line in self.calls:
+            if name not in self.funcs:
+                raise CompileError(f"line {line}: undefined function {name}")
+        total = sum(n for _, n in self.locals)
+        if total > STATIC_MAX:
+            raise CompileError(f"the program's static variables take {total} bytes; the limit is {STATIC_MAX}")
+        for name in self.funcs:
+            w = self.worst(name, [])
+            if w > MAX_DEPTH:
+                raise CompileError(f"{name}: stack use along one call chain is {w + 1} values; cc_stk holds 32")
+        return "\n".join(self.out) + "\n" + RUNTIME + self.strings_text() + DATA + self.locals_text()
 
     def worst(self, f, path):
         """Most values pushed at once on any call chain that starts in f (no recursion allowed)."""
@@ -427,6 +537,29 @@ class Gen:
             self._worst[f] = w
         return self._worst[f]
 
+    def function(self, name, params, body, line):
+        self.fn, self.vars = name, {}
+        self.claim("fn_" + name, line)
+        self.lab("fn_" + name)
+        for base, ptr, pname, pline in params:
+            self.declare(pname, base, ptr, None, pline)
+        for s in body:
+            self.stmt(s)
+        self.ins("lda #0")
+        self.ins("sta acc")
+        self.ins("sta acc+1")
+        self.ins("rts")
+
+    def declare(self, name, base, ptr, arr, line):
+        if name in self.vars:
+            raise CompileError(f"line {line}: {name} is already declared in {self.fn}")
+        lbl = f"v_{self.fn}_{name}"
+        self.claim(lbl, line)
+        v = Var(lbl, base, ptr, arr)
+        self.vars[name] = v
+        self.locals.append((lbl, v.nbytes()))
+        return v
+
     def strings_text(self):
         out = []
         for lbl, data in self.strings:
@@ -437,43 +570,84 @@ class Gen:
         return "\n".join(out) + "\n"
 
     def locals_text(self):
-        return "".join(f"{lbl}: .res 2\n" for lbl in self.locals)
+        return "".join(f"{lbl}: .res {n}\n" for lbl, n in self.locals)
 
     def var(self, name, line):
         if name not in self.vars:
             raise CompileError(f"line {line}: undefined variable {name}")
         return self.vars[name]
 
-    def load(self, lbl):
+    def push(self):
+        self.depth += 1
+        self.fn_max[self.fn] = max(self.fn_max.get(self.fn, 0), self.depth)
+        if self.depth > MAX_DEPTH:
+            raise CompileError("expression too deeply nested for the software stack")
+        self.ins("jsr cc_push")
+
+    def pop(self):
+        self.depth -= 1
+        self.ins("jsr cc_pop")
+
+    def load16(self, lbl):
         self.ins(f"lda {lbl}")
         self.ins("sta acc")
         self.ins(f"lda {lbl}+1")
         self.ins("sta acc+1")
 
-    def store(self, lbl):
+    def store16(self, lbl):
         self.ins("lda acc")
         self.ins(f"sta {lbl}")
         self.ins("lda acc+1")
         self.ins(f"sta {lbl}+1")
 
+    def address_of_label(self, lbl):
+        self.ins(f"lda #<{lbl}")
+        self.ins("sta acc")
+        self.ins(f"lda #>{lbl}")
+        self.ins("sta acc+1")
+
+    def load_through(self, base):
+        """acc is an address: load the element at it into acc (char: zero-extended)."""
+        self.ins("lda acc")
+        self.ins("sta cc_ptr")
+        self.ins("lda acc+1")
+        self.ins("sta cc_ptr+1")
+        self.ins("ldy #0")
+        self.ins("lda (cc_ptr),y")
+        self.ins("sta acc")
+        if base == "char":
+            self.ins("lda #0")
+            self.ins("sta acc+1")
+        else:
+            self.ins("ldy #1")
+            self.ins("lda (cc_ptr),y")
+            self.ins("sta acc+1")
+
+    def store_through(self, base):
+        """tmp is the address, acc the value: store the element (char: the low byte)."""
+        self.ins("lda tmp")
+        self.ins("sta cc_ptr")
+        self.ins("lda tmp+1")
+        self.ins("sta cc_ptr+1")
+        self.ins("ldy #0")
+        self.ins("lda acc")
+        self.ins("sta (cc_ptr),y")
+        if base == "int":
+            self.ins("ldy #1")
+            self.ins("lda acc+1")
+            self.ins("sta (cc_ptr),y")
+
     def stmt(self, s):
         kind = s[0]
         if kind == "decl":
-            _, name, init, line = s
-            if name in self.vars:
-                raise CompileError(f"line {line}: {name} is already declared in {self.fn}")
-            lbl = f"v_{self.fn}_{name}"
-            self.claim(lbl, line)
-            self.vars[name] = lbl
-            self.locals.append(lbl)
+            _, base, ptr, name, arr, init, line = s
+            v = self.declare(name, base, ptr, arr, line)
             if init is not None:
-                self.expr(init)
-                self.store(lbl)
+                t = self.expr(init)
+                self.check((v.base, v.ptr), t, init, line, "initialise")
+                self.store_scalar(v)
         elif kind == "assign":
-            _, name, value, line = s
-            lbl = self.var(name, line)
-            self.expr(value)
-            self.store(lbl)
+            self.assign(s[1], s[2], s[3])
         elif kind == "expr":
             self.expr(s[1])
         elif kind == "return":
@@ -482,7 +656,7 @@ class Gen:
                 self.ins("sta acc")
                 self.ins("sta acc+1")
             else:
-                self.expr(s[1])
+                self.check(("int", False), self.expr(s[1]), s[1], s[2], "return")
             self.ins("rts")
         elif kind == "if":
             _, cond, then, other, _line = s
@@ -512,13 +686,60 @@ class Gen:
             for x in s[1]:
                 self.stmt(x)
 
+    def store_scalar(self, v):
+        if v.base == "char" and not v.ptr:
+            self.ins("lda acc")
+            self.ins(f"sta {v.label}")
+        else:
+            self.store16(v.label)
+
+    def assign(self, lhs, rhs, line):
+        if lhs[0] == "var":
+            v = self.var(lhs[1], lhs[2])
+            if v.arr is not None:
+                raise CompileError(f"line {line}: cannot assign to the array {lhs[1]}")
+            self.check((v.base, v.ptr), self.expr(rhs), rhs, line, "assign")
+            self.store_scalar(v)
+            return
+        if lhs[0] == "deref":
+            t = self.expr(lhs[1])
+            if not t[1]:
+                raise CompileError(f"line {line}: * needs a pointer")
+            base = t[0]
+        elif lhs[0] == "index":
+            base = self.index_addr(lhs)[0]
+        else:
+            raise CompileError(f"line {line}: cannot assign to this")
+        self.push()
+        self.check((base, False), self.expr(rhs), rhs, line, "store")
+        self.pop()
+        self.store_through(base)
+
     def test(self, cond):
         """Leave acc's truth in the flags: Z set when the condition is false."""
         self.expr(cond)
         self.ins("lda acc")
         self.ins("ora acc+1")
 
+    def index_addr(self, node):
+        """a[i]: the element's address in acc. Returns the element type (base, True)."""
+        _, base_e, idx_e, line = node
+        t = self.expr(base_e)
+        if not t[1]:
+            raise CompileError(f"line {line}: a[i] needs a pointer or an array")
+        self.push()
+        ti = self.expr(idx_e)
+        if ti[1]:
+            raise CompileError(f"line {line}: an index must be a number")
+        if t[0] == "int":
+            self.ins("asl acc")
+            self.ins("rol acc+1")
+        self.pop()
+        self.ins("jsr cc_add")
+        return (t[0], True)
+
     def expr(self, e):
+        """Leave the value of e in acc; return its type (base, is_pointer)."""
         kind = e[0]
         if kind == "num":
             v = e[1]
@@ -526,42 +747,111 @@ class Gen:
             self.ins("sta acc")
             self.ins(f"lda #{v >> 8}")
             self.ins("sta acc+1")
-        elif kind == "var":
-            self.load(self.var(e[1], e[2]))
-        elif kind == "str":
+            return ("int", False)
+        if kind == "var":
+            v = self.var(e[1], e[2])
+            if v.arr is not None:
+                self.address_of_label(v.label)
+                return (v.base, True)
+            if v.ptr:
+                self.load16(v.label)
+                return (v.base, True)
+            if v.base == "char":
+                self.ins(f"lda {v.label}")
+                self.ins("sta acc")
+                self.ins("lda #0")
+                self.ins("sta acc+1")
+                return ("char", False)
+            self.load16(v.label)
+            return ("int", False)
+        if kind == "str":
             raise CompileError(f"line {e[2]}: a string literal is only an argument to puts")
-        elif kind == "call":
+        if kind == "call":
             _, name, args, line = e
             if name == "puts":
                 self.puts(args, line)
             else:
-                if args:
-                    raise CompileError(f"line {line}: arguments are not in this slice")
-                self.calls.append((name, line))
-                self.call_sites.setdefault(self.fn, []).append((name, line, self.depth))
-                self.ins(f"jsr fn_{name}")
-        elif kind == "neg":
-            self.expr(e[1])
+                self.call(name, args, line)
+            return ("int", False)
+        if kind == "neg":
+            if self.expr(e[1])[1]:
+                raise CompileError(f"line {e[2]}: - of a pointer is not in this slice")
             self.ins("lda #0")
             self.ins("sta tmp")
             self.ins("sta tmp+1")
             self.ins("jsr cc_sub")
-        elif kind == "bin":
-            _, op, a, b, _line = e
-            self.expr(a)
-            self.push()
-            self.expr(b)
-            self.depth -= 1
-            self.ins("jsr cc_pop")
-            for routine in BINOPS[op]:
-                self.ins(f"jsr {routine}")
+            return ("int", False)
+        if kind == "deref":
+            t = self.expr(e[1])
+            if not t[1]:
+                raise CompileError(f"line {e[2]}: * needs a pointer")
+            self.load_through(t[0])
+            return (t[0], False)
+        if kind == "addr":
+            return self.addr_of(e)
+        if kind == "index":
+            t = self.index_addr(e)
+            self.load_through(t[0])
+            return (t[0], False)
+        if kind == "bin":
+            return self.binary(e)
+        raise CompileError(f"internal: unknown expression {kind}")
 
-    def push(self):
-        self.depth += 1
-        self.fn_max[self.fn] = max(self.fn_max.get(self.fn, 0), self.depth)
-        if self.depth > MAX_DEPTH:
-            raise CompileError("expression too deeply nested for the software stack")
-        self.ins("jsr cc_push")
+    def addr_of(self, e):
+        x, line = e[1], e[2]
+        if x[0] == "var":
+            v = self.var(x[1], x[2])
+            if v.ptr and v.arr is None:
+                raise CompileError(f"line {line}: pointers to pointers are not in this slice")
+            self.address_of_label(v.label)
+            return (v.base, True)
+        if x[0] == "deref":
+            t = self.expr(x[1])
+            if not t[1]:
+                raise CompileError(f"line {line}: * needs a pointer")
+            return (t[0], True)
+        if x[0] == "index":
+            return self.index_addr(x)
+        raise CompileError(f"line {line}: cannot take the address of this")
+
+    def binary(self, e):
+        _, op, a, b, line = e
+        ta = self.expr(a)
+        self.push()
+        tb = self.expr(b)
+        if tb[1]:
+            raise CompileError(f"line {line}: a pointer cannot be the right side of {op} in this slice")
+        if ta[1] and op not in ("+", "-"):
+            raise CompileError(f"line {line}: a pointer can only be added to or subtracted from")
+        if ta[1] and ta[0] == "int":
+            self.ins("asl acc")          # scale the index by the element size (2 for int)
+            self.ins("rol acc+1")
+        self.pop()
+        for routine in BINOPS[op]:
+            self.ins(f"jsr {routine}")
+        if ta[1]:
+            return (ta[0], True)
+        return ("int", False)
+
+    def call(self, name, args, line):
+        if name not in self.funcs:
+            raise CompileError(f"line {line}: undefined function {name}")
+        params = self.params[name]
+        if len(args) != len(params):
+            raise CompileError(f"line {line}: {name} takes {len(params)} argument(s), not {len(args)}")
+        for a, (base, ptr, pname, _lbl) in zip(args, params):
+            self.check((base, ptr), self.expr(a), a, line, f"argument {pname} of {name}")
+            self.push()
+        for base, ptr, _pname, lbl in reversed(params):
+            self.pop()
+            self.ins("lda tmp")
+            self.ins(f"sta {lbl}")
+            if not (base == "char" and not ptr):
+                self.ins("lda tmp+1")
+                self.ins(f"sta {lbl}+1")
+        self.calls.append((name, line))
+        self.call_sites.setdefault(self.fn, []).append((name, line, self.depth))
+        self.ins(f"jsr fn_{name}")
 
     def puts(self, args, line):
         if len(args) != 1 or args[0][0] != "str":
@@ -601,7 +891,7 @@ def compile_c(src):
     except RecursionError:
         raise CompileError("expression nested too deeply for the parser") from None
     seen = set()
-    for name, _, line in funcs:
+    for name, _, _, line in funcs:
         if name in seen:
             raise CompileError(f"line {line}: function {name} is defined twice")
         seen.add(name)

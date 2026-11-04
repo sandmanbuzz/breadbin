@@ -146,5 +146,104 @@ class AsOutput(unittest.TestCase):
         self.assertEqual((h["image"], h["bss"]), (1, 4))
 
 
+
+
+@unittest.skipIf(SKIP, SKIP)
+class AsLongLine(unittest.TestCase):
+    """as read a line into a 128-byte buffer and dropped every character past 126, silently: a
+    long .byte line lost its tail and its zero, and the program ran on into the next data."""
+
+    def image(self, n):
+        src = b's: .byte "' + b"x" * n + b'", 0\n'
+        return asim.run("as", ["/s", "/o"], {"/s": src})
+
+    def test_a_long_line_is_kept_whole(self):
+        r = self.image(150)
+        self.assertEqual(r.exit, 0, r.err)
+        b = r.files["/o"]
+        self.assertIn(b"x" * 150 + b"\x00", b[9:9 + head(b)["image"]])
+
+    def test_a_line_of_254_characters_fits(self):
+        # the line is `s: .byte "` (10) + the string + `", 0` (4): 240 characters make 254 in all
+        r = self.image(240)
+        self.assertEqual(r.exit, 0, r.err)
+        self.assertIn(b"x" * 240 + b"\x00", r.files["/o"][9:9 + head(r.files["/o"])["image"]])
+
+    def test_crlf_does_not_count_against_the_limit(self):
+        src = b's: .byte "' + b"x" * 240 + b'", 0\r\n'
+        r = asim.run("as", ["/s", "/o"], {"/s": src})
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_a_line_of_255_characters_is_refused_loudly(self):
+        r = self.image(241)
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"line too long", r.err)
+
+
+@unittest.skipIf(SKIP, SKIP)
+class AsZeroPageAndNames(unittest.TestCase):
+    """(zp),y and (zp,x) take a zero-page pointer: the 6502 has no other form, and as used to
+    assemble an absolute pointer silently. Names are kept to 14 characters: a longer name is refused,
+    not cut (a cut name collided with its prefix)."""
+
+    def asm(self, src):
+        return asim.run("as", ["/s", "/o"], {"/s": src.encode()})
+
+    def test_indirect_y_with_a_zero_page_pointer_is_fine(self):
+        self.assertEqual(self.asm("ptr = $2b\n        lda (ptr),y\n").exit, 0)
+
+    def test_indirect_y_with_an_absolute_pointer_is_refused(self):
+        r = self.asm("ptr = $1234\n        lda (ptr),y\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_indirect_x_with_an_absolute_pointer_is_refused(self):
+        r = self.asm("ptr = $1234\n        lda (ptr,x)\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_forward_zero_page_pointer_is_fine(self):
+        self.assertEqual(self.asm("        lda (ptr),y\nptr = $2b\n").exit, 0)
+
+    def test_a_forward_absolute_pointer_is_refused(self):
+        r = self.asm("        lda (ptr),y\nptr = $1234\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_label_at_image_offset_zero_is_refused(self):
+        # a label is an offset in the image, not a runtime address: a small offset is not zero page
+        r = self.asm("ptr: .word 0\n        lda (ptr),y\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_label_at_a_small_image_offset_is_refused(self):
+        r = self.asm("        lda (ptr),y\n        nop\nptr: .word 0\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_res_label_is_refused(self):
+        r = self.asm("ptr: .res 2\n        lda (ptr),y\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_low_byte_of_a_label_is_refused(self):
+        r = self.asm("        lda (<lbl),y\nlbl: .word 0\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_the_program_counter_is_refused(self):
+        r = self.asm("        lda (*),y\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"zero page", r.err)
+
+    def test_a_14_character_name_is_kept_and_distinct(self):
+        self.assertEqual(self.asm("abcdefghijklmn: nop\nabcdefghijklmo: nop\n").exit, 0)
+
+    def test_a_15_character_name_is_refused_not_cut(self):
+        r = self.asm("abcdefghijklmno: nop\n")
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"longer than 14", r.err)
+
+
 if __name__ == "__main__":
     unittest.main()
