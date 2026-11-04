@@ -5,7 +5,7 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 | Level | Command | Time (on the runner, in the container) |
 |---|---|---|
 | Fast gate (host tests) | `tools/ci/run.sh all test-host`, or `make test-host` with cc65 and py65 on the host | about 45 s after `make` (`make test-host` alone skips the 77 tests that need build/): 299 tests, none skipped (image tools, key tables, the Ultimate client against a fake server, the py65 simulators of the real kernel, `as` on the host (`tools/asim.py`), the host compiler `tools/cc.py`, and the shard-list check) |
-| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard (89 tests now) |
+| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard (90 tests now) |
 | Smoke | `tools/ci/run.sh test-smoke` | about 2 to 3 minutes: boot, echo, a three-stage pipe, Ctrl-C |
 | Targeted | `tools/ci/run.sh test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `tools/ci/run.sh test-console` | about 2.5 minutes (6 tests, 143 s in the last shard run): screen RAM, colour RAM and VIC registers read back |
