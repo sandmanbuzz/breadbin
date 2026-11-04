@@ -7,10 +7,13 @@
 ; The screen is driven through the console: raw key mode (conmode) and
 ; the ESC = / ESC K / ESC R escapes. Rows 0-23 show text (39 columns),
 ; row 24 is the status line.
-; at_end borrow fix: upstream kpatr1981/breadbin, commit 6b66acc (MIT, Copyright 2026
-; Konstantinos Patronas; the commit is by tuksutukio). Ported unchanged in logic.
+; Ported from upstream Breadbin (kpatr1981/breadbin, MIT, Copyright 2026 Konstantinos
+; Patronas; the commits are by tuksutukio), branch fix/edit; the behaviour, not the diffs:
+;   6b66acc  at_end borrow fix (ported unchanged in logic)
+;   62cb12f  a file over the buffer (TEXTMAX, 12 KB here; 8 KB upstream) is refused with
+;            "edit: file too big" and exit 1, instead of being cut short by the next save
 .include "../../include/breadbin.inc"
-.import argn, print
+.import argn, print, eprint
 
 TEXTMAX = 12288
 ROWS    = 24
@@ -190,9 +193,31 @@ load:   lda fname
         sta tlen
         lda r1+1
         sta tlen+1
+        cmp #>TEXTMAX
+        bcc @c              ; short of a full buffer: all of it
+        lda #<key           ; a full buffer: is there more?
+        sta r0
+        lda #>key
+        sta r0+1
+        lda #1
+        sta r1
+        lda #0
+        sta r1+1
+        lda fd
+        jsr SYS_READ
+        bcs @c
+        lda r1
+        bne @big
 @c:     lda fd
         jsr SYS_CLOSE
 @r:     rts
+@big:   lda fd              ; saving would cut the file short: refuse it
+        jsr SYS_CLOSE
+        lda #<s_big
+        ldx #>s_big
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
 
 save:   lda fname+1
         bne @have
@@ -706,6 +731,7 @@ m_saved:   .byte " saved", 0
 m_err:     .byte " cannot save file", 0
 m_noname:  .byte " no file name: run edit file", 0
 m_full:    .byte " buffer full", 0
+s_big:     .byte "edit: file too big", 10, 0
 m_unsaved: .byte " unsaved changes! ^x again quits", 0
 
 .segment "BSS"
