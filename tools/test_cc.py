@@ -19,8 +19,9 @@ def defined_labels(text):
 
 def branch_targets(text):
     # sys_* names are predefined by `as` (the system call table), not labels of this file
+    # relative targets (*+5) name no label; sys_* names are predefined by `as`
     return [t for t in re.findall(r"^\s+(?:jmp|beq|bne|bcc|bcs)\s+(\S+)", text, re.M)
-            if not t.startswith("sys_")]
+            if not t.startswith(("sys_", "*"))]
 
 
 HELLO = """\
@@ -254,6 +255,11 @@ class Errors(unittest.TestCase):
         for init_line in ("g_seed:", "g_msg: .word"):
             self.assertLess(next(i for i, l in enumerate(lines) if l.startswith(init_line)), first_res)
 
+    def test_a_pointer_to_a_literal_has_its_own_bytes(self):
+        # the same text used by puts and by a pointer: the pointer may be written, so it is not shared
+        out = compile_src('char *p = "abc";\nint main() { char *q = "abc"; puts("abc"); return 0; }')
+        self.assertEqual(out.count(".byte 97, 98, 99, 0"), 3)     # the global, the local and puts: three labels
+
     def test_index_needs_a_pointer(self):
         self.assertFails("int main() { int x = 1; return x[0]; }", "needs a pointer or an array")
 
@@ -325,7 +331,7 @@ class Errors(unittest.TestCase):
 
     def test_symbol_table_limit(self):
         body = "".join("    if (%d == 1) { }\n" % i for i in range(200))
-        self.assertFails("int main() {\n" + body + "    return 0;\n}\n", "symbols; as holds 185")
+        self.assertFails("int main() {\n" + body + "    return 0;\n}\n", "symbols; as holds 220")
 
     def test_expression_depth_limit(self):
         ok = "int main() { return " + "1+(" * 31 + "1" + ")" * 31 + "; }"

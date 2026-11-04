@@ -163,6 +163,18 @@ class AsLongLine(unittest.TestCase):
         b = r.files["/o"]
         self.assertIn(b"x" * 150 + b"\x00", b[9:9 + head(b)["image"]])
 
+    def test_the_low_byte_of_a_constant_is_zero_page(self):
+        # <$1234 is $34: a zero-page pointer; only a label's low byte is refused
+        for src in ("        lda (<$1234),y\n", "PTR = $1234\n        lda (<PTR),y\n"):
+            self.assertEqual(asim.run("as", ["/s", "/o"], {"/s": src.encode()}).exit, 0, src)
+
+    def test_a_cr_inside_a_string_is_kept(self):
+        src = b's: .byte "a\rb", 0\n'
+        r = asim.run("as", ["/s", "/o"], {"/s": src})
+        self.assertEqual(r.exit, 0, r.err)
+        b = r.files["/o"]
+        self.assertIn(b"\x61\x0d\x62\x00", b[9:9 + head(b)["image"]])
+
     def test_a_line_of_254_characters_fits(self):
         # the line is `s: .byte "` (10) + the string + `", 0` (4): 240 characters make 254 in all
         r = self.image(240)
@@ -244,6 +256,23 @@ class AsZeroPageAndNames(unittest.TestCase):
         r = self.asm("abcdefghijklmno: nop\n")
         self.assertNotEqual(r.exit, 0)
         self.assertIn(b"longer than 14", r.err)
+
+
+@unittest.skipIf(SKIP, SKIP)
+class AsSymbolLimit(unittest.TestCase):
+    """The table holds 255 names, 35 of them builtins: 220 labels of a program (was 185)."""
+
+    def labels(self, n):
+        return b"".join(b"l%d: nop\n" % i for i in range(n))
+
+    def test_220_labels_fit(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.labels(220)})
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_221_labels_are_refused_loudly(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.labels(221)})
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"too many symbols", r.err)
 
 
 @unittest.skipIf(SKIP, SKIP)

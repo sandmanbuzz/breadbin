@@ -25,7 +25,7 @@ KEYWORDS = {"int", "char", "if", "else", "while", "for", "return"}
 MAX_DEPTH = 31                       # cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
 LINE_BYTES = 16                      # .byte values per emitted line (as keeps at most 254 characters a line)
-SYMTABLE = 185                       # as NSYM 220 less its 35 builtins
+SYMTABLE = 220                       # as NSYM 255 less its 35 builtins
 STATIC_MAX = 8192                    # bytes of static variables a program may have (a project limit: the owner may change it)
 
 TOKEN = re.compile(r"""
@@ -392,12 +392,11 @@ cc_lt:                          ; acc = 1 if tmp < acc (unsigned), else 0
         sbc acc
         lda tmp+1
         sbc acc+1
-        bcc cc_lt_1
+        bcc *+11                ; borrow: the 1 below (relative: no label to spend)
         lda #0
         sta acc
         sta acc+1
         rts
-cc_lt_1:
         lda #1
         sta acc
         lda #0
@@ -406,16 +405,15 @@ cc_lt_1:
 cc_eq:                          ; acc = 1 if tmp == acc, else 0
         lda tmp
         cmp acc
-        bne cc_eq_0
+        bne *+21
         lda tmp+1
         cmp acc+1
-        bne cc_eq_0
+        bne *+13
         lda #1
         sta acc
         lda #0
         sta acc+1
         rts
-cc_eq_0:
         lda #0
         sta acc
         sta acc+1
@@ -423,12 +421,11 @@ cc_eq_0:
 cc_not:                         ; acc = 1 if acc == 0, else 0
         lda acc
         ora acc+1
-        beq cc_not_1
+        beq *+11
         lda #0
         sta acc
         sta acc+1
         rts
-cc_not_1:
         lda #1
         sta acc
         lda #0
@@ -571,6 +568,7 @@ class Gen:
                        for name, params, _, _ in funcs}
         self.out, self.n, self.depth = [], 0, 0
         self.strings, self.locals, self.calls = [], [], []
+        self.shared = {}                   # puts() strings, by text
         self.names, self.fn_max, self.call_sites, self._worst = {}, {}, {}, {}
         self.fn, self.vars = None, {}
         self.globals, self.gdata, self.gres = {}, [], []
@@ -711,9 +709,15 @@ class Gen:
         self.locals.append((lbl, v.nbytes()))
         return v
 
-    def add_string(self, data):
+    def add_string(self, data, share=False):
+        """share: reuse the label of an identical puts() string. Only puts() shares: a pointer to a
+        literal may be written through, so each pointer gets its own bytes."""
+        if share and data in self.shared:
+            return self.shared[data]
         lbl = f"s_{len(self.strings) + 1}"
         self.strings.append((lbl, data))
+        if share:
+            self.shared[data] = lbl
         return lbl
 
     def strings_text(self):
@@ -834,11 +838,10 @@ class Gen:
             self.ins("rts")
         elif kind == "if":
             _, cond, then, other, _line = s
-            else_l, end_l, yes_l = self.new_label(), self.new_label(), self.new_label()
+            else_l, end_l = self.new_label(), self.new_label()
             self.test(cond)
-            self.ins(f"bne {yes_l}")
+            self.ins("bne *+5")         # true: skip the 3-byte jump to the else part (no label)
             self.ins(f"jmp {else_l}")
-            self.lab(yes_l)
             self.stmt(then)
             self.ins(f"jmp {end_l}")
             self.lab(else_l)
@@ -847,12 +850,11 @@ class Gen:
             self.lab(end_l)
         elif kind == "while":
             _, cond, body, _line = s
-            top_l, end_l, yes_l = self.new_label(), self.new_label(), self.new_label()
+            top_l, end_l = self.new_label(), self.new_label()
             self.lab(top_l)
             self.test(cond)
-            self.ins(f"bne {yes_l}")
+            self.ins("bne *+5")         # true: skip the 3-byte jump out of the loop (no label)
             self.ins(f"jmp {end_l}")
-            self.lab(yes_l)
             self.stmt(body)
             self.ins(f"jmp {top_l}")
             self.lab(end_l)
@@ -1038,7 +1040,7 @@ class Gen:
             raise CompileError(f"line {line}: string literal is longer than 254 bytes (rt_puts indexes with Y)")
         if 0 in data:
             raise CompileError(f"line {line}: a \\0 in a string would end it early; not in this slice")
-        lbl = self.add_string(data)
+        lbl = self.add_string(data, share=True)
         self.ins(f"lda #<{lbl}")
         self.ins("sta cc_ptr")
         self.ins(f"lda #>{lbl}")
