@@ -631,3 +631,16 @@ Build: the kernel and sources at aadea2f are identical to 9ccef95 (sha256 `743fd
 - The root-mount stall mitigation (13 of 13 before the kernel changed, per CLAUDE.md) holds on this build: 5 of 5 here plus the R8 boot (one boot, 32 s).
 
 **Not run (R13 list):** `format` (the list says expendable media only; the Ultimate's emulated drive with a scratch image is the right target, not the physical disk, and needs a second drive configured: not done this turn); the other-drive mount `mount 9 /mnt` (needs a second drive image); `tests.test_keyboard` on the Ultimate (not run this turn). Also not run: the JiffyDOS-ROM set on hardware.
+
+### 2026-11-04, R13b: a prg/root build mismatch gives "exec format error" on mount (Agent A)
+
+Ultimate firmware 1.1.0, JiffyDOS KERNAL. Every run used one drive A (bus 9) image at a time; `/Temp/breadbin.d64` was restored read-only after each run; scratch uploads were deleted and verified gone; the `ultimate` lock was held for each run only.
+
+- **Run 1 (all-zero d64 on drive A):** `mount 9 /mnt` gave "mount: /mnt: no such device or no disk". An all-zero image has no BAM, so this shows nothing about mount. Not a test of the format path.
+- **Run 2 (c1541-formatted blank on drive A, prg sha256 `e8932954…`, kernel hash `$6D7E`):** `mount 9 /mnt` gave "mount: /mnt: exec format error". The root disk `/Temp/breadbin.d64` carries `/lib/km/cbm` with hash `$7162`, so the prg and the root modules came from different builds. Which disk was root in this run was not checked (root follows the boot drive `$BA`).
+- **Run 3 (matched pair, prg sha256 `07f911f8…` from main `6afb2cb`, the same build's image uploaded as a new name; root forced to drive 9 with `load"*",9,1`; `$00BA` read back as 9):** login as root worked. `mount` listed "drive 9 on / (c64fs)" and "reu on /tmp (c64fs)". `mount 9 /mnt` gave "mount: /mnt: device busy", because drive 9 is the root device. No "exec format error".
+- **Reading:** a prg built from a different kernel than the root disk's modules gives "exec format error" on mount (the module hash check in `src/kernel/exec.s`, reached through `sys_mount`, `cbm_ensure` and `mod_load`). Run 3 supports this but does not prove the mismatch was the only cause, since the root disk changed between runs. The earlier root was not established.
+- **Not run:** the raw magic read-back at d64 offset 96256 (needs a blank disk on a device other than root); the other-drive mount of a formatted blank (needs a second drive); `format`; `tests.test_keyboard` (H2: no key injection on firmware 1.1.0, so this test cannot run on the Ultimate).
+- **Not changed:** the physical 1541 and bus 8 were not touched; no bus number was changed.
+
+**Rule for next time:** check the prg and root hashes before booting (`/lib/km/cbm` bytes 15-16 against `build/khash.inc`, or the hash of the module built beside the prg). A root on the same device as the target gives "device busy" on `mount`, so the other-drive test needs a second device.
