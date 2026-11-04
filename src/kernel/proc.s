@@ -92,7 +92,11 @@ sched:
         stx tmp2
         cpx #$ff - STKSAVE
         bcs @stkok
-        ; the process overflowed its stack area: it cannot be saved, kill it
+        ; the process overflowed its stack area: it cannot be saved, kill it. Its frames
+        ; are dead, and proc_exit (page_free, wakeup, ...) must not run on a bad stack,
+        ; so the stack is reset first. proc_exit never returns here.
+        ldx #$ff
+        txs
         lda #128+11
         jmp proc_exit
 @stkok: ldx cur
