@@ -8,7 +8,7 @@ LIBSRC  := $(wildcard src/lib/*.s)
 LIBOBJ  := $(BUILD)/lib/breadbin.lib
 ROOTSRC := $(shell find rootfs -type f)
 
-.PHONY: FORCE all clean test test-host test-smoke test-only test-keyboard test-console size run run-reu run-reu-root
+.PHONY: FORCE all clean webdemo test test-host test-smoke test-only test-keyboard test-console size run run-reu run-reu-root
 .SECONDARY:
 all: $(BUILD)/breadbin.d64
 
@@ -86,6 +86,12 @@ run: all
 
 run-reu-root: $(BUILD)/breadbin.reu $(BUILD)/breadbin.prg
 	x64sc -drive8type 0 -reu -reusize 256 -reuimage $(BUILD)/breadbin.reu -autostartprgmode 1 -autostart $(BUILD)/breadbin.prg
+
+# the browser demo bundle, a local directory (docs/webdemo.md): WEBDEMO is the external tool that
+# builds the EmulatorJS/VICE kit; nothing is published
+webdemo: $(BUILD)/breadbin.reu $(BUILD)/breadbin.prg
+	@test -n "$(WEBDEMO)" || { echo "make webdemo WEBDEMO=DIR (see docs/webdemo.md)"; exit 1; }
+	python3 tools/webdemo.py $(WEBDEMO) $(BUILD)/breadbin.prg $(BUILD)/breadbin.reu $(BUILD)/webdemo
 
 run-reu: all
 	x64sc -reu -reusize 512 -autostart $(BUILD)/breadbin.d64
