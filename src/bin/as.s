@@ -153,25 +153,35 @@ rp_done:
         jmp SYS_CLOSE
 
 write_out:
-        ; the output is written as outp~ and renamed over outp only when complete: a failed write
-        ; leaves the previous output as it was, and no short file under the real name
+        ; the output is written as ~as in its own directory and renamed over outp only when complete:
+        ; a failed write leaves the previous output as it was, and no short file under the real name
         lda outp
         sta r0
         lda outp+1
         sta r0+1
+        ldx #0                  ; x: where the last component starts (0 when there is none)
         ldy #0
 @cn:    lda (r0),y
         beq @cdone
-        cpy #78
+        cpy #74
         bcs @long
         sta tname,y
-        iny
+        cmp #'/'
+        bne @ns
+        tya
+        clc
+        adc #1
+        tax
+@ns:    iny
         bne @cn
 @cdone: lda #'~'
-        sta tname,y
-        iny
+        sta tname,x
+        lda #'a'
+        sta tname+1,x
+        lda #'s'
+        sta tname+2,x
         lda #0
-        sta tname,y
+        sta tname+3,x
         lda #<tname
         sta r0
         lda #>tname
@@ -243,12 +253,7 @@ write_out:
         lda fd
         jsr SYS_CLOSE
         bcs @werr              ; the close is where a buffered write can fail
-        lda outp               ; the old output goes first (a rename may not replace one), then the new one takes its name
-        sta r0
-        lda outp+1
-        sta r0+1
-        jsr SYS_UNLINK         ; no old file is fine
-        lda #<tname
+        lda #<tname             ; the complete file takes the output's name (c64fs replaces an existing one)
         sta r0
         lda #>tname
         sta r0+1
@@ -257,8 +262,13 @@ write_out:
         lda outp+1
         sta r1+1
         jsr SYS_RENAME
-        bcs @werr
+        bcs @rnerr
         rts
+@rnerr: lda #<s_rnerr           ; the complete file is kept: it is named in the message
+        ldx #>s_rnerr
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
 @werr:  lda fd
         jsr SYS_CLOSE          ; its result does not matter now: the write has failed
         lda #<tname
@@ -1457,6 +1467,7 @@ d_text:  .byte "text", 0
 s_usage: .byte "usage: as source output", 10, 0
 s_as:    .byte "as: line ", 0
 s_wrerr:  .byte "as: cannot write the output", 10, 0
+s_rnerr:  .byte "as: cannot rename the output; the complete file is left as ~as in its directory", 10, 0
 s_long:  .byte "line too long (over 254 characters)", 0
 s_colon: .byte ": ", 0
 s_bytes: .byte " bytes, ", 0
