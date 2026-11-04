@@ -22,8 +22,10 @@ def shards(path=LIST):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            name, _, specs = line.partition("|")
-            out.append((name, specs.split()))
+            name, bar, specs = line.partition("|")
+            if not bar or not name.strip() or not specs.split():
+                raise ValueError("bad shard line (need name|specs): %r" % line)
+            out.append((name.strip(), specs.split()))
     return out
 
 
@@ -59,8 +61,8 @@ def problems(shard_list, ids, nmax):
     if len(shard_list) > nmax:
         bad.append(f"{len(shard_list)} shards > {nmax} slots")
     for i in ids:
-        hits = [n for n, specs in shard_list
-                if any(i == s or i.startswith(s + ".") for s in specs)]
+        # one entry per matching SPEC, so a class and one of its methods in the same shard count twice
+        hits = [n for n, specs in shard_list for s in specs if i == s or i.startswith(s + ".")]
         if not hits:
             bad.append(f"uncovered {i}")
         elif len(hits) > 1:
@@ -74,7 +76,11 @@ def problems(shard_list, ids, nmax):
 
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "check"
-    sl = shards()
+    try:
+        sl = shards()
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
     if cmd == "list":
         for n, specs in sl:
             print(f"{n}\t{' '.join(specs)}")
