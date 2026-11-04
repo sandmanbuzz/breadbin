@@ -275,7 +275,7 @@ class Kill(unittest.TestCase):
 
     def test_kill_moves_the_text_once(self):
         # 20 lines of 50 bytes: killing the first one moves the 950 bytes after it. Measured: 76,000 steps
-        # for the whole run when the tail moves once, 638,000 when it moved once per character.
+        # for the whole run when the tail moves once, 606,000 when it moved once per character.
         data = (b"x" * 49 + b"\n") * 20
         r = edit(data, [KILL, SAVE])
         self.assertEqual(r.files[F], data[50:])
