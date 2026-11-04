@@ -108,5 +108,116 @@ class Refusal(unittest.TestCase):
         self.assertEqual(edit(None, [ord("q"), SAVE]).files[F], b"q")
 
 
+@unittest.skipIf(SKIP, SKIP)
+class Redraw(unittest.TestCase):
+    LINES = b"one\ntwo\nthree\nfour\n"
+
+    def per_key(self, data, keys):
+        """The bytes written after each key (marks[i+1] - marks[i]); keys end with a QUIT."""
+        r = edit(data, list(keys) + [QUIT])
+        out, m = r.out, r.marks
+        return r, [out[m[i]:m[i + 1]] for i in range(len(keys))]
+
+    def test_a_cursor_key_only_moves_the_cursor(self):
+        r, outs = self.per_key(self.LINES, [RIGHT, DOWN, LEFT, UP, HOME, RIGHT, DOWN, DOWN, UP])
+        for i, o in enumerate(outs):
+            self.assertEqual(len(o), 4, "key %d wrote %d bytes, more than the cursor move: %r" % (i, len(o), o[:40]))
+            self.assertEqual(o[:2], bytes([ESC, ord("=")]))
+
+    def test_a_cursor_key_leaves_what_is_on_the_screen(self):
+        # as upstream's test: put marks on the screen (row 10, and the status line's end); cursor
+        # keys must not wipe them, typing a character redraws the text rows and wipes the one on row 10
+        r, outs = self.per_key(self.LINES, [RIGHT, DOWN, ord("A")])
+        s = screen_of(r.out[:r.marks[0]])
+        s.rows[10][0] = "*"
+        s.rows[24][39] = "*"
+        s.feed(outs[0] + outs[1])
+        self.assertEqual((s.rows[10][0], s.rows[24][39]), ("*", "*"))
+        s.feed(outs[2])
+        self.assertEqual(s.rows[10][0], " ")
+        self.assertEqual(s.rows[24][39], " ")                          # the first change redraws the status line
+
+    def test_typing_redraws_the_text(self):
+        r, outs = self.per_key(self.LINES, [ord("A")])
+        self.assertGreater(len(outs[0]), 24 * 4)
+        self.assertEqual(screen_of(r.out[:r.marks[1]]).line(0), "Aone")
+
+    def test_the_status_line_is_drawn_when_it_changes_only(self):
+        r, outs = self.per_key(self.LINES, [ord("A"), ord("B"), RIGHT, ord("C")])
+        has_status = [bytes([ESC, ord("R")]) in o for o in outs]
+        self.assertEqual(has_status, [True, False, False, False])     # first edit: " *" appears
+        r, outs = self.per_key(self.LINES, [ord("A"), SAVE, RIGHT, ord("B")])
+        has_status = [bytes([ESC, ord("R")]) in o for o in outs]
+        self.assertEqual(has_status, [True, True, True, True])        # " *", " saved", the message cleared, " *"
+        r, outs = self.per_key(self.LINES, [ord("A"), SAVE, RIGHT, RIGHT, LEFT])
+        has_status = [bytes([ESC, ord("R")]) in o for o in outs]
+        self.assertEqual(has_status, [True, True, True, False, False])
+        r, outs = self.per_key(self.LINES, [RIGHT, DEL, DEL])
+        self.assertEqual([bytes([ESC, ord("R")]) in o for o in outs], [False, True, False])
+
+    def test_the_status_line_follows_dirty_and_messages(self):
+        r = edit(self.LINES, [ord("A"), QUIT])      # first ^X: warning, second (end of input): quits
+        s = Screen()
+        s.feed(r.out[:r.marks[2]])
+        self.assertIn("unsaved changes", s.line(24))
+        r = edit(self.LINES, [ord("A")])
+        s = screen_of(r.out[:r.marks[1]])
+        self.assertTrue(s.line(24).startswith(" edit: " + F), s.line(24))
+        self.assertIn("*", s.line(24))
+        r = edit(self.LINES, [ord("A"), SAVE, ord("B"), DEL])
+        marks = r.marks
+        self.assertIn("saved", screen_of(r.out[:marks[2]]).line(24))
+        self.assertNotIn("saved", screen_of(r.out[:marks[3]]).line(24))   # typing clears the message
+
+    def test_scrolling_redraws_the_text(self):
+        many = b"".join(b"line%02d\n" % i for i in range(40))
+        r, outs = self.per_key(many, [DOWN] * 30)
+        big = [len(o) > 24 * 4 for o in outs]
+        self.assertEqual(big[:23], [False] * 23)                      # the cursor goes down rows 1..23
+        self.assertTrue(big[23] and big[24])                          # past row 23 the view scrolls
+        s = screen_of(r.out[:r.marks[30]])
+        self.assertEqual(s.line(0), "line07")
+        self.assertEqual(s.line(23), "line30")
+        # and back up
+        r, outs = self.per_key(many, [DOWN] * 30 + [UP] * 23)
+        s = screen_of(r.out[:r.marks[53]])
+        self.assertEqual((s.line(0), s.line(23)), ("line07", "line30"))   # the cursor is on the top row: no scroll yet
+        r, outs = self.per_key(many, [DOWN] * 30 + [UP] * 24)
+        s = screen_of(r.out[:r.marks[54]])
+        self.assertEqual((s.line(0), s.line(23)), ("line06", "line29"))
+
+    def test_the_screen_matches_the_text_after_random_edits(self):
+        rng = random.Random(1983)
+        alphabet = [ord(c) for c in "abcxyz "]
+        for trial in range(30):
+            start = rng.choice([b"", b"one\ntwo\nthree", b"hello world\n\nlast line\n", b"x" * 45 + b"\nshort\n"])
+            keys = []
+            rets = 0
+            for _ in range(rng.randint(5, 40)):
+                k = rng.choice(["a", "a", "a", "ret", "del", "del", "up", "down", "left", "right", "home", "kill"])
+                if k == "a":
+                    keys.append(rng.choice(alphabet))
+                elif k == "ret":
+                    if rets < 6:
+                        keys.append(RET)
+                        rets += 1
+                else:
+                    keys.append({"del": DEL, "up": UP, "down": DOWN, "left": LEFT, "right": RIGHT,
+                                 "home": HOME, "kill": KILL}[k])
+            r = edit(start, keys + [SAVE])
+            saved = r.files[F]
+            lines = saved.decode("latin-1").split("\n")
+            if saved.endswith(b"\n"):
+                lines.pop()
+            s = Screen()
+            s.feed(r.out[:r.marks[len(keys) + 1]])     # up to the save (quitting clears the screen)
+            if len(lines) > 24:
+                continue                                # the view may have scrolled: the model is for one page
+            for n in range(24):
+                want = (lines[n][:39] if n < len(lines) else "").rstrip()
+                self.assertEqual(s.line(n), want, "trial %d, row %d: start %r keys %s" % (
+                    trial, n, start, bytes(keys).hex()))
+
+
 if __name__ == "__main__":
     unittest.main()
