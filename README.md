@@ -15,7 +15,7 @@ It is a real kernel, not a shell that prints canned output:
 - **More drives.** `mount 9 /mnt` attaches drive 9, 10 or 11. A Breadbin disk shows up with its directories. A normal C64 disk shows up as one flat directory that you can read, write (`cp`), `rm` and `mv`; the writes go through the drive's own DOS, so other C64 software can read the results.
 - **Users and screen.** There's a `login` with passwords (`passwd`, `whoami`), a full-screen editor (`edit`), colour `theme`s, shell wildcards (`*.bas`) and `jobs`.
 - **Stock hardware.** It runs on a stock C64 with a 1541, and the same disk boots with or without an REU.
-- **BASIC and an assembler.** Both run *on* the C64: `basic` is an integer BASIC, and `as` is a 6502 assembler that produces new Breadbin commands.
+- **BASIC and an assembler.** Both run *on* the C64: `basic` is an integer BASIC, and `as` is a 6502 assembler that produces new Breadbin commands (a trailing `.res` is the program's BSS, so big buffers cost no disk space). A small C-subset compiler, `tools/cc.py`, runs on the host and emits `as` source that the C64 assembles and runs; it is a host-side reference for now.
 
 ## Building
 
@@ -107,7 +107,7 @@ The boot disk is mounted at `/`. More drives work too: put a disk in drive 9, 10
 
 ## Commands
 
-`sh` `init` `login` `ls [-l] [-a]` `cat` `echo` `grep [-v] [-c]` `wc` `head [-n]` `more` `edit` `cp` `mv` `rm` `mkdir` `rmdir` `pwd` `stat` `hexdump` `ps` `kill [-sig]` `sleep` `free` `df` `mount` `umount` `format` `uptime` `date` `uname [-a]` `version` `whoami` `passwd` `theme` `turbo [0-15|off|max]` `help` `clear` `count` `basic` `as`
+`sh` `init` `login` `ls [-l] [-a]` `cat` `echo` `grep [-v] [-c]` `wc` `head [-n]` `tail` `tee` `sort` `touch` `more` `edit` `cp` `mv` `rm` `mkdir` `rmdir` `pwd` `stat` `hexdump` `ps` `kill [-sig]` `sleep` `free` `df` `mount` `umount` `format` `uptime` `date` `uname [-a]` `version` `whoami` `passwd` `theme` `turbo [0-15|off|max]` `help` `clear` `count` `basic` `as`
 
 Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 
@@ -139,8 +139,10 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 ## Tests
 
 ```sh
-make test-host   # image builder and relocation tool (fast, no VICE needed)
-make test        # boots VICE and drives the shell (slow: about 47 minutes for 63 VICE tests, one run in a container with every VICE slot taken; `docs/testing.md`)
+tools/ci/run.sh all test-host   # the fast gate: image tools, simulators, the assembler and compiler on the host (about 45 s, 289 tests)
+tools/ci/sharded.sh             # the whole VICE suite in six containers at once (80 tests, about 10 minutes)
+make test-host                  # the same host tests directly, with cc65 and py65 installed
+make test                       # boots VICE one test after another (slow: 63 VICE tests took 2,804 s in the container with every slot taken)
 ```
 
 The system tests start `x64sc` (windows open minimized), type commands through VICE's remote monitor, and read the screen back. They need `x64sc` and `c1541` on your `PATH` (or set `X64SC=/path/to/x64sc`). Don't run other VICE instances at the same time: the tests are timing-sensitive under heavy CPU load.
