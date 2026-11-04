@@ -36,7 +36,9 @@ hw:     .res 2          ; end of the bytes actually stored (pc past it: a traili
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
-tname:  .res 80         ; the output name with ~ appended: the file is written under it, then renamed
+tname:  .res 90         ; the output name with ~ appended: the file is written under it, then renamed
+tlead:  .res 1          ; where the output's last path component starts in tname
+tend:   .res 1
 qkind:  .res 1          ; the quote character open in the line being lowercased, or 0
 lbuf:   .res 256            ; up to 254 characters a line (readline refuses longer ones)
 li:     .res 1
@@ -164,8 +166,9 @@ write_out:
 @cn:    lda (r0),y
         beq @cdone
         cpy #74
-        bcs @long
-        sta tname,y
+        bcc @cok
+        jmp @long
+@cok:   sta tname,y
         cmp #'/'
         bne @ns
         tya
@@ -174,19 +177,56 @@ write_out:
         tax
 @ns:    iny
         bne @cn
-@cdone: lda #'~'
+@cdone: stx tlead
+        tya
+        sec
+        sbc tlead
+        cmp #15                 ; a c64fs name is at most 14 characters
+        bcc @lok
+        jmp @long
+@lok:        lda tlead               ; the temporary is ~ and the first 13 characters of the output's name (^ if
+        clc                     ; the name starts with ~, so it can never equal the output), same directory
+        adc #14
+        sta tend
+        ldy tlead
+        lda (r0),y
+        ldx #'~'
+        cmp #'~'
+        bne @pf
+        ldx #'^'
+@pf:    txa
+        ldx tlead
         sta tname,x
-        lda #'a'
-        sta tname+1,x
-        lda #'s'
-        sta tname+2,x
-        lda #0
-        sta tname+3,x
+        inx
+@cp:    lda (r0),y
+        beq @ce
+        sta tname,x
+        iny
+        inx
+        cpx tend
+        bcc @cp
+@ce:    lda #0
+        sta tname,x
         lda #<tname
         sta r0
         lda #>tname
         sta r0+1
-        lda #(O_WRONLY | O_CREAT | O_TRUNC)
+        lda #O_RDONLY           ; no O_EXCL exists: probe first, and never write over a file that is there
+        jsr SYS_OPEN
+        bcs @free
+        jsr SYS_CLOSE
+        lda #<s_exists
+        ldx #>s_exists
+        jsr eprint
+        lda #<tname
+        ldx #>tname
+        jsr eprint
+        lda #10
+        ldy #2
+        jsr fputc
+        lda #1
+        jmp SYS_EXIT
+@free:  lda #(O_WRONLY | O_CREAT | O_TRUNC)
         jsr SYS_OPEN
         bcc @ok
         ldx outp
@@ -267,6 +307,12 @@ write_out:
 @rnerr: lda #<s_rnerr           ; the complete file is kept: it is named in the message
         ldx #>s_rnerr
         jsr eprint
+        lda #<tname
+        ldx #>tname
+        jsr eprint
+        lda #10
+        ldy #2
+        jsr fputc
         lda #1
         jmp SYS_EXIT
 @werr:  lda fd
@@ -400,6 +446,7 @@ do_line:
         jsr expr
         jsr restore_name
         jsr eqfwd               ; a forward value is not known yet: a label alias would be a plain constant
+        jsr eqbyte
         lda erel
         beq @abs
         ldy #F_REL
@@ -1390,6 +1437,16 @@ name_is:
         bne @l
 @r:     rts
 
+; eqbyte: an = value that is a byte of a label (<lbl, >lbl) is an error: the label-ness would be lost
+eqbyte: lda ehl
+        beq @r
+        lda erl
+        beq @r
+        lda #<e_eqbyte
+        ldx #>e_eqbyte
+        jmp error
+@r:     rts
+
 ; eqfwd: an = value that uses a symbol not yet defined is an error (the value would not be settled)
 eqfwd:  lda efwd
         beq @r
@@ -1467,7 +1524,8 @@ d_text:  .byte "text", 0
 s_usage: .byte "usage: as source output", 10, 0
 s_as:    .byte "as: line ", 0
 s_wrerr:  .byte "as: cannot write the output", 10, 0
-s_rnerr:  .byte "as: cannot rename the output; the complete file is left as ~as in its directory", 10, 0
+s_rnerr:  .byte "as: cannot rename the output; the complete file is left as ", 0
+s_exists: .byte "as: will not overwrite the existing file ", 0
 s_long:  .byte "line too long (over 254 characters)", 0
 s_colon: .byte ": ", 0
 s_bytes: .byte " bytes, ", 0
@@ -1485,6 +1543,7 @@ e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
 e_eqfwd: .byte "forward reference in =: define the symbol first", 0
+e_eqbyte: .byte "a byte of a label cannot be an = value: use .byte <lbl, >lbl", 0
 e_outname: .byte "output name is too long", 0
 e_wordb: .byte "a byte of a label in .word: use .byte <lbl, >lbl", 0
 e_resrel: .byte "res count is an address, not a number", 0
