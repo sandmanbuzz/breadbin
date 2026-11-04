@@ -24,6 +24,12 @@ def cmd(*b):
     return bytes([1, len(b)]) + b
 
 
+def cmd_sink(*b):
+    """op 9: a command whose response bytes are kept in the sink (every chunk back to back)."""
+    b = bytes(b)
+    return bytes([9, len(b)]) + b
+
+
 def rdloop(target, chunk, total):
     return bytes([2, target]) + struct.pack("<HH", chunk, total)
 
@@ -136,7 +142,49 @@ GROUPS = {
              ("open the file again", open_read()),
              ("load the same, again", cmd(1, 0x21, *struct.pack("<I", 0x20000), *struct.pack("<I", 32768))),
              ("close", close())]),
+    "rdchunks": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("OPEN DIR (current directory)", cmd(1, 0x13)),
+                  ("READ DIR, one listing", cmd(1, 0x14))]),
+    "rdsink": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("OPEN DIR (current directory)", cmd(1, 0x13)),
+                ("READ DIR, chunks kept", cmd_sink(1, 0x14))]),
+    "rdlong": ([("CHANGE DIR /SD", cmd(1, 0x11, *b"/SD")), ("OPEN DIR (current directory)", cmd(1, 0x13)),
+                ("READ DIR, chunks kept (names longer than 12)", cmd_sink(1, 0x14))]),
+    "abortmid": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("ABORT after 1 chunk: set", bytes([12, 1])),
+                  ("READ DIR, aborted after chunk 1", cmd_sink(1, 0x14)), ("ABORT off: set", bytes([12, 255])),
+                  ("OPEN DIR again (recovery)", cmd(1, 0x13)), ("READ DIR after the abort, full listing", cmd_sink(1, 0x14))]),
+    "renameonto": ([("CHANGE DIR /Temp", cmd(1, 0x11, *b"/Temp")), ("MKDIR scratch", cmd(1, 0x16, *b"/Temp/bqscratch")),
+                    ("CREATE a.txt", cmd(1, 0x02, 0x0A, *b"/Temp/bqscratch/a.txt")), ("WRITE a.txt 8 bytes", cmd(1, 0x05, *b"AAAAAAAA")), ("CLOSE a.txt", close()),
+                    ("CREATE b.txt", cmd(1, 0x02, 0x0A, *b"/Temp/bqscratch/b.txt")), ("WRITE b.txt 8 bytes", cmd(1, 0x05, *b"BBBBBBBB")), ("CLOSE b.txt", close()),
+                    ("RENAME a.txt onto existing b.txt", cmd(1, 0x0A, *b"/Temp/bqscratch/a.txt", 0, *b"/Temp/bqscratch/b.txt")),
+                    ("OPEN b.txt for read", open_read(1, b"/Temp/bqscratch/b.txt")), ("READ 8 from b.txt", cmd(1, 0x04, 8, 0)), ("CLOSE b.txt", close()),
+                    ("FILE STAT a.txt (gone?)", cmd(1, 0x08, *b"/Temp/bqscratch/a.txt")), ("FILE STAT b.txt", cmd(1, 0x08, *b"/Temp/bqscratch/b.txt")),
+                    ("DELETE b.txt", cmd(1, 0x09, *b"/Temp/bqscratch/b.txt")), ("DELETE a.txt (if still there)", cmd(1, 0x09, *b"/Temp/bqscratch/a.txt")),
+                    ("DELETE scratch dir", cmd(1, 0x09, *b"/Temp/bqscratch"))]),
     "net": ([("target 3 identify", cmd(3, 0x01)), ("target 4 identify", cmd(4, 0x01))]),
+    # Q2, Q4, Q5 of docs/design/next/uci-v1.md: directory commands (absolute and relative names after CHANGE DIR,
+    # FILE STAT by name), the error cases, READ DIR packets. Creates and removes /Temp/bdir and /Temp/bdir/sub.
+    "dirs": ([("mkdir /Temp/bdir", cmd(1, 0x16, *b"/Temp/bdir")), ("mkdir again (exists)", cmd(1, 0x16, *b"/Temp/bdir")),
+              ("mkdir /Temp/bdir/sub", cmd(1, 0x16, *b"/Temp/bdir/sub")),
+              ("CHANGE DIR /Temp/bdir (absolute)", cmd(1, 0x11, *b"/Temp/bdir")), ("GET PATH", cmd(1, 0x12)),
+              ("FILE STAT relative 'sub' (dir)", cmd(1, 0x08, *b"sub")),
+              ("FILE STAT absolute /Temp/bdir/sub", cmd(1, 0x08, *b"/Temp/bdir/sub")),
+              ("CHANGE DIR /Temp (absolute)", cmd(1, 0x11, *b"/Temp")), ("GET PATH", cmd(1, 0x12)),
+              ("FILE STAT relative 'bdir' (after CD /Temp)", cmd(1, 0x08, *b"bdir")),
+              ("OPEN DIR /Temp/bdir", cmd(1, 0x13, *b"/Temp/bdir")), ("READ DIR 1", cmd(1, 0x14)), ("READ DIR 2", cmd(1, 0x14)),
+              ("READ DIR 3", cmd(1, 0x14)), ("READ DIR 4 (end?)", cmd(1, 0x14)),
+              ("DELETE non-empty dir /Temp/bdir", cmd(1, 0x09, *b"/Temp/bdir")),
+              ("DELETE /Temp/bdir/sub", cmd(1, 0x09, *b"/Temp/bdir/sub")), ("DELETE /Temp/bdir", cmd(1, 0x09, *b"/Temp/bdir")),
+              ("FILE STAT /Temp/bdir (gone)", cmd(1, 0x08, *b"/Temp/bdir")), ("CHANGE DIR /", cmd(1, 0x11, *b"/"))]),
+    # Q7: LOAD REU near the end of a 2 MB REU (needs /Temp/uci32k.bin from the write group, and the REU in the config).
+    # Each load reopens the file: a LOAD reads from the open file's position, so a second load after the first
+    # reads at end of file and loads 0 bytes.
+    "reuend": ([("open 32 KB file", open_read()), ("LOAD REU 32 KB at $1F8000 (ends at 2 MB)", cmd(1, 0x21, *struct.pack("<I", 0x1F8000), *struct.pack("<I", 32768))),
+                ("close", close()), ("open", open_read()), ("LOAD REU 256 at $1FFF00 (ends at 2 MB)", cmd(1, 0x21, *struct.pack("<I", 0x1FFF00), *struct.pack("<I", 256))),
+                ("close", close()), ("open", open_read()), ("LOAD REU 512 at $1FFF00, crossing 2 MB", cmd(1, 0x21, *struct.pack("<I", 0x1FFF00), *struct.pack("<I", 512))),
+                ("close", close())]),
+    # READ DIR follow-up: the dirs group got the same 85-byte packet four times. Open /Temp (which has entries) and read.
+    "readdir": ([("OPEN DIR /Temp", cmd(1, 0x13, *b"/Temp")), ("READ DIR 1", cmd(1, 0x14)), ("READ DIR 2", cmd(1, 0x14)),
+                 ("READ DIR 3", cmd(1, 0x14)), ("OPEN DIR /Temp/bdir again", cmd(1, 0x13, *b"/Temp/bdir")),
+                 ("READ DIR after reopen", cmd(1, 0x14))]),
 }
 
 
@@ -154,6 +202,7 @@ def run(name, ops):
     u.writemem(0xC000, code)
     u.writemem(0x4000, script)
     u.writemem(0xC7F0, bytes(2))
+    u.writemem(0xC79D, b"\xff")          # op 12 ABORT count: never, until a script sets it
     u.resume()
     feed("sys49152\n")
     t0 = time.time()
@@ -177,6 +226,29 @@ def run(name, ops):
               f"{' TIMEOUT' if res else ''}  regs {e[1]:02X}/{idr:02X}  {show[:48]}")
 
 
+def chunk_log():
+    """After a run: where each Data More chunk of the last command started (cumulative bytes) and its status."""
+    n = u.readmem(0xC79E, 1)[0]
+    starts = [struct.unpack("<H", bytes(u.readmem(0xC7A0 + 2 * i, 2)))[0] for i in range(min(n, 32))]
+    stats = [bytes(u.readmem(0xC760 + i, 1))[0] for i in range(min(n, 32))]
+    total = struct.unpack("<H", bytes(u.readmem(0xC710, 2)))[0]
+    print(f"== chunks of the last command: {n}, total response {total} bytes")
+    for i in range(min(n, 32)):
+        end = starts[i + 1] if i + 1 < n else total
+        print(f"  chunk {i:2d}: starts at {starts[i]:4d}, length {end - starts[i]:3d}, ends with status ${stats[i]:02X}"
+              f"{' (Data Last)' if stats[i] & 0xF0 == 0x20 else ' (Data More)' if stats[i] & 0xF0 == 0x30 else ''}")
+
+
 work = os.environ.get("SCRATCH", ".")
 for g in sys.argv[1:]:
     run(g, GROUPS[g])
+    if g == "rdchunks":
+        chunk_log()
+    if g in ("rdsink", "rdlong", "abortmid", "renameonto"):
+        chunk_log()
+        total = struct.unpack("<H", bytes(u.readmem(0xC710, 2)))[0]
+        data = bytes(u.readmem(0x5000, total)) if total else b""
+        starts = [struct.unpack("<H", bytes(u.readmem(0xC7A0 + 2 * i, 2)))[0] for i in range(min(u.readmem(0xC79E, 1)[0], 32))]
+        for i, st in enumerate(starts):
+            end = starts[i + 1] if i + 1 < len(starts) else total
+            print(f"  chunk {i:2d} bytes: {data[st:end].hex(' ')}   text: {data[st:end].decode('latin1')!r}")
