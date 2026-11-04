@@ -25,15 +25,20 @@ if git merge-base --is-ancestor "$branch" HEAD; then
     exit 0
 fi
 
+# Whatever fails after the merge starts (conflict, red suite, a failing commit such as a passphrase
+# prompt with no agent), the merge is aborted, so the primary is never left mid-merge.
+abort_if_merging() {
+    if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then git merge --abort; fi
+}
+trap abort_if_merging EXIT
+
 if ! git merge --no-ff --no-commit "$branch"; then
-    git merge --abort || true
     echo "land: $branch does not merge cleanly; aborted, resolve on the branch and try again" >&2
     exit 1
 fi
 
 make clean >/dev/null 2>&1 || true
 if ! make test-host; then
-    git merge --abort || true
     echo "land: host suite is red on the merged tree; aborted, nothing committed" >&2
     exit 1
 fi
