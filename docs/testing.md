@@ -10,7 +10,7 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 | Targeted | `tools/ci/run.sh test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `tools/ci/run.sh test-console` | about 2.5 minutes (6 tests, 143 s in the last shard run): screen RAM, colour RAM and VIC registers read back |
 | Keyboard | `tools/ci/run.sh test-keyboard` | about 4 minutes (7 tests, 232 s): real keystrokes through VICE's keyboard matrix |
-| Full suite, sharded | `tools/ci/sharded.sh` | six containers at once under one `with-lock -x`, about 10 minutes: 74 tests took 605 s on `27fa473` and 628 s on `bb09283` (stock ROMs); the 80-test layout has not been timed yet. Fails on any non-zero shard, any skip, or a total that differs from the discovered count |
+| Full suite, sharded | `tools/ci/sharded.sh` | six containers at once under one `with-lock -x`, about 10 to 13 minutes: 74 tests took 605 s on `27fa473` and 628 s on `bb09283` (stock ROMs); the 80-test layout on `3fd8112` took 778 s (80 of 80, shards 601 to 768 s: the shard list is unbalanced again and the runs now take longer per test than before, so a rebalance by cost is due). Fails on any non-zero shard, any skip, or a total that differs from the discovered count |
 | Full suite, JiffyDOS ROMs | `BREADBIN_CI_JIFFY=<dir> tools/ci/sharded.sh` | the same run: 74 of 74 in 562 s on `2048e78`. `BREADBIN_VICE_PRINT_ARGS=1` prints the emulator command line, so `-kernal JiffyDOS-C64.bin -dos1541 JiffyDOS_1541-II.bin` can be seen |
 | Full suite, serial (the reference) | `BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test` | 63 VICE tests in 2,804 s on the runner, every slot taken (about 47 minutes). The older 55-test figure, 2,511 s on 4778b1a (the Mac), is not comparable |
 
