@@ -72,13 +72,16 @@ Accepted, by decision, and documented here for the owner:
 - Block scope is not enforced: `{ int x = 1; } x = 2;` compiles, because all locals of a
   function share one namespace. C would refuse the second use.
 
-- `as` symbol names are at most 15 characters; the compiler refuses longer local names.
-- `as` holds at most 220 symbols (`NSYM`); a large program will hit that before it hits the code
-  size. The count is not checked yet.
+- Symbol names are at most 14 characters (`as` keeps 14); the compiler refuses longer names, locals and
+  globals and functions alike.
+- `as` holds 220 program symbols (`NSYM` 255 less the 35 builtins; the count is one byte). The compiler
+  counts a program's labels and refuses one that needs more (`SYMTABLE` = 220).
 - The software stack is 32 levels; deeper expressions are refused.
 - Size on `as` (findings for S13): hello assembles to 390 bytes with 71 relocations, from 153
   emitted lines and 24 labels (about 28 names with the system names). The loop program has 194
-  lines and 27 labels. Both are far under the 220-symbol table; the count is not checked yet.
+  lines and 27 labels. Both are far under the 220-symbol table, and the compiler checks the count.
+- A negative literal is accepted as the initial value of an `int` global (`int g = -5;` is 65531).
+  A `char` global takes 0 to 255 and a pointer global takes a string or 0.
 - Zero page: one pair, `cc_ptr = $2b` (the string pointer for `(zp),y` in `rt_puts`). `as`
   accepted `(zp),y` with a non-zero-page pointer and emitted a silent wrong address (found on the
   machine: the string read as empty). The data area was the first placement and it was wrong.

@@ -636,8 +636,9 @@ class Gen:
                 self.gdata.append(f"{v.label}: .word 0")
                 return
             raise CompileError(f"line {line}: a global pointer takes a string or 0")
-        elif init[0] == "num":
-            value = init[1] & 0xFFFF
+        elif init[0] == "num" or (init[0] == "neg" and init[1][0] == "num" and base == "int"):
+            n = init[1] if init[0] == "num" else -init[1][1]     # an int may start negative (two's complement)
+            value = n & 0xFFFF
             data = [value & 255] if base == "char" else [value & 255, value >> 8]
         else:
             raise CompileError(f"line {line}: a global needs a literal initialiser")
