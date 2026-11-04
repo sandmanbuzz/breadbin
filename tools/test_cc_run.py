@@ -126,5 +126,67 @@ class Executed(unittest.TestCase):
         self.assertEqual(run_c(src), b"Y")
 
 
+@unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
+class ExecutedSlice2(unittest.TestCase):
+    def check(self, src, want=b"Y"):
+        self.assertEqual(run_c(src), want, src)
+
+    def test_char_is_zero_extended_and_keeps_the_low_byte(self):
+        self.check('int main() { char c = 321; if (c == 65) puts("Y"); else puts("N"); return 0; }')
+
+    def test_char_arithmetic_promotes(self):
+        self.check('int main() { char c = 200; char d = 100; if (c + d == 300) puts("Y"); else puts("N"); return 0; }')
+
+    def test_parameters_are_passed_in_order(self):
+        self.check("int sub(int a, int b) { return a - b; }\n"
+                   'int main() { if (sub(10, 3) == 7) puts("Y"); else puts("N"); return 0; }')
+
+    def test_nested_calls_with_arguments(self):
+        self.check("int add(int a, int b) { return a + b; }\n"
+                   'int main() { if (add(add(1, 2), add(3, 4)) == 10) puts("Y"); else puts("N"); return 0; }')
+
+    def test_a_char_parameter_keeps_the_low_byte(self):
+        self.check("int lo(char c) { return c; }\n"
+                   'int main() { if (lo(321) == 65) puts("Y"); else puts("N"); return 0; }')
+
+    def test_for_counts(self):
+        self.check('int main() { int i; int s = 0; for (i = 0; i < 5; i = i + 1) s = s + i; '
+                   'if (s == 10) puts("Y"); else puts("N"); return 0; }')
+
+    def test_pointer_reads_and_writes_an_int(self):
+        self.check('int main() { int x = 5; int *p; p = &x; *p = 9; '
+                   'if (x == 9) puts("Y"); else puts("N"); return 0; }')
+
+    def test_pointer_reads_a_char(self):
+        self.check('int main() { char c = 7; char *q; q = &c; *q = 8; '
+                   'if (c == 8) puts("Y"); else puts("N"); return 0; }')
+
+    def test_array_stores_and_loads_ints(self):
+        self.check('int main() { int a[5]; int i; for (i = 0; i < 5; i = i + 1) a[i] = i + 1; '
+                   'if (a[0] + a[4] == 6) puts("Y"); else puts("N"); return 0; }')
+
+    def test_parameters_are_not_swapped(self):
+        # a program that always printed Y would pass the tests above; this one must print N
+        self.check("int sub(int a, int b) { return a - b; }\n"
+                   'int main() { if (sub(3, 10) == 7) puts("Y"); else puts("N"); return 0; }', b"N")
+
+    def test_array_elements_are_two_bytes_apart(self):
+        self.check('int main() { int a[4]; int *p; a[2] = 77; p = a; '
+                   'if (*(p + 2) == 77) puts("Y"); else puts("N"); return 0; }')
+
+    def test_char_array_is_one_byte_apart(self):
+        self.check('int main() { char s[4]; char *p; s[0] = 1; s[1] = 2; s[2] = 3; p = s; '
+                   'if (*(p + 2) == 3) puts("Y"); else puts("N"); return 0; }')
+
+    def test_an_array_is_passed_as_a_pointer(self):
+        self.check("int sum3(int *p) { return p[0] + p[1] + p[2]; }\n"
+                   'int main() { int a[3]; a[0] = 1; a[1] = 2; a[2] = 3; '
+                   'if (sum3(a) == 6) puts("Y"); else puts("N"); return 0; }')
+
+    def test_pointer_arithmetic_scales_by_the_element(self):
+        self.check('int main() { int a[3]; int *p; a[1] = 5; p = a + 1; '
+                   'if (*p == 5) puts("Y"); else puts("N"); return 0; }')
+
+
 if __name__ == "__main__":
     unittest.main()

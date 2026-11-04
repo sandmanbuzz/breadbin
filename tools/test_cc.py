@@ -173,11 +173,23 @@ class Errors(unittest.TestCase):
     def test_puts_needs_one_literal(self):
         self.assertFails("int main() { puts(3); return 0; }", "puts takes one string literal")
 
-    def test_parameters_are_refused(self):
-        self.assertFails("int f(int a) { return a; }\nint main() { return 0; }", "parameters are not in this slice")
+    def test_wrong_argument_count(self):
+        self.assertFails("int f(int a) { return a; }\nint main() { return f(); }", "takes 1 argument(s), not 0")
 
-    def test_arguments_are_refused(self):
-        self.assertFails("int f() { return 0; }\nint main() { return f(1); }", "arguments are not in this slice")
+    def test_array_parameters_are_refused(self):
+        self.assertFails("int f(int a[]) { return 0; }\nint main() { return 0; }", "array parameters")
+
+    def test_index_needs_a_pointer(self):
+        self.assertFails("int main() { int x = 1; return x[0]; }", "needs a pointer or an array")
+
+    def test_cannot_assign_to_an_array(self):
+        self.assertFails("int main() { int a[3]; a = 1; return 0; }", "cannot assign to the array a")
+
+    def test_pointers_to_pointers_are_refused(self):
+        self.assertFails("int main() { int *p; int *q; q = &p; return 0; }", "pointers to pointers")
+
+    def test_deref_needs_a_pointer(self):
+        self.assertFails("int main() { int x; return *x; }", "* needs a pointer")
 
     def test_missing_brace(self):
         self.assertFails("int main() { return 0;", "missing '}'")
