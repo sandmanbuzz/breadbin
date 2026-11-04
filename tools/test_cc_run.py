@@ -253,5 +253,15 @@ class ExecutedSlice3(unittest.TestCase):
                    'if (acc == 120) puts("Y"); else puts("N"); return 0; }')
 
 
+@unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
+class ExecutedDeepSum(unittest.TestCase):
+    def test_a_600_term_sum_compiles_and_runs(self):
+        # a left-deep chain recursed once per term in code generation (34e8ba refused it cleanly):
+        # it is a valid program and must give its value
+        expr = " + ".join(["1"] * 600)
+        src = 'int main() { if (%s == 600) puts("Y"); else puts("N"); return 0; }' % expr
+        self.assertEqual(run_c(src), b"Y")
+
+
 if __name__ == "__main__":
     unittest.main()

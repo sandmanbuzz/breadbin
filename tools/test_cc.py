@@ -326,18 +326,30 @@ class Errors(unittest.TestCase):
         self.assertFails("int main() { int a[2]; return 6 / a; }", "a pointer cannot be the right side of /")
 
     def test_deep_parentheses_are_a_compile_error(self):
-        src = "int main() { return " + "(" * 400 + "1" + ")" * 400 + "; }"
-        self.assertFails(src, "too deeply for the parser")
-
+        # the compiler raises its recursion limit for one compile (a 600-term sum is valid);
+        # a nesting past that limit is still a CompileError, never a traceback
+        src = "int main() { return " + "(" * 3000 + "1" + ")" * 3000 + "; }"
+        self.assertFails(src, "nested too deeply for the compiler")
+        ok = "int main() { return " + "(" * 400 + "1" + ")" * 400 + "; }"
+        compile_src(ok)
     def test_symbol_table_limit(self):
         body = "".join("    if (%d == 1) { }\n" % i for i in range(200))
         self.assertFails("int main() {\n" + body + "    return 0;\n}\n", "symbols; as holds 220")
 
     def test_expression_depth_limit(self):
-        ok = "int main() { return " + "1+(" * 31 + "1" + ")" * 31 + "; }"
-        compile_src(ok)
-        too_deep = "int main() { return " + "1+(" * 32 + "1" + ")" * 32 + "; }"
+        # the stack holds 32 values: 32 nested pending values fit, the 33rd is refused
+        compile_src("int main() { return " + "1+(" * 32 + "1" + ")" * 32 + "; }")
+        too_deep = "int main() { return " + "1+(" * 33 + "1" + ")" * 33 + "; }"
         self.assertFails(too_deep, "too deeply nested")
+
+    def test_call_chain_boundary_is_32_values(self):
+        # f uses 12 values; main calls it with d values pending: d + 12 = 32 fits, 33 does not
+        inner = "1+(" * 12 + "1" + ")" * 12
+        def src(d):
+            return ("int f() { return %s; }\n"
+                    "int main() { return %s f() %s; }\n") % (inner, "1+(" * d, ")" * d)
+        compile_src(src(20))
+        self.assertFails(src(21), "stack use along one call chain is 33 values")
 
 
 class Cli(unittest.TestCase):
