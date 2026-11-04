@@ -36,6 +36,7 @@ hw:     .res 2          ; end of the bytes actually stored (pc past it: a traili
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
+qkind:  .res 1          ; the quote character open in the line being lowercased, or 0
 lbuf:   .res 256            ; up to 254 characters a line (readline refuses longer ones)
 li:     .res 1
 name:   .res 16
@@ -275,19 +276,24 @@ readline:
 @end:   lda #0
         sta lbuf,x
         ldx #0
-        ldy #0
+        lda #0
+        sta qkind
 @lc:    lda lbuf,x
         beq @done
-        cmp #'"'
-        beq @q
-        cmp #$27
-        bne @nq
-@q:     tya
-        eor #1
-        tay
-        jmp @nx
-@nq:    cpy #0
+        ldy qkind           ; the quote character that is open, 0 outside quotes
+        beq @out
+        cmp qkind           ; inside a quote only the same quote character closes it
         bne @nx
+        lda #0
+        sta qkind
+        beq @nx
+@out:   cmp #'"'
+        beq @open
+        cmp #$27
+        bne @plain
+@open:  sta qkind
+        jmp @nx
+@plain: 
         cmp #'A'
         bcc @nx
         cmp #'Z'+1
