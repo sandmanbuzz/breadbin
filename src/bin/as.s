@@ -433,7 +433,14 @@ d_bytes:
 
 d_words:
 @l:     jsr expr
-        lda erel
+        lda ehl                 ; a byte of a label: .word relocates both bytes, so it cannot hold one
+        beq @nb
+        lda erl                 ; erl: the label-ness before < or > cleared erel
+        beq @nb
+        lda #<e_wordb
+        ldx #>e_wordb
+        jmp error
+@nb:    lda erel
         beq @w
         lda pc
         clc
@@ -1422,6 +1429,7 @@ e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
 e_eqfwd: .byte "forward reference in =: define the symbol first", 0
+e_wordb: .byte "a byte of a label in .word: use .byte <lbl, >lbl", 0
 e_resrel: .byte "res count is an address, not a number", 0
 e_resbig: .byte "res count is too big for the pool", 0
 e_reloc: .byte "bad relocatable expression", 0
