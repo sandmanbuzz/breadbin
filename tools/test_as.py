@@ -3,6 +3,7 @@ Header: "CX", 1, image size, BSS size, relocation count. A trailing .res is BSS 
 with something after it is stored as zeros, as it always was."""
 import hashlib
 import os
+import re
 import sys
 import unittest
 
@@ -331,6 +332,51 @@ class AsResCount(unittest.TestCase):
     def test_a_count_that_fills_the_address_space_is_refused_when_it_overflows(self):
         r = self.asm("        .res 65535\n        .res 2\n")
         self.assertNotEqual(r.exit, 0)
+
+
+class PoolSize(unittest.TestCase):
+    """as refuses a .res that the user pool cannot hold: its POOLSZ must be the pool the kernel
+    gives a program, KSTART (src/kernel/k.inc) less $0800. The two are in different files; this
+    test is what keeps them the same when the footprint work moves the edge a page at a time."""
+
+    def test_pool_size_matches_the_kernel(self):
+        def const(path, name):
+            with open(os.path.join(ROOT, path)) as f:
+                for line in f:
+                    m = re.match(r"\s*%s\s*=\s*\$([0-9A-Fa-f]+)" % name, line)
+                    if m:
+                        return int(m.group(1), 16)
+            self.fail(f"{name} not found in {path}")
+        kernel = const("src/kernel/k.inc", "KSTART") - 0x0800
+        as_pool = const("src/bin/as.s", "POOLSZ")
+        self.assertEqual(as_pool, kernel, "as's POOLSZ is not KSTART - $0800 in src/kernel/k.inc")
+
+
+@unittest.skipIf(SKIP, SKIP)
+class AsWriteErrors(unittest.TestCase):
+    """A write that fails (a full disk) is an error: as says so and exits non-zero, rather than
+    leaving a short file behind with exit 0."""
+
+    SRC = b"lbl: .byte 1, 2, 3\n        .word lbl\n"
+
+    def test_a_successful_write_is_fine(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC})
+        self.assertEqual(r.exit, 0, r.err)
+
+    def test_a_failed_header_write_is_reported(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC}, fail_write=1)
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"cannot write", r.err)
+
+    def test_a_failed_image_write_is_reported(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC}, fail_write=2)
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"cannot write", r.err)
+
+    def test_a_failed_relocation_write_is_reported(self):
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC}, fail_write=3)
+        self.assertNotEqual(r.exit, 0)
+        self.assertIn(b"cannot write", r.err)
 
 
 if __name__ == "__main__":
