@@ -464,6 +464,7 @@ class AsV8(unittest.TestCase):
     def test_an_output_name_too_long_for_the_temporary_name_is_refused(self):
         r = asim.run("as", ["/s", "/" + "a" * 79], {"/s": self.SRC8})
         self.assertEqual(r.exit, 1, r.err)
+        self.assertTrue(r.err.startswith(b"as: ") and r.err.endswith(b"\n"), r.err)
         self.assertIn(b"too long", r.err)
 
 
@@ -488,7 +489,15 @@ class AsV8(unittest.TestCase):
         self.assertEqual(r.exit, 1, r.err)
         self.assertEqual(r.files["/~o"], b"USER")
         self.assertIn(b"~o", r.err)
+        self.assertIn(b"remove it and try again", r.err)
         self.assertNotIn("/o", r.files)
+
+    def test_a_probe_error_other_than_absent_is_refused(self):
+        # only ENOENT means the temporary name is free; any other error from the probe must not be treated as absent
+        r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8}, fail_read_open=("/~o", 5))
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertNotIn("/o", r.files)
+        self.assertNotIn("/~o", r.files)
 
     def test_a_user_file_at_the_temporary_name_survives_a_failed_write(self):
         r = asim.run("as", ["/s", "/o"], {"/s": self.SRC8, "/~o": b"USER"}, fail_write=1)

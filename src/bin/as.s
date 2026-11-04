@@ -213,7 +213,7 @@ write_out:
         sta r0+1
         lda #O_RDONLY           ; no O_EXCL exists: probe first, and never write over a file that is there
         jsr SYS_OPEN
-        bcs @free
+        bcs @probe
         jsr SYS_CLOSE
         lda #<s_exists
         ldx #>s_exists
@@ -221,9 +221,16 @@ write_out:
         lda #<tname
         ldx #>tname
         jsr eprint
-        lda #10
-        ldy #2
-        jsr fputc
+        lda #<s_rmretry
+        ldx #>s_rmretry
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
+@probe: cmp #ENOENT             ; only "no such file" means the name is free; any other error is refused
+        beq @free
+        ldx #<tname
+        ldy #>tname
+        jsr perr
         lda #1
         jmp SYS_EXIT
 @free:  lda #(O_WRONLY | O_CREAT | O_TRUNC)
@@ -1526,6 +1533,7 @@ s_as:    .byte "as: line ", 0
 s_wrerr:  .byte "as: cannot write the output", 10, 0
 s_rnerr:  .byte "as: cannot rename the output; the complete file is left as ", 0
 s_exists: .byte "as: will not overwrite the existing file ", 0
+s_rmretry: .byte "; remove it and try again", 10, 0
 s_long:  .byte "line too long (over 254 characters)", 0
 s_colon: .byte ": ", 0
 s_bytes: .byte " bytes, ", 0
@@ -1544,7 +1552,7 @@ e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
 e_eqfwd: .byte "forward reference in =: define the symbol first", 0
 e_eqbyte: .byte "a byte of a label cannot be an = value: use .byte <lbl, >lbl", 0
-e_outname: .byte "output name is too long", 0
+e_outname: .byte "as: output name is too long", 10, 0
 e_wordb: .byte "a byte of a label in .word: use .byte <lbl, >lbl", 0
 e_resrel: .byte "res count is an address, not a number", 0
 e_resbig: .byte "res count is too big for the pool", 0
