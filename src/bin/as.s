@@ -36,6 +36,7 @@ hw:     .res 2          ; end of the bytes actually stored (pc past it: a traili
 lineno: .res 2
 nrel:   .res 2
 errs:   .res 1
+tname:  .res 80         ; the output name with ~ appended: the file is written under it, then renamed
 qkind:  .res 1          ; the quote character open in the line being lowercased, or 0
 lbuf:   .res 256            ; up to 254 characters a line (readline refuses longer ones)
 li:     .res 1
@@ -152,9 +153,28 @@ rp_done:
         jmp SYS_CLOSE
 
 write_out:
+        ; the output is written as outp~ and renamed over outp only when complete: a failed write
+        ; leaves the previous output as it was, and no short file under the real name
         lda outp
         sta r0
         lda outp+1
+        sta r0+1
+        ldy #0
+@cn:    lda (r0),y
+        beq @cdone
+        cpy #78
+        bcs @long
+        sta tname,y
+        iny
+        bne @cn
+@cdone: lda #'~'
+        sta tname,y
+        iny
+        lda #0
+        sta tname,y
+        lda #<tname
+        sta r0
+        lda #>tname
         sta r0+1
         lda #(O_WRONLY | O_CREAT | O_TRUNC)
         jsr SYS_OPEN
@@ -162,6 +182,11 @@ write_out:
         ldx outp
         ldy outp+1
         jsr perr
+        lda #1
+        jmp SYS_EXIT
+@long:  lda #<e_outname
+        ldx #>e_outname
+        jsr eprint
         lda #1
         jmp SYS_EXIT
 @ok:    sta fd
@@ -218,9 +243,29 @@ write_out:
         lda fd
         jsr SYS_CLOSE
         bcs @werr              ; the close is where a buffered write can fail
+        lda outp               ; the old output goes first (a rename may not replace one), then the new one takes its name
+        sta r0
+        lda outp+1
+        sta r0+1
+        jsr SYS_UNLINK         ; no old file is fine
+        lda #<tname
+        sta r0
+        lda #>tname
+        sta r0+1
+        lda outp
+        sta r1
+        lda outp+1
+        sta r1+1
+        jsr SYS_RENAME
+        bcs @werr
         rts
 @werr:  lda fd
         jsr SYS_CLOSE          ; its result does not matter now: the write has failed
+        lda #<tname
+        sta r0
+        lda #>tname
+        sta r0+1
+        jsr SYS_UNLINK         ; no half-written file is left behind
         lda #<s_wrerr
         ldx #>s_wrerr
         jsr eprint
@@ -1429,6 +1474,7 @@ e_syms:  .byte "too many symbols", 0
 e_big:   .byte "program too big", 0
 e_fwd:   .byte "res count not known yet", 0
 e_eqfwd: .byte "forward reference in =: define the symbol first", 0
+e_outname: .byte "output name is too long", 0
 e_wordb: .byte "a byte of a label in .word: use .byte <lbl, >lbl", 0
 e_resrel: .byte "res count is an address, not a number", 0
 e_resbig: .byte "res count is too big for the pool", 0

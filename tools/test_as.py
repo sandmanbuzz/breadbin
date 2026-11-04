@@ -461,5 +461,11 @@ class AsV8(unittest.TestCase):
         self.assertEqual(set(r.files), {"/s", "/o"})
 
 
+    def test_an_output_name_too_long_for_the_temporary_name_is_refused(self):
+        r = asim.run("as", ["/s", "/" + "a" * 79], {"/s": self.SRC8})
+        self.assertEqual(r.exit, 1, r.err)
+        self.assertIn(b"too long", r.err)
+
+
 if __name__ == "__main__":
     unittest.main()
