@@ -54,7 +54,9 @@ khi   = $2c
         beq @ch
         ldx n               ; the first byte of a line: remember where
         cpx #MAXL
-        bcs toomany
+        bcc @room
+        jmp toomany
+@room:
         pha
         lda p
         sta plo,x
@@ -68,7 +70,10 @@ khi   = $2c
         bne @st
         inc atstart         ; the next byte starts a line ...
         lda #0              ; ... and a NUL ends this one
-@st:    jsr store
+@st:    cmp #0
+        beq @nochk
+        jsr linecheck       ; a line may hold 255 bytes at most (the sort and the output are 8-bit)
+@nochk: jsr store
         jmp @rd
 @eof:   lda atstart
         bne @in_
@@ -181,10 +186,34 @@ cmpgt:  ldy #0
 @eq:    clc
 @r:     rts
 
+linecheck:
+        pha
+        ldx n
+        dex                 ; the line being read is the last one stored
+        lda p
+        sec
+        sbc plo,x
+        sta lt
+        lda p+1
+        sbc phi,x
+        bne @long
+        lda lt
+        cmp #255
+        bcc @ok
+@long:  lda #<s_long
+        ldx #>s_long
+        jsr eprint
+        lda #1
+        jmp SYS_EXIT
+@ok:    pla
+        rts
+
 .segment "RODATA"
 s_big:  .byte "sort: input too large", 10, 0
 s_many: .byte "sort: too many lines", 10, 0
+s_long: .byte "sort: line too long (255 bytes at most)", 10, 0
 .segment "BSS"
+lt:     .res 1
 plo:    .res MAXL
 phi:    .res MAXL
 text:   .res TEXT
