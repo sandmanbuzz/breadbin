@@ -6,7 +6,11 @@ MAXPROC = 12
 NFD     = 8         ; fds per process
 NFILE   = 24        ; system open-file table
 NPIPE   = 4
+.ifdef NBUF_VALUE         ; make NBUF=n passes -D NBUF_VALUE=n (the NBUF experiment; default 6)
+NBUF    = NBUF_VALUE
+.else
 NBUF    = 6         ; block cache buffers
+.endif
 NDEV    = 5         ; 0 drive 8, 1 REU, 2-4 drives 9-11
 NMNT    = 4         ; mount table entries
 FS_C64  = 0
