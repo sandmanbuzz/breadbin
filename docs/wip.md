@@ -121,3 +121,25 @@ Owner decisions live in this section; the facilitator is the single pane of glas
 - NBUF experiment approved as a build constant; a perf study is on the roadmap as a nice-to-have.
 - Size ledger: one row per landing.
 - The demo runner may be asked for detail when a change could show in a demo.
+
+## Branch state (sprint 2026-11-06)
+
+From `git branch -a --merged main` / `--no-merged main` on 2026-11-06 (dates are last commit). `fleet-store` is the canonical record; this table is a snapshot. Nothing was deleted.
+
+| branch | state | owner | note |
+|---|---|---|---|
+| fix/create-probe | landed | C | merged 2026-11-03 |
+| feat/footprint-b-save-jtab | landed | B | merged 2026-11-03 |
+| notes/hw-agent-a, notes/stats-correction | landed | A, D | merged 2026-11-02 |
+| worktree-bridge-cse_01K1DnUTJ6dVBi4ux4XrSh9C | landed | facilitator | merged 2026-11-04 (empty `tests/__init__.py`) |
+| feat/size-ledger | landed | C | merged 2026-11-03 |
+| other fix/*, feat/*, docs/*, tools/*, test/*, port/*, space/*, chore/*, archive/*, older worktree-* | landed | various | all in `--merged main`; no action |
+| archive/fix-create-entry-first | stale | C | renamed from fix/create-entry-first; kept as an archive |
+| feat/cp2-sh-bss | held | B | docs say it stays unmerged (2026-11-02) |
+| feat/brk-kill | held | D | out of the coalesce (2026-11-06) |
+| tools/shards-balance2 | stale | C | conflicts with the balance3 layout; drop |
+| wip/nf-unfixed-arm | unmerged | - | DELETE CANDIDATE for the owner (2026-11-02) |
+| fleet/roster-agent-* (b, b-2..b-7, c, c-2..c-5) | unmerged | facilitator | DELETE CANDIDATES for the owner; roster lives on `fleet-store` |
+| fleet/handoff-agent-b, fleet/handoff-agent-c, fleet/luggage-agent-a, wip/agent-d-pack | unmerged | agents b, c, a, d | not classified by the owner; review before any cleanup |
+| fleet-store | in flight | facilitator | canonical roster and branch state |
+| up/*, upstream/fix-webdemo-cache | in flight | upstream | upstream contributors' refs; not ours to merge or delete |
