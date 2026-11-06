@@ -7,10 +7,12 @@ idx = $23
 .segment "CODE"
         lda argc
         cmp #3
-        beq @mount
-        cmp #1
-        beq @list
-        lda #<usage
+        bne @n3
+        jmp @mount
+@n3:    cmp #1
+        bne @us
+        jmp @list
+@us:    lda #<usage
         ldx #>usage
         jsr eprint
         lda #1
@@ -40,7 +42,20 @@ idx = $23
         ldx isu             ; X = 'U' marks the Ultimate (A alone could be drive 85)
         jsr SYS_MOUNT
         bcc @ok
-        pha
+        cmp #ENOENT         ; the mount point, or something else? Stat it to tell
+        bne @pe
+        lda #2
+        jsr argn
+        sta r0
+        stx r0+1
+        lda #<buf
+        sta r1
+        lda #>buf
+        sta r1+1
+        jsr SYS_STAT
+        bcs @nomp
+        lda #ENOENT
+@pe:    pha
         lda #2
         jsr argn
         pha
@@ -50,6 +65,20 @@ idx = $23
         tax
         pla
         jsr perr
+        lda #1
+        jmp SYS_EXIT
+@nomp:  lda #0              ; "mount: DIR: mount point does not exist"
+        jsr argn
+        jsr eprint
+        lda #<s_colon
+        ldx #>s_colon
+        jsr eprint
+        lda #2
+        jsr argn
+        jsr eprint
+        lda #<s_nomp
+        ldx #>s_nomp
+        jsr eprint
         lda #1
         jmp SYS_EXIT
 @bad:   lda #EINVAL
@@ -128,6 +157,8 @@ idx = $23
         bne @l
         rts
 .segment "RODATA"
+s_colon: .byte ": ", 0
+s_nomp: .byte ": mount point does not exist", 10, 0
 usage: .byte "usage: mount [drive|uci dir]", 10, 0
 s_root: .byte " on / (c64fs)", 10, 0
 s_reu: .byte "reu", 0
