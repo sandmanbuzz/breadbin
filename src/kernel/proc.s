@@ -33,7 +33,7 @@ next_pid: .res 1
 new_slot: .res 1
 wk_ch:    .res 1
 
-.export p_pslot, new_slot, proc_entry, p_uid, sys_getuid, sys_setuid
+.export p_pslot, new_slot, proc_entry, p_uid, sys_getuid, sys_setuid, p_sig
 
 .segment "RODATA"
 s_init: .byte "init exited", 0
@@ -280,7 +280,7 @@ irq:
         cpx #$ff
         beq @out
         lda p_sig,x
-        bne @die
+        bne die_redirect
         dec slice
         bne @out
         lda #1
@@ -288,7 +288,7 @@ irq:
         jsr sched
         ldx cur
         lda p_sig,x
-        bne @die
+        bne die_redirect
         lda #0
         sta in_kernel
 @out:   jmp irq_exit
@@ -301,7 +301,10 @@ irq:
 ; with interrupts off (a slow close, say a UCI file, would freeze the machine): make the
 ; interrupt return into die_stub instead, with I still set in the stacked flags, and
 ; let die_stub finish the job with interrupts on, as a syscall would.
-@die:   tsx
+; BRK (main.s) also comes here after setting p_sig to SIGKILL
+.export die_redirect
+die_redirect:
+        tsx
         lda #<die_stub
         sta $0105,x
         lda #>die_stub
