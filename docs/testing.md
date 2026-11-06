@@ -119,3 +119,7 @@ xvfb-run -a make test-only T="tests.test_system.REU"
 Run the full suite when a milestone story lands (the M0 stories, a filesystem or block-layer change, anything touching the IRQ path), and record the result in the commit message. Between milestones, smoke plus the targeted tests above are enough.
 
 CI runs the build and host tests on every push. It does not run the VICE tests, because they need ROMs that are not in the repo.
+
+## Known issues
+
+- **Key drop in the VICE keyboard path (not reproduced).** An earlier bisect reported 4 of 40 typed keys lost. That came from the test reader, not the kernel: the prompt line wraps at 40 columns, so reading the row alone cut the text short. With the reader fixed (join all screen rows, read after the last `$ `), a bounded repro on e8588d9 (`keybuf` and `type`, 3 trials each, under the VICE lock) gave 0 keys lost in all 6 runs. The raw path prints shifted letters in uppercase by design; that is case, not loss. Re-open this if a key loss shows up on screen with the fixed reader.
