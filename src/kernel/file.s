@@ -994,6 +994,8 @@ sys_rmdir:
         dec ci+I_NLINK
         jmp iput
 
+; cold path (rarely run): unlink and rename park above the BSS in CODEHI, out of the user pool
+.segment "CODEHI"
 ; unlink(r0 = path)
 sys_unlink:
         jsr set_pp_r0
@@ -1166,6 +1168,7 @@ sys_rename:
         jmp iput
 @done:  clc
         rts
+.segment "CODE"
 
 ; ---------------------------------------------------------------------
 ; chdir(r0 = path)
