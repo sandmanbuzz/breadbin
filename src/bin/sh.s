@@ -8,6 +8,8 @@
 ;   "quoted words", # comments
 ; Built-ins: cd, exit, kill (also /bin/kill), jobs. `sh file` runs a script.
 ; Words with * or ? are expanded against the directory they name.
+; On the console, lines are edited in raw mode: DEL, CTRL-D, and CTRL-I (TAB)
+; completes a command or file name (see readline).
 .include "../../include/breadbin.inc"
 .import print, eprint, putc, newline, print_dec, perr, argn, strlen, exit, parse_dec
 .importzp lp1, lp2
@@ -75,6 +77,11 @@ g_ss:    .res 1
 gpos:    .res 2
 gbuf:    .res 256
 tpos:    .res 1
+tty:     .res 1         ; interactive on the console: edit lines in raw mode
+kbuf:    .res 1
+tsave:   .res 1
+xsave:   .res 1
+tlen:    .res 1
 
 .segment "CODE"
 start:
@@ -84,7 +91,13 @@ start:
         sta ilen
         lda #1
         sta interactive
-        lda argc
+        lda #0
+        sta tty
+        lda #0
+        jsr SYS_ISATTY      ; carry clear: fd 0 is the console
+        bcs @nt
+        inc tty
+@nt:    lda argc
         cmp #2
         bcc main
         lda #1
@@ -109,6 +122,7 @@ start:
 @ok:    sta in_fd
         lda #0
         sta interactive
+        sta tty
 
 main:   lda interactive
         beq @noprompt
@@ -161,7 +175,10 @@ reap:   lda #$ff
 ; getline: next line from in_fd into `line` (NUL-terminated, no newline)
 ; carry set on EOF with nothing read
 getline:
-        lda #0
+        lda tty
+        beq @buf
+        jmp readline
+@buf:   lda #0
         sta lnlen
 @loop:  lda ipos
         cmp ilen
@@ -204,6 +221,266 @@ getline:
         sta line,x
         clc
         rts
+
+; ---- readline (raw console input), TAB completion ----
+; TAB completion of command and file names (complete, is_sep, addch) is
+; adapted from upstream commit 4abb291 "feat: CTRL-I (TAB) in the shell
+; completes command and file names", Konstantinos Patronas, 2026,
+; https://github.com/kpatr1981/breadbin (MIT: Copyright (c) 2026 Konstantinos
+; Patronas; the repo's LICENSE at that commit). Adapted to this tree's glob;
+; the readline around it is our own, without history.
+;
+; readline: a line from the console, edited in raw mode: DEL, CTRL-I (TAB)
+; completes, CTRL-D (or a read error) on an empty line is EOF (carry set)
+readline:
+        lda #1
+        jsr SYS_CONMODE
+        lda #0
+        sta lnlen
+@key:   jsr rawkey
+        bcs @eof
+        cmp #K_RET
+        beq @ret
+        cmp #K_DEL
+        beq @del
+        cmp #4              ; CTRL-D
+        beq @d
+        cmp #K_TAB
+        beq @tab
+        cmp #$20
+        bcc @key
+        cmp #$7f
+        bcs @key
+        jsr addch
+        jmp @key
+@tab:   jsr complete
+        jmp @key
+@del:   lda lnlen
+        beq @key
+        dec lnlen
+        lda #K_DEL
+        jsr putc
+        jmp @key
+@d:     lda lnlen
+        bne @key
+@eof:   lda #0
+        jsr SYS_CONMODE
+        sec
+        rts
+@ret:   jsr newline
+        lda #0
+        jsr SYS_CONMODE
+        ldx lnlen
+        lda #0
+        sta line,x
+        clc
+        rts
+
+; rawkey -> A = next key; carry set on EOF or error
+rawkey: lda #<kbuf
+        sta r0
+        lda #>kbuf
+        sta r0+1
+        lda #1
+        sta r1
+        lda #0
+        sta r1+1
+        lda in_fd
+        jsr SYS_READ
+        bcs @e
+        lda r1
+        beq @e
+        lda kbuf
+        clc
+        rts
+@e:     sec
+        rts
+
+; addch: A goes on the end of the line being edited (dropped when it's full)
+addch:  ldx lnlen
+        cpx #LINEMAX
+        bcs @r
+        sta line,x
+        inc lnlen
+        jmp putc
+@r:     rts
+
+; complete: the word before the cursor, plus '*', is expanded like a glob
+; (in /bin for a command name). What all the matches share is typed in, then
+; '/' or ' ' if there is only one; with nothing to add, they are listed.
+; More matches than the glob buffer holds: nothing happens.
+complete:
+        ldx lnlen
+@ws:    txa                 ; tsave = the word's start
+        beq @wd
+        lda line-1,x
+        jsr is_sep
+        beq @wd
+        dex
+        jmp @ws
+@wd:    stx tsave
+@cp:    dex                 ; a command name: nothing but spaces back to
+        bmi @cmd            ; the start or to | ; &
+        lda line,x
+        jsr is_sep
+        bne @arg
+        tya
+        beq @cp
+        cmp #4              ; < or >: a file name
+        bcs @arg
+@cmd:   ldx tsave           ; ... without a '/'
+@sl:    cpx lnlen
+        beq @bin
+        lda line,x
+        inx
+        cmp #'/'
+        bne @sl
+@arg:   ldy #0
+        beq @cpy
+@bin:   ldy #4
+@bc:    lda s_bin,y
+        sta tbuf,y
+        dey
+        bpl @bc
+        ldy #5
+@cpy:   ldx tsave           ; tbuf = ["/bin/"] word '*'
+@c:     cpx lnlen
+        beq @star
+        lda line,x
+        cmp #'*'            ; a pattern already: its length is not an offset
+        beq @nope           ; into a name, so do nothing
+        cmp #'?'
+        beq @nope
+        sta tbuf,y
+        inx
+        iny
+        bne @c
+@star:  cpy #45             ; glob's buffer holds the directory part of every
+        bcs @nope           ; match: keep it short
+        sty xsave           ; xsave = the typed part's length
+        lda #'*'
+        sta tbuf,y
+        lda #0
+        sta tbuf+1,y
+        sta nargs
+        sta gpos
+        sta gpos+1
+        sta g_n
+        lda #<tbuf
+        sta zp1
+        lda #>tbuf
+        sta zp1+1
+        jsr glob
+        lda g_n
+        beq @x
+        lda nargs
+        cmp #MAXARG
+        bcs @x
+        lda gpos
+        cmp #256-64
+        bcc @go
+@nope:
+@x:     rts
+@go:    lda av              ; tlen = what the matches share
+        sta zp1
+        lda av+1
+        sta zp1+1
+        ldy #$ff
+@len:   iny
+        lda (zp1),y
+        bne @len
+        sty tlen
+        lda nargs
+        asl a
+        sta g_p
+        ldx #2
+@nx:    cpx g_p
+        bcs @cd
+        lda av,x
+        sta zp2
+        lda av+1,x
+        sta zp2+1
+        ldy #0
+@cm:    cpy tlen
+        bcs @nn
+        lda (zp1),y
+        cmp (zp2),y
+        bne @sh
+        iny
+        bne @cm
+@sh:    sty tlen
+@nn:    inx
+        inx
+        bne @nx
+@cd:    ldy xsave
+        cpy tlen
+        bcc @ad
+        lda nargs
+        cmp #2
+        bcs @list
+@ad:    cpy tlen
+        bcs @one
+        lda (zp1),y
+        sty g_ss
+        jsr addch
+        ldy g_ss
+        iny
+        bne @ad
+@one:   lda nargs
+        cmp #2
+        bcs @r
+        lda zp1             ; one match: '/' after a directory
+        sta r0
+        lda zp1+1
+        sta r0+1
+        lda #<g_ent
+        sta r1
+        lda #>g_ent
+        sta r1+1
+        jsr SYS_STAT
+        lda #' '
+        bcs @sp
+        ldx g_ent
+        cpx #T_DIR
+        bne @sp
+        lda #'/'
+@sp:    jmp addch
+@r:     rts
+@list:  jsr newline
+        ldx #0
+@li:    stx g_star
+        lda av,x
+        clc
+        adc g_d
+        pha
+        lda av+1,x
+        adc #0
+        tax
+        pla
+        jsr print
+        lda #' '
+        jsr putc
+        ldx g_star
+        inx
+        inx
+        cpx g_p
+        bcc @li
+        jsr newline
+        jsr prompt
+        ldx lnlen
+        lda #0
+        sta line,x
+        lda #<line
+        ldx #>line
+        jmp print
+
+; is_sep: A one of " |;&<>"? -> Z set, Y = its index
+is_sep: ldy #5
+@l:     cmp seps,y
+        beq @r
+        dey
+        bpl @l
+@r:     rts
 
 ; ---- tokenizer ----
 ; tokenize `line` into tbuf/tlo/thi/ttype; carry set on error/empty
@@ -1036,6 +1313,7 @@ s_done:    .byte "] done", 10, 0
 s_syntax:  .byte "sh: syntax error", 10, 0
 s_toolong: .byte "sh: line too long", 10, 0
 s_bin:     .byte "/bin/"
+seps:      .byte " |;&<>"
 s_cd:      .byte "cd", 0
 s_exit:    .byte "exit", 0
 s_kill:    .byte "kill", 0
