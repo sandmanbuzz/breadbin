@@ -279,21 +279,44 @@ scr_setrow:
         rts
 
 ; scr_scroll: move rows 1-24 up one row and blank row 24
+;
+; Four straight copies, one after the other. The old version interleaved three
+; streams in one loop, and stream 2 overwrote bytes $100-$127 that stream 1 had not
+; read yet (it reads src 40..295 while stream 2 writes dst 256..): the last 40 bytes
+; of each page boundary came out as the row below, so rows were doubled (reproduced
+; in VICE and in py65, no beam involved). Ascending order is safe because every dst
+; byte is written after the copy that reads it as a src has run.
+;
+; Beam: wait for raster line >= $FB (251, just below the last text line, $33-$FA),
+; so the copy starts in the bottom border and the beam is behind the write pointer.
+; The copy is about 13,400 cycles (960 x 14), 8.6-8.9 raster lines per text row, the
+; beam crosses a row in 8, so the beam gains at most about 3 rows in 24 (a little
+; more with badline stalls and one IRQ, about 1,000 cycles) on a lead of 12 rows (PAL,
+; 112 border lines before the text starts) or 7 rows (NTSC, 63 lines). It never catches the copy,
+; so it never shows an old row under a new one. A call that arrives while the beam is in
+; lines 0-250 or 256-311 waits for the next $FB: at most one scroll per frame.
 scr_scroll:
+@w:     lda $d012
+        cmp #$fb
+        bcc @w
         ldx #0
 @a:     lda SCREEN+40,x
         sta SCREEN,x
-        lda SCREEN+$128,x
-        sta SCREEN+$100,x
-        lda SCREEN+$228,x
-        sta SCREEN+$200,x
         inx
         bne @a
-@b:     lda SCREEN+$328,x
+@b:     lda SCREEN+$128,x
+        sta SCREEN+$100,x
+        inx
+        bne @b
+@d:     lda SCREEN+$228,x
+        sta SCREEN+$200,x
+        inx
+        bne @d
+@e:     lda SCREEN+$328,x
         sta SCREEN+$300,x
         inx
         cpx #192
-        bne @b
+        bne @e
         lda #$20
         ldx #39
 @c:     sta SCREEN+960,x
