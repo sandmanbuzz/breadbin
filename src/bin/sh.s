@@ -17,6 +17,7 @@
 MAXTOK  = 32
 MAXARG  = 16
 LINEMAX = 127
+HISTN   = 4                 ; lines of history kept on the console
 
 zp1 = $23
 zp2 = $25
@@ -82,6 +83,14 @@ kbuf:    .res 1
 tsave:   .res 1
 xsave:   .res 1
 tlen:    .res 1
+; history ring (console only): HISTN slots of LINEMAX+1 bytes
+hist:    .res HISTN*(LINEMAX+1)
+hlen:    .res HISTN
+hhead:   .res 1             ; slot the next line goes into
+hcount:  .res 1             ; lines held, up to HISTN
+hpos:    .res 1             ; 0 = the line being typed, n = n lines back
+hsn:     .res 1             ; slot index for hslot
+hctr:    .res 1             ; print counter (putc may clobber X and Y)
 
 .segment "CODE"
 start:
@@ -89,6 +98,8 @@ start:
         sta in_fd
         sta ipos
         sta ilen
+        sta hhead
+        sta hcount
         lda #1
         sta interactive
         lda #0
@@ -237,6 +248,7 @@ readline:
         jsr SYS_CONMODE
         lda #0
         sta lnlen
+        sta hpos
 @key:   jsr rawkey
         bcs @eof
         cmp #K_RET
@@ -247,6 +259,10 @@ readline:
         beq @d
         cmp #K_TAB
         beq @tab
+        cmp #K_UP
+        beq @up
+        cmp #K_DOWN
+        beq @down
         cmp #$20
         bcc @key
         cmp #$7f
@@ -254,6 +270,17 @@ readline:
         jsr addch
         jmp @key
 @tab:   jsr complete
+        jmp @key
+@up:    lda hpos
+        cmp hcount
+        bcs @key            ; the oldest line is showing
+        inc hpos
+        jsr hshow
+        jmp @key
+@down:  lda hpos
+        beq @key            ; the line being typed is showing
+        dec hpos
+        jsr hshow
         jmp @key
 @del:   lda lnlen
         beq @key
@@ -268,13 +295,98 @@ readline:
         sec
         rts
 @ret:   jsr newline
-        lda #0
+        lda lnlen
+        beq @nh
+        jsr hsave
+@nh:    lda #0
         jsr SYS_CONMODE
         ldx lnlen
         lda #0
         sta line,x
         clc
         rts
+
+; history: hsave puts the line just read into the next slot.
+hsave:  lda hhead
+        jsr hslot
+        ldy #0
+@c:     cpy lnlen
+        beq @d
+        lda line,y
+        sta (zp1),y
+        iny
+        jmp @c
+@d:     ldx hhead
+        lda lnlen
+        sta hlen,x
+        inc hhead
+        lda hhead
+        cmp #HISTN
+        bcc @n
+        lda #0
+        sta hhead
+@n:     lda hcount
+        cmp #HISTN
+        bcs @r
+        inc hcount
+@r:     lda #0
+        sta hpos
+        rts
+
+; hslot: zp1 = the slot in A (hist + A * (LINEMAX+1))
+hslot:  sta hsn
+        lda #0
+        sta zp1
+        lda hsn
+        lsr                 ; A = slot / 2, carry = slot odd
+        ror zp1             ; zp1 = 128 when the slot is odd
+        pha
+        lda zp1
+        clc
+        adc #<hist
+        sta zp1
+        pla
+        adc #>hist
+        sta zp1+1
+        rts
+
+; hshow: erase the line on screen and show the one hpos lines back (0: empty)
+hshow:  lda lnlen
+        beq @e
+        lda #K_DEL
+        jsr putc
+        dec lnlen
+        jmp hshow
+@e:     lda hpos
+        bne @go
+        rts
+@go:    lda hhead           ; slot = hhead - hpos, wrapped into 0..HISTN-1
+        sec
+        sbc hpos
+        bpl @p
+        clc
+        adc #HISTN
+@p:     jsr hslot
+        ldx hsn
+        lda hlen,x
+        sta lnlen
+        ldy #0
+@cp:    cpy lnlen
+        beq @pr
+        lda (zp1),y
+        sta line,y
+        iny
+        jmp @cp
+@pr:    lda #0
+        sta hctr
+@pl:    ldx hctr
+        cpx lnlen
+        beq @end
+        lda line,x
+        jsr putc
+        inc hctr
+        jmp @pl
+@end:   rts
 
 ; rawkey -> A = next key; carry set on EOF or error
 rawkey: lda #<kbuf
