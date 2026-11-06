@@ -292,7 +292,7 @@ scr_setrow:
 ; The copy is about 13,400 cycles (960 x 14), 8.6-8.9 raster lines per text row, the
 ; beam crosses a row in 8, so the beam gains at most about 3 rows in 24 (a little
 ; more with badline stalls and one IRQ, about 1,000 cycles) on a lead of 12 rows (PAL,
-; 112 border lines before the text starts) or 7 rows (NTSC, 62 lines). It never catches the copy,
+; 112 border lines before the text starts) or 7 rows (NTSC, 63 lines). It never catches the copy,
 ; so it never shows an old row under a new one. A call that arrives while the beam is in
 ; lines 0-250 or 256-311 waits for the next $FB: at most one scroll per frame.
 scr_scroll:

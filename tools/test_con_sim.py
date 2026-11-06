@@ -46,22 +46,38 @@ class Scroll(unittest.TestCase):
         self.assertEqual(rows[24], "")
 
     def test_scroll_waits_for_the_raster(self):
+        """One scroll with a scripted $D012: values below $FB first, then $FB. The copy
+        (first write to screen RAM) must come after the read that returned $FB, and the
+        wait must not have ended on an earlier, lower read."""
         sim = Sim()
-        sim.write(1, b"\x0c")
-        reads = []
-        real = type(sim.mem).__getitem__
+        sim.write(1, b"\x0c" + b"\n" * 24)                 # cursor on row 24: the next LF scrolls
+        script = [0x0A, 0x64, 0xC8, 0xFA, 0xFB, 0xFC]
+        events = []
+        M = type(sim.mem)
+        real_get, real_set = M.__getitem__, M.__setitem__
 
-        def spy(m, a):
+        def get(m, a):
             if a == 0xD012:
-                reads.append(1)
-            return real(m, a)
-        type(sim.mem).__getitem__ = spy
+                v = script[min(len([e for e in events if e[0] == "r"]), len(script) - 1)]
+                events.append(("r", v))
+                return v
+            return real_get(m, a)
+
+        def put(m, a, v):
+            if SCREEN <= a < SCREEN + 1000:
+                events.append(("w", a))
+            real_set(m, a, v)
+        M.__getitem__, M.__setitem__ = get, put
         try:
-            for i in range(30):
-                sim.write(1, b"x\n")
+            sim.write(1, b"\n")
         finally:
-            type(sim.mem).__getitem__ = real
-        self.assertGreater(len(reads), 5)                   # the six scrolls polled $D012
+            M.__getitem__, M.__setitem__ = real_get, real_set
+        kinds = [e[0] for e in events]
+        first_w = kinds.index("w")
+        reads_before = [e[1] for e in events[:first_w]]
+        self.assertTrue(reads_before, "no $D012 read before the first screen write")
+        self.assertEqual(reads_before, script[:5])         # polled up to the first $FB, no further
+        self.assertNotIn("r", kinds[first_w:])
 
 
 if __name__ == "__main__":
