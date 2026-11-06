@@ -48,3 +48,31 @@ The copy path uses one nibbler and one way to start it.
 
   `nibcopy.py` opens `NIBBLER` as a **local** file (`open(os.environ["NIBBLER"])`), not a path on the Ultimate. Earlier attempts failed when given an Ultimate path. Run `nibsetup.sh down` even if the copy fails (the `;` above does that); `nibsetup.sh` does not trap on its own.
 - **Not yet verified on the current scripts:** the last end-to-end `nibcopy.py` run stopped at opening `NIBBLER` (path, fixed in the script since). The DMA-poke start was not rerun after that fix. A full copy with read-back is still to do under the owner's write gate.
+
+## Writing an image to the physical 1541: one command
+
+`write-physical.sh IMAGE.d64` is the supported way to put a disk image on the physical 1541 (device 8). Run it from the repository root or from `experiments/iec-stall`. It takes the `ultimate` lock itself.
+
+```sh
+BREADBIN_ULTIMATE=HOST NIBBLER=/local/keym.d.nibbler.prg experiments/iec-stall/write-physical.sh build/breadbin.d64
+```
+
+- **Duration:** about 50 s on the bench (the owner's observation). The copy waits up to 1,500 s before it reports a timeout, so a long wait is not by itself a failure.
+- **What it does:** preflight (the nibbler's sha256 `30808e1f…`, the image's sha256 `IMAGE_SHA`, default `f6efbf78…` = main 9cab610, and that the Ultimate answers), then under the lock: `nibsetup.sh up` (Software IEC off, stock KERNAL, the image uploaded read-only into drive A on bus 9), `nibcopy.py` (drive A to bus 8, the physical drive renumbered to 9, the copy, then back to 8), and `nibsetup.sh down` in an EXIT trap, so the config comes back even when the copy fails.
+- **Exit status:** 0 written and restored; 1 refused in preflight, nothing changed on the Ultimate; 2 the copy or the config step failed, and the trap restored the config. Read the last lines printed.
+- **Checks already run offline** (this session, no Ultimate): refused with no `BREADBIN_ULTIMATE`; refused on a wrong image hash; refused on a wrong nibbler hash; refused when the Ultimate does not answer, with the lock taken and released and no config change.
+- **Not checked by this tool:** the physical disk's contents. Check it with the directory listing the copy prints.
+
+### Why the physical disk says "0 blocks free"
+
+That is correct, not a copy error. Two different counters:
+
+- `mkimage` marks every block **used** in the CBM BAM (track 18, `tools/mkimage.py:116-120`) so the drive's DOS never writes over c64fs; `LOAD"$",8` on the physical drive reads that BAM and says `0 blocks free`. The source image's BAM is the same (all zeros), so the copy matches it.
+- `mkimage` reports `283 blocks free` from the c64fs bitmap (`FS(img).free_blocks()`, `tools/mkimage.py:424`). That is the number that matters to Breadbin.
+
+The directory entry `BREADBIN PRG 59 blocks` is the same on the source image and the physical disk. Compare the two counters, never one against the other: a CBM `blocks free` of 0 is the design (`docs/filesystem.md`, the CBM BAM paragraph).
+
+### Known gaps
+
+- The write is one way: the script does not read the physical disk back and compare sectors. `mcdup.py --dst 8 --base IMAGE` does that, slowly (about 27 minutes), when a sector-exact check is needed.
+- `nibsetup.sh up` uploads a local image now (it used to pass a local path to the Ultimate, which does not exist there). Changed in this commit; not exercised on hardware yet.
