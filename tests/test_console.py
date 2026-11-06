@@ -87,6 +87,26 @@ class Console(unittest.TestCase):
         self.assertTrue(any("whoami" in l for l in lines))  # the end of the listing is there
         self.assertEqual(self.byte(ROW), 24)
 
+    def test_scroll_flood_keeps_every_row_distinct(self):
+        """Many scrolls in a row: each screen row is a whole line of the listing and no
+        row repeats its neighbour (a torn or half-done copy shows as a doubled row).
+        Screen RAM only: the beam itself is not visible to the emulator's memory dump."""
+        self.v.type("clear\n")
+        self.v.wait_for("/ $")
+        for _ in range(6):
+            self.v.type("ls -l /bin\n")
+            time.sleep(12)
+        lines = self.v.screen_lines()
+        self.assertEqual(lines[24], "/ $")
+        body = [l for l in lines[:24] if l]
+        self.assertGreaterEqual(len(body), 20)
+        names = {l.split()[-1] for l in body if not l.startswith("/ $")}
+        for a, b in zip(body, body[1:]):
+            self.assertNotEqual(a, b, "doubled row: " + repr(lines))
+        listing = [l for l in body if not l.startswith("/ $")]
+        self.assertTrue(all(len(l.split()) >= 2 for l in listing), listing)
+        self.assertTrue(names)
+
     def test_reverse_video_and_cursor_addressing(self):
         self.v.type("clear\n")
         self.v.wait_for("/ $")
