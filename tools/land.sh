@@ -66,3 +66,7 @@ fi
 
 git commit -q -m "$msg"
 echo "land: committed $(git rev-parse --short HEAD) ($branch, host suite green on the merged tree)"
+# The ledger row needs a commit of its own after the merge, so it is printed, not appended: landing stays
+# exactly what it was. Run it from the primary after landing, then commit docs/size-ledger.tsv (docs/process.md).
+echo "land: size ledger row (run now, then commit docs/size-ledger.tsv):"
+echo "  make size | python3 tools/size_ledger.py --commit $(git rev-parse --short HEAD)"

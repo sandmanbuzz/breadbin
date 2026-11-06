@@ -55,7 +55,7 @@ $(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(ROOTSRC) tools/mkimage.py
 $(BUILD)/breadbin.reu: $(BUILD)/breadbin.d64 tools/mkimage.py
 	python3 tools/mkimage.py reu $< $@
 
-test-host:
+test-host: all
 	python3 -m unittest discover -s tools -p 'test_*.py'
 
 # A few minutes: the boot, scheduler, pipe and Ctrl-C paths. Run after any kernel change.
