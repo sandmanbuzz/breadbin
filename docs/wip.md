@@ -108,3 +108,16 @@ Replaced by the roster: `fleet/roster.md` on `fleet-store`. Claims, results and 
 - **Held for the user's decision:** `p_save` into process pages (about +6 pages at an idle prompt, touches the scheduler); `p_cwd` as an inode (about 2 pages).
 - **Fleet-level item, from the user:** the physical-1541 image write takes about 25 minutes and holds the `ultimate` lock for all of it. A faster write path (a drive-side fast loader, or writing only the changed sectors) would cut task latency and lock hold time for everyone; do it before the next major series of image writes.
 - **Origin:** declared 2026-11-01, `docs/process.md`, "Origin" (a mirror; history on GitHub is mutable and can be force-pushed).
+
+## Owner decisions (2026-11-06 retro)
+
+Owner decisions live in this section; the facilitator is the single pane of glass for them.
+
+- `fleet-store` is the canonical ground truth: "if it ain't there it ain't true". Branch state is tracked there.
+- DONE-DONE includes the owning agent's cleanup after a task.
+- `tools/land.sh` improvements approved: when it refuses on a dirty primary tree, name the dirty file and its owner.
+- `make` is the `test-host` backstop: `test-host` must build first.
+- Footprint: Level 1 approved, Level 2 kept on the table, Level 3 deferred to a corner.
+- NBUF experiment approved as a build constant; a perf study is on the roadmap as a nice-to-have.
+- Size ledger: one row per landing.
+- The demo runner may be asked for detail when a change could show in a demo.
