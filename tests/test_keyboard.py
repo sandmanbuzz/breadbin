@@ -117,6 +117,32 @@ class Keyboard(unittest.TestCase):
         self.v.wait_for("/ $", timeout=60, after="sleep 100")
         self.assertEqual(self.v.mem(0x0091, 0x0091)[0] & 0x80, 0x80)   # released again
 
+    def ctrl_i(self):
+        # the C64 has no TAB key: TAB is CTRL-I, sent as Control held plus i
+        self.v.xdown("Control_L")
+        time.sleep(0.2)
+        self.v.xkey("i")
+        self.v.xup("Control_L")
+        time.sleep(0.3)
+
+    def test_tab_no_match_does_not_fire(self):
+        # real TAB on a word nothing completes to: the line is left as typed, the
+        # command runs once, and nothing is inserted or replaced after the word
+        self.v.xtype("echo zzqqx")
+        self.ctrl_i()
+        time.sleep(0.5)
+        self.v.xkey("Return")
+        lines = self.until(lambda l: "zzqqx" in l, what="the echoed word")
+        self.assertFalse(any(l.startswith("echo zzqqx") and l != "echo zzqqx" for l in lines), lines)
+        self.assertEqual(sum(1 for l in lines if l == "zzqqx"), 1, lines)
+
+    def test_tab_completes_a_real_key(self):
+        # positive control for the test above: a real TAB reaches the shell and completes
+        self.v.xtype("ech")
+        self.ctrl_i()
+        self.v.xkey("Return")
+        self.until(lambda l: any(x.rstrip() == "/ $ echo" for x in l), what="ech completed to echo")
+
     def test_jiffy_clock_runs(self):
         a = self.v.mem(JIFFY, JIFFY + 2)
         time.sleep(1)
