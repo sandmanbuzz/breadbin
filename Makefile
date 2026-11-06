@@ -20,9 +20,14 @@ $(BUILD)/cache.stamp: FORCE
 FORCE:
 $(BUILD)/k/blk.o: $(BUILD)/cache.stamp
 
-$(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc
+# make NBUF=3 builds a kernel with three block cache buffers (the NBUF experiment; default 6)
+NBUF    ?= 6
+$(BUILD)/nbuf.stamp: FORCE
+	@mkdir -p $(BUILD)
+	@echo "$(NBUF)" | cmp -s - $@ || echo "$(NBUF)" > $@
+$(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc $(BUILD)/nbuf.stamp
 	@mkdir -p $(dir $@)
-	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) $< -o $@
+	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) $< -o $@
 
 $(BUILD)/breadbin.prg: $(KOBJ) src/kernel.cfg
 	ld65 -C src/kernel.cfg -m $(BUILD)/kernel.map -Ln $(BUILD)/kernel.lbl -o $@ $(KOBJ)
@@ -55,7 +60,7 @@ $(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(ROOTSRC) tools/mkimage.py
 $(BUILD)/breadbin.reu: $(BUILD)/breadbin.d64 tools/mkimage.py
 	python3 tools/mkimage.py reu $< $@
 
-test-host:
+test-host: all
 	python3 -m unittest discover -s tools -p 'test_*.py'
 
 # A few minutes: the boot, scheduler, pipe and Ctrl-C paths. Run after any kernel change.
