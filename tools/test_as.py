@@ -382,23 +382,23 @@ class AsResCount(unittest.TestCase):
         self.assertIn(b"too big", r.err)
 
     def test_a_count_at_the_pool_size_is_refused(self):
-        r = self.asm("        .res 39424\n")
+        r = self.asm("        .res 39680\n")       # POOLSZ $9B00 (KSTART $A300)
         self.assertNotEqual(r.exit, 0)
         self.assertIn(b"too big", r.err)
 
     def test_a_count_just_under_the_pool_size_is_fine(self):
-        r = self.asm("        .res 39423\n")
+        r = self.asm("        .res 39679\n")
         self.assertEqual(r.exit, 0, r.err)
 
     def test_image_plus_res_over_the_pool_is_refused_and_the_message_says_so(self):
         # the pool holds image + BSS: 3 bytes of image and a count under the pool size still do not fit
-        r = self.asm(".byte 1,2,3\n        .res 39423\n")
+        r = self.asm(".byte 1,2,3\n        .res 39679\n")
         self.assertNotEqual(r.exit, 0)
         self.assertIn(b"image plus res", r.err)
         self.assertNotIn("/o", r.files)
-        r = self.asm(".byte 1,2,3\n        .res 39421\n")      # 39424 in all: one byte past the last page
+        r = self.asm(".byte 1,2,3\n        .res 39677\n")      # 39680 in all: one byte past the last page
         self.assertNotEqual(r.exit, 0)
-        r = self.asm(".byte 1,2,3\n        .res 39420\n")      # 39423 in all: fits
+        r = self.asm(".byte 1,2,3\n        .res 39676\n")      # 39679 in all: fits
         self.assertEqual(r.exit, 0, r.err)
 
     def test_a_label_as_the_count_is_refused(self):
