@@ -108,3 +108,38 @@ Replaced by the roster: `fleet/roster.md` on `fleet-store`. Claims, results and 
 - **Held for the user's decision:** `p_save` into process pages (about +6 pages at an idle prompt, touches the scheduler); `p_cwd` as an inode (about 2 pages).
 - **Fleet-level item, from the user:** the physical-1541 image write takes about 25 minutes and holds the `ultimate` lock for all of it. A faster write path (a drive-side fast loader, or writing only the changed sectors) would cut task latency and lock hold time for everyone; do it before the next major series of image writes.
 - **Origin:** declared 2026-11-01, `docs/process.md`, "Origin" (a mirror; history on GitHub is mutable and can be force-pushed).
+
+## Owner decisions (2026-11-06 retro)
+
+Owner decisions live in this section; the facilitator is the single pane of glass for them.
+
+- `fleet-store` is the canonical ground truth: "if it ain't there it ain't true". Branch state is tracked there.
+- DONE-DONE includes the owning agent's cleanup after a task.
+- `tools/land.sh` improvements approved: when it refuses on a dirty primary tree, name the dirty file and its owner.
+- `make` is the `test-host` backstop: `test-host` must build first.
+- Footprint: Level 1 approved, Level 2 kept on the table, Level 3 deferred to a corner.
+- NBUF experiment approved as a build constant; a perf study is on the roadmap as a nice-to-have.
+- Size ledger: one row per landing.
+- The demo runner may be asked for detail when a change could show in a demo.
+
+## Branch state (sprint 2026-11-06)
+
+From `git branch -a --merged main` / `--no-merged main` on 2026-11-06 (dates are last commit). `fleet-store` is the canonical record; this table is a snapshot. Nothing was deleted.
+
+| branch | state | owner | note |
+|---|---|---|---|
+| fix/create-probe | landed | C | merged 2026-11-03 |
+| feat/footprint-b-save-jtab | landed | B | merged 2026-11-03 |
+| notes/hw-agent-a, notes/stats-correction | landed | A, D | merged 2026-11-02 |
+| worktree-bridge-cse_01K1DnUTJ6dVBi4ux4XrSh9C | landed | facilitator | merged 2026-11-04 (empty `tests/__init__.py`) |
+| feat/size-ledger | landed | C | merged 2026-11-03 |
+| other fix/*, feat/*, docs/*, tools/*, test/*, port/*, space/*, chore/*, archive/*, older worktree-* | landed | various | all in `--merged main`; no action |
+| archive/fix-create-entry-first | stale | C | renamed from fix/create-entry-first; kept as an archive |
+| feat/cp2-sh-bss | held | B | docs say it stays unmerged (2026-11-02) |
+| feat/brk-kill | held | D | out of the coalesce (2026-11-06) |
+| tools/shards-balance2 | stale | C | conflicts with the balance3 layout; drop |
+| wip/nf-unfixed-arm | unmerged | - | DELETE CANDIDATE for the owner (2026-11-02) |
+| fleet/roster-agent-* (b, b-2..b-7, c, c-2..c-5) | unmerged | facilitator | DELETE CANDIDATES for the owner; roster lives on `fleet-store` |
+| fleet/handoff-agent-b, fleet/handoff-agent-c, fleet/luggage-agent-a, wip/agent-d-pack | unmerged | agents b, c, a, d | not classified by the owner; review before any cleanup |
+| fleet-store | in flight | facilitator | canonical roster and branch state |
+| up/*, upstream/fix-webdemo-cache | in flight | upstream | upstream contributors' refs; not ours to merge or delete |
