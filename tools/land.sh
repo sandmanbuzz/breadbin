@@ -23,6 +23,13 @@ done
 
 if [ -n "$(git status --porcelain)" ]; then
     echo "land: working tree is not clean; nothing merged" >&2
+    # Name each dirty file and its owner (best effort: the author of the last commit that touched it).
+    git status --porcelain | while IFS= read -r line; do
+        f=${line#???}
+        f=${f##* -> }
+        who=$(git log -1 --format=%an -- "$f" 2>/dev/null || true)
+        echo "land:   $f  (${who:-uncommitted (no owner)})" >&2
+    done
     exit 1
 fi
 if ! git rev-parse --verify --quiet "$branch^{commit}" >/dev/null; then
