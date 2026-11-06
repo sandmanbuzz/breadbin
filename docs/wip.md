@@ -41,7 +41,7 @@ The roster is `fleet/roster.md` on `fleet-store` (the owner's roster, published 
 - **Size ledger:** `tools/size_ledger.py` and `docs/size-ledger.tsv` are on `feat/size-ledger` (9353b44). Land it, then point `CLAUDE.md`'s status at the ledger rather than at a number.
 - **Tests:** `test_keyboard` needs X (container); the JiffyDOS-ROM subset is partly run (above).
 - **Roster:** `fleet/missing.md` has no writer yet.
-- **Origin and pushes:** the user's decision.
+- **Origin and pushes:** the user's decision. Decided: push at first numbered release
 
 ## Cloud session state (written before a context compaction, 2026-10-31)
 
