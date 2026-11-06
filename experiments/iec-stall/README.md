@@ -76,3 +76,7 @@ The directory entry `BREADBIN PRG 59 blocks` is the same on the source image and
 
 - The write is one way: the script does not read the physical disk back and compare sectors. `mcdup.py --dst 8 --base IMAGE` does that, slowly (about 27 minutes), when a sector-exact check is needed.
 - `nibsetup.sh up` uploads a local image now (it used to pass a local path to the Ultimate, which does not exist there). Changed in this commit; not exercised on hardware yet.
+
+### Backlog
+
+- **"Grab working copy from the SD"** as a `write-physical.sh` enhancement: fetch the nibbler PRG from the Ultimate's SD card (`/SD/utils/disk/`) over FTP into a local path, so `NIBBLER` need not be set by hand. Not implemented; the PRG stays untracked (`.gitignore`).
