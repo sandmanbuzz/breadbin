@@ -91,6 +91,19 @@ oft_alloc:
         clc
         rts
 
+; oft_free: carry set (A = EMFILE) if no open-file entry is free; takes nothing
+oft_free:
+        ldx #NFILE-1
+@l:     lda f_type,x
+        beq @f
+        dex
+        bpl @l
+        lda #EMFILE
+        sec
+        rts
+@f:     clc
+        rts
+
 ; oft_ref: X = entry, ref++
 oft_ref:
         inc f_ref,x
@@ -239,7 +252,9 @@ sys_open:
         bpl @cbmc
         jmp uci_create
 @cbmc:  jmp cbm_create
-@c64c:  lda nm_dev
+@c64c:  jsr oft_free        ; no free open-file entry: fail before anything is created
+        bcs @err
+        lda nm_dev
         sta of_dev
         lda nm_ino
         sta of_ino
