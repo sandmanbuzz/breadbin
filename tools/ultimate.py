@@ -28,6 +28,24 @@ MAX_BODY = 4096        # bytes of JSON per input request
 MAX_PUT_WRITE = 128    # bytes writemem accepts on the PUT (hex in the URL) form
 
 
+
+def load_local_env():
+    """Set the variables in .breadbin-local.env (gitignored, per machine) that the environment does
+    not already set. Keeps the Ultimate's address out of the repository."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".breadbin-local.env")
+    if not os.path.isfile(path):
+        return
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+load_local_env()
+
 class UltimateError(Exception):
     pass
 
