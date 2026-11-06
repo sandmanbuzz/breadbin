@@ -318,6 +318,7 @@ class Mem:
         self.b = bytearray(65536)
         self.uci = uci
         self.touch = []                     # (r/w, address) of every access to $DF1B-$DF1F
+        self.raster = 0                     # $D012 counts up on every read, so a wait for a line ends
 
     def __getitem__(self, a):
         if 0xDF1B <= a <= 0xDF1F:
@@ -325,6 +326,9 @@ class Mem:
             if self.uci:
                 return self.uci.read(a)
             return self.b[a]
+        if a == 0xD012:
+            self.raster = (self.raster + 7) & 0xFF
+            return self.raster
         return self.b[a]
 
     def __setitem__(self, a, v):
