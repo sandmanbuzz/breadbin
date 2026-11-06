@@ -1,5 +1,6 @@
 """Tests for tools/land.sh under the system /bin/sh: the dirty-tree refusal names each file and its owner."""
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ LAND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "land.sh")
 MAIL = "344811358+sandmanbuzz@users.noreply.github.com"
 
 
+@unittest.skipUnless(shutil.which("git"), "git is not in the CI image; land.sh is a host tool")
 class LandDirty(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
