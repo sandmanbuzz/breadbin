@@ -143,6 +143,24 @@ class Keyboard(unittest.TestCase):
         self.v.xkey("Return")
         self.until(lambda l: any(x.rstrip() == "/ $ echo" for x in l), what="ech completed to echo")
 
+    def test_history_recalls_lines(self):
+        # cursor up recalls the line before, cursor down goes forward again, and
+        # a recalled line runs like one typed
+        self.v.xtype("echo hist1")
+        self.v.xkey("Return")
+        self.until(lambda l: "hist1" in l, what="the first echo")
+        self.v.xtype("echo hist2")
+        self.v.xkey("Return")
+        self.until(lambda l: "hist2" in l, what="the second echo")
+        self.v.xkey("Up")
+        self.until(lambda l: any(x.rstrip() == "/ $ echo hist2" for x in l), what="hist2 recalled")
+        self.v.xkey("Up")
+        self.until(lambda l: any(x.rstrip() == "/ $ echo hist1" for x in l), what="hist1 recalled")
+        self.v.xkey("Down")
+        self.until(lambda l: any(x.rstrip() == "/ $ echo hist2" for x in l), what="hist2 again")
+        self.v.xkey("Return")
+        self.until(lambda l: sum(1 for x in l if x == "hist2") == 2, what="hist2 run a second time")
+
     def test_jiffy_clock_runs(self):
         a = self.v.mem(JIFFY, JIFFY + 2)
         time.sleep(1)
