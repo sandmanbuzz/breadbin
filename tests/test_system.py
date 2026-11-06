@@ -865,3 +865,10 @@ class Readline(unittest.TestCase):
         self.v.keybuf(b"\x04")
         self.v.type("echo outer\n")
         self.v.wait_for("outer", after="$ echo outer\n")
+
+    def test_tab_leaves_a_pattern_alone(self):
+        self.clear()
+        self.v.type("echo /home/h*.s")
+        self.tab()                              # a pattern: nothing is added
+        self.v.type("\n")
+        self.v.wait_for("/home/hello.s", after="$ echo /home/h*.s\n")
