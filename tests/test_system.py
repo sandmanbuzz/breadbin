@@ -865,3 +865,99 @@ class Touch(unittest.TestCase):
         # a path that cannot be made: touch must report it, which proves touch ran at all
         self.assertIn("touch:", self.v.run("touch /home/tch2 /nodir/zz"))
         self.assertIn("keep", self.v.run("cat /home/tch2"))
+
+
+class Readline(unittest.TestCase):
+    """The shell's raw readline: TAB completion of command and file names
+    (upstream 4abb291), DEL, and CTRL-D on an empty line. One VICE session."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.img = os.path.join(ROOT, "build", "test_readline.d64")
+        with open(IMAGE, "rb") as f, open(cls.img, "wb") as g:
+            g.write(f.read())
+        cls.v = make_target(cls.img)
+        cls.v.wait_shell()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.v.close()
+
+    def clear(self):
+        self.v.type("clear\n")
+        self.v.wait_for("$")
+
+    def tab(self):
+        self.v._cmd("keybuf \\x09")
+        self.v._cmd("x", wait=0.5)
+
+    def test_tab_completes_a_command(self):
+        self.clear()
+        self.v.type("whoa")
+        self.tab()
+        self.v.type("\n")
+        self.v.wait_for("root", after="$ whoami")
+
+    def test_tab_completes_after_a_pipe(self):
+        self.clear()
+        self.v.type("echo hi | hexd")
+        self.tab()
+        self.v.type("\n")
+        self.v.wait_for("68 69", after="$ echo hi | hexdump")
+
+    def test_tab_adds_slash_after_a_directory(self):
+        self.clear()
+        self.v.type("echo /ho")
+        self.tab()
+        self.v.type("\n")
+        self.v.wait_for("/home/", after="$ echo /home/\n")
+
+    def test_tab_lists_ambiguous_matches(self):
+        self.clear()
+        self.v.type("echo /home/h")
+        self.tab()                              # hello.bas, hello.s: "hello."
+        self.tab()                              # lists them
+        s = self.v.wait_for("$ echo /home/hello.", after="hello.bas")
+        listing = [l for l in s.splitlines() if "hello.bas" in l][-1]
+        self.assertEqual(sorted(listing.split()), ["hello.bas", "hello.s"])
+        self.v.type("s")
+        self.tab()
+        self.v.type("\n")
+        self.v.wait_for("$ echo /home/hello.s\n/home/hello.s")
+
+    def test_tab_with_no_match_changes_nothing(self):
+        self.clear()
+        self.v.type("echo zzq")
+        self.tab()
+        self.v.type("\n")
+        self.v.wait_for("zzq", after="$ echo zzq\n")
+
+    def test_tab_on_an_empty_line_is_harmless(self):
+        self.clear()
+        self.tab()
+        self.v.type("echo ok\n")
+        self.v.wait_for("ok", after="$ echo ok\n")
+
+    def test_del_erases_the_last_character(self):
+        self.clear()
+        self.v.type("echo abx")
+        self.v.keybuf(b"\x14")                  # DEL
+        self.v.type("c\n")
+        self.v.wait_for("abc", after="$ echo abc\n")
+
+    def test_ctrl_d_on_an_empty_line_ends_a_shell(self):
+        self.clear()
+        self.v.type("sh\n")
+        self.v.wait_for("$", after="$ sh\n")
+        self.v.type("echo inner\n")
+        self.v.wait_for("inner", after="$ echo inner\n")
+        self.v.keybuf(b"\x04")
+        self.v.type("echo outer\n")
+        self.v.wait_for("outer", after="$ echo outer\n")
+
+    def test_tab_leaves_a_pattern_alone(self):
+        self.clear()
+        self.v.type("echo /home/h*.s")
+        self.tab()                              # a pattern: nothing is added
+        self.v.type("\n")
+        self.v.wait_for("/home/hello.s", after="$ echo /home/h*.s\n")
