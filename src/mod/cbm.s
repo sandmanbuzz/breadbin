@@ -17,7 +17,7 @@
         jmp init
         jmp fini
         .word KAPI_HASH
-        .byte 1                 ; class 1: filesystem
+        .byte $11               ; class 1: filesystem; high nibble = name id for `mod ls` (1 cbm, 2 uci)
 
 .segment "BSS"
 cb_t:    .res 1

@@ -656,6 +656,7 @@ class Drives(unittest.TestCase):
             self.assertIn("welcome to breadbin.", v.run("cat /mnt/motd"))
             ls = v.run("mod ls")                              # one copy, loaded by the mount
             self.assertEqual(len(re.findall(r"class 1", ls)), 1, ls)
+            self.assertRegex(ls, r"slot 0 \(cbm\): page \d+", ls)   # the module's name
             v.run("mod load /lib/km/cbm")                     # a second copy is refused
             ls = v.run("mod ls")
             self.assertEqual(len(re.findall(r"class 1", ls)), 1, ls)
@@ -707,6 +708,10 @@ class Drives(unittest.TestCase):
             self.assertEqual(v.run("pwd"), "/")
             self.assertEqual(v.run("umount /mnt"), "")
             self.assertIn("no such device", v.run("mount 10 /mnt"))
+            # a missing mount point says so, not a bare "no such file"
+            out = v.run("mount 9 /nowhere")
+            self.assertIn("/nowhere: mount point does not", out)   # 40 columns wrap the line
+            self.assertNotIn("mount 9", v.run("mount"))
             # UCI v1: VICE has no Command Interface; the probe says so and changes nothing
             self.assertIn("no such device", v.run("mount uci /mnt"))
             self.assertIn("no such device", v.run("mount uci /nowhere"))
