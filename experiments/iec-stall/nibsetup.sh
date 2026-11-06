@@ -2,6 +2,8 @@
 # Put the Ultimate in the state the nibbler test needs (stock KERNAL, Software IEC off, a CBM disk image read-only in
 # drive A on bus 9) or put it back. Call under tools/with-lock -r ultimate, by hand, around the steps in nibtest.py.
 #   BREADBIN_ULTIMATE=host nibsetup.sh up IMAGE (a local file is uploaded; otherwise a path on the Ultimate) | nibsetup.sh down
+# the Ultimate address comes from the environment, else from .breadbin-local.env at the repo root (gitignored)
+[ -n "${BREADBIN_ULTIMATE:-}" ] || [ ! -r "$(cd "$(dirname "$0")/../.." && pwd)/.breadbin-local.env" ] || . "$(cd "$(dirname "$0")/../.." && pwd)/.breadbin-local.env"
 H=${BREADBIN_ULTIMATE:?}; here=$(cd "$(dirname "$0")" && pwd)
 put(){ curl -s -m10 -X PUT "http://$H/v1/configs/$1?value=$2" >/dev/null; }
 K="C64%20and%20Cartridge%20Settings/Kernal%20ROM"
