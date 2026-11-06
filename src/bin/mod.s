@@ -74,7 +74,6 @@ idx = $25
         lda #<s_slot
         ldx #>s_slot
         jsr print
-        lda idx
         ; slot number = idx / 3
         lda idx
         ldy #0
@@ -87,6 +86,7 @@ idx = $25
         ldx #0
         ldy #1
         jsr print_dec_w
+        jsr pname
         lda #<s_page
         ldx #>s_page
         jsr print
@@ -108,6 +108,7 @@ idx = $25
         jsr print
         ldx idx
         lda buf+2,x
+        and #$0f
         ldx #0
         ldy #1
         jsr print_dec_w
@@ -119,11 +120,45 @@ idx = $25
         cpx #12
         bcc @l
         rts
+; pname: print " (name)" for the slot at idx, from the high nibble of its class byte; nothing if 0
+pname:  ldx idx
+        lda buf+2,x         ; the class byte: high nibble = module name id (0 = unnamed)
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        beq @r
+        cmp #3
+        bcc @nm
+        lda #0              ; unknown id: "?"
+@nm:    asl a
+        sta nid
+        lda #<s_op
+        ldx #>s_op
+        jsr print
+        ldx nid
+        lda names,x
+        pha
+        lda names+1,x
+        tax
+        pla
+        jsr print
+        lda #<s_cp
+        ldx #>s_cp
+        jsr print
+@r:     rts
 .segment "RODATA"
 usage:  .byte "usage: mod [ls | load PATH | unload SLOT]", 10, 0
 s_slot: .byte "slot ", 0
 s_page: .byte ": page ", 0
 s_np:   .byte ", pages ", 0
+s_op:   .byte " (", 0
+s_cp:   .byte ")", 0
+n_unk:  .byte "?", 0
+n_cbm:  .byte "cbm", 0
+n_uci:  .byte "uci", 0
+names:  .word n_unk, n_cbm, n_uci
 s_cls:  .byte ", class ", 0
 .segment "BSS"
 buf: .res 12
+nid: .res 1

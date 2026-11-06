@@ -7,7 +7,7 @@
         jmp init
         jmp fini
         .word KAPI_HASH
-        .byte 0                 ; class 0: generic
+        .byte 0                 ; class 0: generic, no name id
 
 .segment "CODE"
 init:   lda #<s_hi
