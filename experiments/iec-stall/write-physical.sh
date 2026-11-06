@@ -21,6 +21,9 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
+# the Ultimate address comes from the environment, else from .breadbin-local.env at the repo root (gitignored)
+[ -n "${BREADBIN_ULTIMATE:-}" ] || [ ! -r "$(cd "$(dirname "$0")/../.." && pwd)/.breadbin-local.env" ] || . "$(cd "$(dirname "$0")/../.." && pwd)/.breadbin-local.env"
+
 IMAGE=${1:-}
 IMAGE_SHA=${IMAGE_SHA:-f6efbf78418ce18f30956b6102d25c9327b184a392413dc5ba44746964bc5f90}
 NIBBLER_SHA=30808e1f581d6427f839e4fce96bd46762c29c6343c09ec5d37ea4c4881fcfe5

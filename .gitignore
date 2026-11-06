@@ -17,3 +17,6 @@ experiments/**/*.stall
 
 # Keymaster nibbler: commercial 1980s program, pulled from the Ultimate SD card; never commit
 experiments/iec-stall/keym.d.nibbler.prg
+
+# Local, per-machine settings (the Ultimate address and the like). Never commit: see .breadbin-local.env.example
+.breadbin-local.env
