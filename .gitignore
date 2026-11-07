@@ -20,3 +20,6 @@ experiments/iec-stall/keym.d.nibbler.prg
 
 # Local, per-machine settings (the Ultimate address and the like). Never commit: see .breadbin-local.env.example
 .breadbin-local.env
+*.db
+*.db-wal
+*.db-shm
