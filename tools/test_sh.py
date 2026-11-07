@@ -20,7 +20,7 @@ UP, DOWN, RET = b"\x10", b"\x0e", b"\n"
 
 
 def sh(stdin, tty=False, **kw):
-    return asim.run("sh", [], {}, stdin=stdin, tty=tty, **kw)
+    return asim.run("sh", [], kw.pop("files", {}), stdin=stdin, tty=tty, **kw)
 
 
 def argvs(r):
@@ -68,6 +68,65 @@ class Commands(unittest.TestCase):
     def test_pipeline_is_refused_not_faked(self):
         r = sh(b"echo a | echo b\n")
         self.assertEqual(r.spawns, [])                    # PIPE failed: nothing is spawned
+
+
+def label(name):
+    """Address of a sh variable in the host image (build/p/sh.lbl holds offsets from the load address)."""
+    with open(os.path.join(ROOT, "build", "p", "sh.lbl")) as f:
+        for ln in f:
+            w = ln.split()
+            if len(w) == 3 and w[2] == "." + name:
+                return (asim.BASE_PAGE << 8) + int(w[1], 16)
+    raise KeyError(name)
+
+
+def dirent(name):
+    return b"\x02" + name.encode().ljust(15, b"\0")
+
+
+@unittest.skipIf(SKIP, SKIP)
+class Glob(unittest.TestCase):
+    def test_longest_directory_prefix_does_not_overflow_the_glob_buffer(self):
+        # g_store used to guard only gpos < 192, then copied the whole prefix plus the name. A prefix
+        # longer than 47 characters is now literal, so the longest one that globs (47) is used, with
+        # more matches than gbuf holds: those that fit are kept, the rest are dropped.
+        prefix = "/" + "a" * 45 + "/"
+        self.assertEqual(len(prefix), 47)
+        names = [c * 14 for c in "bcdefg"]
+        files = {prefix[:-1]: b"".join(dirent(n) for n in names)}
+        r = sh(("echo " + prefix + "*\n").encode(), files=files)
+        gbuf = label("gbuf")
+        after = bytes(r.mem[gbuf + 257:gbuf + 256 + 64])    # tpos (first) follows the typed line's length
+        control = bytes(sh(b"echo x\n").mem[gbuf + 257:gbuf + 256 + 64])    # the variables after gbuf at rest
+        self.assertEqual(after, control, "glob wrote past the end of gbuf")
+        got = argvs(r)[0][1:]
+        self.assertEqual(got, [prefix + n for n in names[:len(got)]])
+        self.assertTrue(3 <= len(got) < len(names), got)
+
+    def glob_in(self, plen):
+        """`echo <prefix>*` where the prefix is plen characters (including its '/') and its directory exists under the full name."""
+        prefix = "/" + "a" * (plen - 2) + "/"
+        self.assertEqual(len(prefix), plen)
+        names = ["x1", "x2"]
+        files = {prefix[:-1]: b"".join(dirent(n) for n in names)}
+        files.setdefault(prefix[:46], dirent("decoy"))     # what a prefix cut at 46 characters would open
+        return prefix, names, argvs(sh(("echo " + prefix + "*\n").encode(), files=files))
+
+    def test_prefix_of_46_characters_still_globs(self):
+        prefix, names, got = self.glob_in(46)
+        self.assertEqual(got, [["echo", prefix + names[0], prefix + names[1]]])
+
+    def test_prefix_of_47_characters_still_globs(self):
+        # the 47th character is the '/', which is dropped: the directory is the full 46 characters
+        prefix, names, got = self.glob_in(47)
+        self.assertEqual(got, [["echo", prefix + names[0], prefix + names[1]]])
+
+    def test_prefix_too_long_for_the_directory_buffer_stays_literal(self):
+        # g_dir holds 47 characters: a longer prefix was cut short and a truncated directory was read,
+        # while every name still got the full prefix.
+        for plen in (48, 60, 121):
+            prefix, names, got = self.glob_in(plen)
+            self.assertEqual(got, [["echo", prefix + "*"]], plen)
 
 
 @unittest.skipIf(SKIP, SKIP)

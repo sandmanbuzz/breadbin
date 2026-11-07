@@ -1009,7 +1009,11 @@ glob:   lda zp1
         lda #0
         sta g_dir+1
         jmp @open
-@dir:   ldy #0
+@dir:   lda g_d
+        cmp #48             ; g_dir holds 47 characters: a longer prefix stays literal
+        bcc @dn
+        jmp @lit
+@dn:    ldy #0
 @dc:    cpy g_d
         beq @dz
         lda (zp1),y
@@ -1084,8 +1088,11 @@ glob:   lda zp1
 g_store:
         lda gpos+1
         bne @full
-        lda gpos
-        cmp #256-64
+        lda gpos            ; the record is d + 15 name bytes + NUL: gpos+d+16 <= 256
+        clc
+        adc g_d
+        bcs @full
+        adc #15
         bcs @full
         lda #<gbuf
         clc
