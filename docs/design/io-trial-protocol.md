@@ -17,12 +17,13 @@ One disk serves three arms that split the boot by stage, so a disk swap is not n
 
 ## Configuration (every row records it)
 
-Normal configuration (experiments README) except where noted: JiffyDOS KERNAL host, physical 1541 alone on bus 8, drive A on bus 9 with no disk, Software IEC off, turbo off, REU on, 1581 off the bus. The JiffyDOS drive ROM stays fitted. Columns per row: session, block, trial index, arm, start time, minutes since the drive was powered on, image sha256 prefix, kernel commit, disk id, outcome, seconds, IOSTAT counters (B and D), stall dump if any.
+Normal configuration (experiments README) except where noted: JiffyDOS KERNAL host, physical 1541 alone on bus 8, drive A on bus 9 with no disk, Software IEC off, turbo off, REU on, 1581 off the bus. The Ultimate's `Serial Bus Mode` and `Burst Mode Patch` settings are read back and recorded (never recorded before). The JiffyDOS drive ROM stays fitted. Columns per row: session, block, trial index, arm, start time, minutes since the drive was powered on, image sha256 prefix, kernel commit, disk id, outcome, seconds, IOSTAT counters (B and D), stall dump if any.
 
 Outcomes: `pass`, `LOADING hang`, `LOAD ERROR`, `root-mount panic`, `stall` (class S signature in the dump), `mismatch` (bytes differ: silent corruption, the worst outcome), `other` (described).
 
 ## Order and counts (pre-registered)
 
+0a. **Block 0, CPU-halt probe (H11), no drive needed.** Physical drive off or unplugged from the bus, so it takes no wear. `haltprobe` (branch `io/haltprobe`) runs five arms of 60 s each in a fixed order: idle with no host traffic; 1-byte REST reads every 1 s; every 0.1 s; one 1000-byte read every 2 s; REU transfers. Pass condition: the longest gap is badline-sized (65 cycles or less) in every arm. Any gap of 150 cycles or more, in any arm, is reported before block 1. If one shows up, block 2's harness polling changes before block 2 is run, and that change is logged as a deviation. This block can run while the drive is still cooling down, if the Ultimate itself is not part of the cooldown.
 0. **Cold record.** Hours powered off, room temperature if known. Owner powers on the drive, then the Ultimate. Nothing else touches the drive.
 1. **Block 1, control, cold:** C x 12. One disk insertion.
 2. **Block 2, Breadbin disk:** the cycle K, B, D repeated 10 times (30 trials). One disk swap.
