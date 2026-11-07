@@ -80,3 +80,31 @@ The pulse-histogram conclusion of 2026-10-31 ("not short pulses") stands. What i
 3. during REU transfers.
 
 Expected if H11 holds: gaps above 100 µs appear, tied to one of these. Expected if dead: the maximum gap is badline-sized (under about 70 µs) in every condition. Then H11 is killed and class S needs another mechanism.
+
+## 2026-11-07: VICE confirms the drive's side of the stall (branch io/h10-frame-vice, e85124e, 8 VICE boots, stock ROMs)
+
+The experiment-only build `make H10=1` pulls DATA low partway through the 5th block read of the boot, at byte 100, after bit 3. The injection runs in the receive path, so while it runs the C64 is not watching CLK.
+
+| Glitch | Bits the C64 counted | CLK at timeout | Drive CPU | Retry |
+|---|---|---|---|---|
+| none (control) | – (33 reads, 0 retries) | – | – | – |
+| 20 µs | 7 | held low ($DD00 $87) | ack-wait loop $E987-$E9C8 (polls DATA and ATN) | not tried |
+| 100 µs | 7 | held low ($87) | same loop | recovered in 1 retry, login |
+| 1 ms, at bit 3 | 3 | released ($C7) | not sampled (drive abandoned the byte) | disabled: panic |
+| 100 µs, at bit 0 | 0 | released ($C7) | normal DOS code | not tried |
+
+Reading:
+
+- **Short glitches.** When the C64 is busy for about one bit time, it misses one CLK pulse. The drive finishes all 8 bits and parks in the after-the-last-bit acknowledge wait, with CLK held low. That is exactly the hardware signature's drive state, now seen directly in the drive monitor rather than inferred from source. The retry recovers it.
+- **Long glitches, or one at the start of a byte.** This is a frame error: the drive releases CLK. It is a different signature, and the hardware never showed it.
+- **What this means for hardware.** The hardware's "2 to 6 bits counted" means the C64 missed 2 to 6 pulses while the drive went on clocking. The C64 receiver was either not polling, or not seeing CLK, for several bit times.
+- **What it does not show.** Whether ATN frees the drive in VICE, and whether a TALK resends from the pointer, were not tested. Neither was the mangled-byte prediction.
+
+Effect on the hypotheses:
+
+- **H10 (an outside glitch on DATA) is downgraded.** A DATA glitch alone does not make the C64 miss pulses. In this run the C64 missed a bit only because the injection kept it busy.
+- **Class S becomes "the receiver misses CLK pulses".** Two candidates remain:
+  - **H11:** the CPU is halted (DMA).
+  - **H12 (new):** CLK pulses do not reach the C64's CIA. They could be filtered or delayed in the C64 Ultimate's bus logic (`Serial Bus Mode` routing), or lost to the line.
+
+The halt probe separates the two: CPU gaps over 150 cycles in step with the stalls means H11; no gaps means H12.
