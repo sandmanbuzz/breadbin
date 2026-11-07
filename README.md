@@ -5,7 +5,7 @@ A small Unix-like operating system for the Commodore 64 — the "breadbin".
 Breadbox is a fork of [Breadbin](https://github.com/kpatr1981/breadbin) by Konstantinos Patronas. Based on breadbin by kpatronas@gmail.com. The boot banner reads "breadbox 0.1 / based on breadbin by kpatronas@gmail.com".
 
 - The name is temporary and may be renamed. The version number restarts at 0.1 on purpose and makes no claim of tracking upstream's numbering.
-- How and why this fork differs from upstream: [docs/why-this-fork.md](docs/why-this-fork.md) (for now that page exists only on the branch `docs/why-this-fork`).
+- How and why this fork differs from upstream: [docs/why-this-fork.md](docs/why-this-fork.md).
 - File and command names keep the old name for now: `build/breadbin.d64`, the `BREADBIN` boot file, `include/breadbin.inc`.
 
 It is a real kernel, not a shell that prints canned output:
@@ -146,7 +146,7 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 | `docs/filesystem.md` | disks, mounting, `format`, and the on-disk layout |
 | `docs/testing.md` | which tests to run for which change |
 | `docs/roadmap.md` | where this fork is heading: limits, milestones, and the first stories |
-| `docs/why-this-fork.md` | how this fork differs from upstream (on the branch `docs/why-this-fork` for now) |
+| `docs/why-this-fork.md` | how this fork differs from upstream |
 | `docs/process.md` | how sessions work together: branches, the machine lock, kickoff |
 | `docs/size-ledger.tsv` | kernel bytes and headroom per landing (`make size` measures) |
 | `tools/land.sh` | merges a branch into main after building and running the host tests |
