@@ -701,3 +701,18 @@ Not run: `tests.test_system` on the Ultimate for the UCI classes; the physical-d
 `experiments/iec-stall/disksum/disksum.py build/breadbin.d64` (image main 4ec614f, sha256 `bf504d94…`, the image written earlier), physical 1541 on bus 8, under `tools/with-lock -r ultimate`. The reader stopped at sector 0 of 683 with no progress for 180 s; the tool reported `STALLED`, restored the config (JiffyDOS KERNAL, Software IEC on) and exited 1. No sector was compared, so there is no checksum verdict. Not retried.
 
 The owner accepted the write as-is and closed the item: the write exited 0 and the disk lists the PRG, so the disk is not known to be broken. The stall is the known physical root-stall path (see the entries on the root-mount stall above).
+
+### 2026-11-07, physical boot after a full power cycle: no clean run, KNOWN ISSUE (owner-accepted, follow-up backlogged)
+
+Image: main 8cc3e57 build, sha256 `e5eba79c…`, on the scratch disk in drive 8 (bus 8, solo). Config unchanged across the attempts: Ultimate Software IEC off, drive A on bus 9 with no image, JiffyDOS KERNAL active.
+
+Attempts, all after a full machine power cycle unless noted:
+- Stock-KERNAL boot, one attempt: stuck at `LOADING`, motor on, activity light solid. Config restored automatically.
+- Scratch-disk boot, one attempt: stuck at `LOADING`, same look. Config restored.
+- Owner's manual boot: login prompt reached (owner's hands; after a full power cycle).
+- Agent boot, same config, no reset beyond the script's: `kernel panic: cannot mount root filesystem` after the kernel banner (the mitigation's retry budget was exhausted).
+- Agent boot after the next full power cycle: `LOAD ERROR` shown briefly, then a cleared screen. A new failure mode. Script stopped by the agent (rc 143).
+
+Result: no clean run from the agent's side. The owner's manual boot reached login. Mitigation (bounded `bus_acptr` wait, three `iec_read` tries with UNTALK) is not reliable enough to call solid: the retry budget can be exhausted, and a new `LOAD ERROR` mode has appeared.
+
+Owner decision: accept this state and proceed with a follow-up story for the boot path, backlogged. Not bisected. Not chased further in this session.
