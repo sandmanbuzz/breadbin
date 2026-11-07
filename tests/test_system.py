@@ -148,15 +148,15 @@ class Boot(unittest.TestCase):
         self.assertNotIn("count", self.run_("ps"))
 
     def test_15_too_many_processes(self):
-        # init + sh (login has exec'd into it) + 10 jobs fill the 12-slot process table
+        # init + sh (login has exec'd into it) + 8 jobs fill the 10-slot process table
         pids = []
-        for _ in range(10):
+        for _ in range(8):
             pids.append(self.run_("sleep 9999 &").strip("[]"))
         out = self.v.run("sleep 9999 &", clear=False)
         self.assertIn("too many processes", out)
         self.assertTrue(all(p.isdigit() for p in pids), pids)
-        self.v.run("kill " + " ".join(pids[:5]), clear=False)
-        self.v.run("kill " + " ".join(pids[5:]), clear=False)
+        self.v.run("kill " + " ".join(pids[:4]), clear=False)
+        self.v.run("kill " + " ".join(pids[4:]), clear=False)
         self.assertEqual(self.run_("echo alive"), "alive")
         self.assertNotIn("sleep", self.run_("ps"))
 
@@ -237,6 +237,21 @@ class Boot(unittest.TestCase):
         self.v.keybuf(b"\x18")                  # ^X quit
         time.sleep(3)
         self.assertEqual(self.run_("cat /home/e.txt | wc"), "     1      2     12")
+
+    def test_28_basic_depth_limit_survives_switches(self):
+        # STKSAVE is 128: the deepest legal expression (11 levels, about 106 bytes of saved
+        # stack) must survive 600 timer-driven context switches (at 96 it was killed
+        # silently, status 139), and no run of minus signs may grow the stack past the cap.
+        e = "(" * 10 + "1" + ")" * 10
+        self.run_(f"echo '10 for i = 1 to 600 : a = {e} : next i : print a' > /home/d11")
+        self.assertEqual(self.run_("basic /home/d11"), "1")
+        self.run_("echo '10 for i = 1 to 600 : a = -----5 : next i : print a' > /home/um")
+        self.assertEqual(self.run_("basic /home/um"), "-5")
+        m = "-" * 40
+        self.run_(f"echo '10 for i = 1 to 600 : a = {m}5 : next i : print a' > /home/u40")
+        self.assertIn("too complex", self.run_("basic /home/u40"))
+        self.assertEqual(self.run_("echo alive"), "alive")
+        self.run_("rm /home/d11 /home/um /home/u40")
 
     def test_26_error_messages_from_the_file(self):
         """perr looks messages up in /etc/errors; three are built in; a missing file gives 'error N'."""
