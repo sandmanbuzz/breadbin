@@ -695,3 +695,9 @@ Ultimate firmware 1.1.0, JiffyDOS KERNAL. Image: main 2a27321 build (sha256 `bf5
 Found on the way: `mount uci /u` without the mount point fails with `mount: /u: mount point does not exist`. The test backend's own boot (`load"*",8,1`) reads drive 8, which on this bench is the physical 1541; with the physical drive on bus 8 and drive A on bus 9 that boot stalled at `run` (no shell in 240 s). Booting from drive A on bus 9 avoids it.
 
 Not run: `tests.test_system` on the Ultimate for the UCI classes; the physical-disk checksum read-back.
+
+### 2026-11-06, physical-disk checksum read-back: STALLED, closed by the owner as-is (hardware lane)
+
+`experiments/iec-stall/disksum/disksum.py build/breadbin.d64` (image main 4ec614f, sha256 `bf504d94…`, the image written earlier), physical 1541 on bus 8, under `tools/with-lock -r ultimate`. The reader stopped at sector 0 of 683 with no progress for 180 s; the tool reported `STALLED`, restored the config (JiffyDOS KERNAL, Software IEC on) and exited 1. No sector was compared, so there is no checksum verdict. Not retried.
+
+The owner accepted the write as-is and closed the item: the write exited 0 and the disk lists the PRG, so the disk is not known to be broken. The stall is the known physical root-stall path (see the entries on the root-mount stall above).
