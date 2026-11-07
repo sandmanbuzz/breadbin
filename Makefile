@@ -40,7 +40,7 @@ $(LIBOBJ): $(patsubst src/lib/%.s,$(BUILD)/lib/%.o,$(LIBSRC))
 	rm -f $@
 	ar65 a $@ $^
 
-$(BUILD)/p/%.o: src/bin/%.s include/breadbin.inc
+$(BUILD)/p/%.o: src/bin/%.s include/breadbin.inc $(wildcard src/bin/*.inc)
 	@mkdir -p $(dir $@)
 	ca65 -g $< -o $@
 
