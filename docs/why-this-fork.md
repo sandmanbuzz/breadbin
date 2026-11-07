@@ -1,33 +1,57 @@
 # Why this fork
 
-**Name pending.** The fork is still called Breadbin in this tree. Candidate names are under owner review; this page will be updated when one is chosen.
+Breadbox is a fork of Breadbin, the Unix-like operating system for the Commodore 64 by Konstantinos Patronas (<https://github.com/kpatr1981/breadbin>). The fork point is upstream commit `aa58d27`, when upstream's version string read 0.2 (`docs/design/upstream-survey.md`).
 
-Status: draft for the owner, 2026-11-06. Every claim below points at a file or commit in this repo. Anything without a source was left out.
+**The name is temporary.** "Breadbox" was chosen so that the fork is not confused with upstream and makes no claim to track it. It can change if a collision or a better idea turns up. The version string restarts at 0.1 for the same reason: upstream's number is upstream's.
+
+Status: 2026-11-07. Every claim below points at a file or commit in this repo, or at an upstream commit. Upstream moves quickly; where this page compares, it says which upstream commit it looked at: `bb4bba3` on upstream `main` (2026-11-06, upstream version 0.6) and `f896ed2` on its `release-0.6` branch. Re-check before relying on a line.
 
 ## What it is
 
-Breadbin is a small Unix-like operating system for the Commodore 64, written in 6502 assembly (ca65): preemptive multitasking, separate programs in `/bin`, pipes and redirection, signals, a filesystem with directories, and an assembler and BASIC that run on the machine itself (`README.md`). This is a fork of the upstream Breadbin by Konstantinos Patronas (<https://github.com/kpatr1981/breadbin>). The fork point is upstream commit `aa58d27` (`docs/design/upstream-survey.md`).
+A small Unix-like operating system for the C64, in 6502 assembly (ca65): preemptive multitasking, separate programs in `/bin`, pipes and redirection, signals, a filesystem with directories, and an assembler and BASIC that run on the machine itself (`README.md`). All of that is upstream's work and is shared.
 
 ## Why it exists
 
-The direction is in `docs/roadmap.md`: make the C64 a place where real software is written on the machine, starting with a small compiler, and to treat an Ultimate (UCI file API, a large REU, turbo) as the recommended hardware without ever requiring it. That needed work upstream did not do: replacing the C64 KERNAL, a kernel-space budget, and test infrastructure that does not take 25 minutes per run. The roadmap says the fork is probably too big to send upstream whole; useful pieces may go as pull requests.
+The direction is in `docs/roadmap.md`: make the C64 a place where real software is written on the machine, starting with a small compiler, and treat an Ultimate (UCI file API, a large REU, turbo) as the recommended hardware without ever requiring it. This fork goes a different way from upstream on a few foundations: it takes over the KERNAL completely, it budgets kernel bytes to give programs more memory, and it is developed by a fleet of AI agents with real hardware in the loop (below). The roadmap says the fork is probably too big to send upstream whole; useful pieces may go as pull requests, and we port from upstream with credit.
 
-## What this fork has that upstream does not
+## Where the fork differs
 
-All items below are on local `main`; sources are `CLAUDE.md`, `docs/roadmap.md`, `docs/wip.md` and the commits named.
+Upstream has a lot we also have (see the next section). These are the parts that differ, checked against upstream `bb4bba3`.
 
-- **No KERNAL ROM.** Our own interrupt entry, keyboard, screen driver and serial bus (IEC) driver replace the ROM. We therefore need no Commodore ROM at run time.
-- **REU block cache** for the boot drive, write-through, keyed by a build id (`cache` command, `make CACHE=0|1|2`). The survey classes upstream's REU disk copy (`84f0981`) as an older version of the same idea.
-- **Kernel modules** (`mod` command) with the CBM DOS filesystem and **UCI v1** (`mount uci /u`) as modules, so an Ultimate's own file API is a mounted filesystem. `mount uci` passes on the real Ultimate (`docs/hardware-notes.md`).
-- **`exec`** (`SP_EXEC`): `login` execs into `sh`. Also `turbo`, and BRK in user code kills the process (`1e78c68`).
-- **Footprint work.** Boot-only code released to the pool, cold code above the BSS, a split user library, and the L1 pass (`c64fe3a`). The user pool is 154 pages (`$0800-$A1FF`) in the CLAUDE.md status; `docs/size-ledger.tsv` has one row per landing and is the number to quote. `make size` measures it.
-- **Test infrastructure.** Host tests (`make test-host`), VICE system tests sharded across containers (`tools/ci`, `docs/ci.md`), a real-keystroke test, a py65-based simulator for UCI and for `as`, a fake Ultimate server, hardware test backend for the Ultimate (`tools/ultimatetest.py`), locks for shared machines (`tools/with-lock`), and a landing script (`tools/land.sh`) that builds and runs `make test-host` on the merged tree before committing.
-- **Toolchain.** `as` runs on the C64; `tools/cc.py` is a host-side C-subset compiler that emits `as` source. It is a host-side reference for now (`README.md`). A table-driven check of the `as` opcode table exists (`7627968`).
-- **Shell.** Command history with Up/Down recall (`5c299d0`) and TAB completion adapted from upstream `4abb291` (`9b5e93e`). `touch` is ported from upstream with credit (`338674b`).
+- **No KERNAL ROM at all.** Our own interrupt entry, keyboard, screen driver and serial bus (IEC) driver. No Commodore ROM is needed at run time. Upstream has its own IEC driver too (`src/kernel/iec.s`), but it keeps the KERNAL ROM for the screen and keyboard and runs under the KERNAL interrupt path (its `CLAUDE.md`, `src/kernel/main.s`).
+- **Kernel modules** (`mod` command), with the CBM DOS filesystem and **UCI v1** (`mount uci /u`) as loadable modules, so an Ultimate's own file API is a mounted filesystem. Upstream has CBM DOS disks built into its kernel (`src/kernel/cbm.s`) and no UCI. `mount uci` passes on the real Ultimate (`docs/hardware-notes.md`).
+- **REU block cache** for the boot drive: write-through, keyed by a build id and the disk label (`cache` command, `make CACHE=0|1|2`). Upstream also keeps a copy of drive 8's blocks in the REU as they are read (`84f0981`), which the survey treats as an earlier version of the same idea.
+- **`turbo`.** Upstream has no equivalent.
+- **Kernel size is measured.** `make size` reports the bytes per module and the headroom, and `docs/size-ledger.tsv` has a row per landing. Upstream also treats RAM as scarce and has an INIT segment and code under the ROM; it has no measurement tool or ledger that we found.
+- **User memory.** The user pool is 155 pages (`$0800-$A2FF`, 39,680 bytes), above a stock C64's 38,911 BASIC bytes. Upstream's `release-0.6` gives programs 125 pages (`61f006d`, kernel at `$8500`).
+- **Test infrastructure.** Upstream has VICE system tests run in parallel on one machine (`tools/ptest.py`, about 40 minutes by its `CLAUDE.md`) and host tests. This fork adds VICE tests sharded across containers (`tools/ci`, `docs/ci.md`), a real-keystroke test, a py65-based simulator for UCI and for `as`, a fake Ultimate server, a hardware test backend (`tools/ultimatetest.py`), locks for shared machines (`tools/with-lock`), and a landing script (`tools/land.sh`) that builds and runs `make test-host` on the merged tree before it commits.
+- **Host-side compiler.** `tools/cc.py`, a C-subset compiler that emits `as` source. It is a host-side reference for now (`README.md`).
+
+## Hardware in the loop
+
+Real hardware is part of the acceptance process, and agents drive it.
+
+- The same system, keyboard and console tests that run under VICE run against a real Ultimate 64 with `BREADBIN_TARGET=ultimate` (`tools/ultimatetest.py`, `tools/ultimate.py`; `docs/testing.md`).
+- Hardware is a shared, locked resource (`tools/with-lock -r ultimate`), held by one agent at a time, and findings go to `docs/hardware-notes.md` with the command, date and commit. A hardware agent writes images to a physical 1541 and boots them.
+- At a milestone the gate is the full VICE suite, the JiffyDOS-ROM subset, and a hardware run (`CLAUDE.md`). It is a milestone gate, not a per-commit one: hardware answers what only hardware can answer.
+- The gate does find things: the physical-1541 stall was found this way and is still open (below).
+
+## What upstream has that we have too
+
+Verified in upstream `bb4bba3`: `exec` (`src/kernel/exec.s`; `login` execs into the shell), BRK in user code kills only that process, shell history with Up/Down, TAB completion, `touch`, `as` and BASIC on the machine, MIT licence. Some of these we ported with credit (TAB completion adapted from `4abb291`, `touch`); the rest (`exec`, BRK kill, history) are our own implementations of features upstream also has, so none of them is a first for this fork.
 
 ## What upstream has that we lag on
 
-Tracked in `docs/design/upstream-survey.md` (40 upstream commits since the fork point, each with a verdict, and the status table dated 2026-11-04 against upstream `712cc60`). That table predates some landings above (TAB, history, `touch`), so re-check it before relying on a line. Items it lists as missing and wanted: shell `$?`, `&&`, `||` and `2>`; fast 1541 reads (upstream `7bc197a`, about 1.8 times faster; ours is story M0-8); the CLK pulse at talk turnaround (`ff69a25`, an experiment tied to the stall below); the jiffy clock keeping time during disk I/O (`d2e3423`). Job control, a write-back cache and file times are classed "inspiration only". Several `edit` fixes from upstream's `fix/edit` branch were the next cheap ports; at least one equivalent (`0575584`, redraw only what changed) has landed.
+Tracked in `docs/design/upstream-survey.md`, whose status table is dated 2026-11-04 against upstream `712cc60` and is now 15 upstream commits stale. From the upstream log:
+
+- **Shell:** `$?`, `&&`, `||` and `2>`. We have none of these yet (backlog; not needed for 0.1).
+- **Disk:** fast 1541 reads (`7bc197a`, about 1.8 times faster; ours is story M0-8), the CLK pulse at talk turnaround (`ff69a25`, tied to the stall below), the jiffy clock keeping time during disk I/O (`d2e3423`).
+- **REU swap:** programs that are not running wait in the REU when memory runs out (`3ad7236`).
+- **1581:** a `breadbin.d81` target and `mount` of a 1581, tested in VICE only. Non-1541 drives are nice-to-have for us, not milestone work.
+- **`edit` fixes:** several (`1cd090b`, `b84924a`, `683a525`, `1224179`). One equivalent of the flicker fix (`0575584`) has landed here; the others have not been compared.
+- **On `release-0.6` only:** `SYS_SEEK`, `fsck` in 18 pages, `tail` reading the last 2 KB, hot kernel variables in zero page.
+
+Job control, a write-back cache and file times are classed "inspiration only" in the survey.
 
 ## Platform tiers
 
@@ -43,29 +67,13 @@ The core never requires an REU or an Ultimate.
 
 ## Known limits and open issues
 
-- **Physical 1541 root-mount stall: mitigated, not root-caused.** A bounded wait in `bus_acptr` and three retries with UNTALK took about 1 boot in 4 to 13 of 13; 5 of 5 on a later build (`docs/hardware-notes.md`). A sector-by-sector read-back of the physical disk stalled at sector 0 and was closed by the owner as-is.
-- **Keyboard.** A key drop reported on hardware is unreproduced (a bounded VICE repro lost 0 keys in 6 runs). Separately, the VICE test `test_tab_no_match_does_not_fire` fails in its setUp; cause not identified (`docs/testing.md`, "Known issues").
+- **Physical 1541 root-mount stall: mitigated, not root-caused.** A bounded wait in `bus_acptr` and three retries with UNTALK took about 1 boot in 4 to 13 of 13, and 5 of 5 on a later build (`docs/hardware-notes.md`). On 2026-11-07 a single boot attempt of the candidate build stalled at LOAD, in the known stall path; it was not chased. The 0.1 release does not claim a verified physical-1541 boot. The Ultimate boot is the evidence for the Recommended tier.
+- **Keyboard.** A key drop on hardware has been seen once and not reproduced on demand. The VICE test `test_tab_no_match_does_not_fire` fails in its setUp; cause not identified (`docs/testing.md`, "Known issues").
+- **Scrolling.** The page-boundary scroll bug (`9cab610`) is fixed and checked in VICE and in the py65 simulator. The commit records no hardware run; the owner checked the release candidate by eye on the real machine.
 - **Kernel space is scarce.** 14 bytes above the BSS and `CODEHI`, guarded by a link-time assert; every kernel byte over the room costs user memory a page at a time.
 - **Modules trust each other:** no file owners, modes or memory protection (`docs/design/next/modules-v1.md`).
-- **Non-1541 drives** are nice-to-have, not milestone work. c64fs v1 compatibility is dropped.
+- **Non-1541 drives** are nice-to-have. c64fs v1 compatibility is dropped.
 
 ## Credit and licence
 
-The base system is by Konstantinos Patronas and is MIT licensed; `LICENSE` and the README's licence line are kept as they are. The fork's own code follows the same licence. Ported upstream code carries a "Ported from upstream" header naming the commit. GPL/LGPL code is not brought in (`CLAUDE.md`, licence policy). Commodore and drive ROMs are never in the repo.
-
-## Tag readiness (for the owner)
-
-State of local `main` at `3dd2264`, 2026-11-06. SHAs are on `main` (checked as ancestors).
-
-| DONE | OWNER-HELD / OPEN |
-|---|---|
-| Scroll fix: `9cab610` (scr_scroll doubled rows at page boundaries) | **Owner-held:** the tag itself |
-| Create probe: `7a34403` (creates probe before allocating; +21 kernel bytes) | **Owner-held:** banner identity line. The upstream author's email is in the banner at `src/kernel/main.s:111` and `src/bin/version.s:9`, and in `README.md` (lines 5 and 159) and `LICENSE` |
-| Footprint L1: `c64fe3a` | **Owner-held:** push decision, and the commit-trailer question. `docs/design/push-readiness.md`: 208 commits unpushed, 30 with a Co-Authored-By trailer; 181 already on origin carry one; 33 on origin are authored as "Claude" |
-| NBUF build constant: `01ebe9a` (default 6 unchanged) | **Owner-held:** fork name, and the trademark/existing-project check |
-| sh readline and TAB: `9b5e93e` | **Owner-held:** host for the web demo bundle (`docs/webdemo.md`) |
-| Shell history: `2a27321` (merge; code `5c299d0`) | **Open technical:** hardware key drop, unreproduced |
-| mount / `mod ls` polish: `e0694d1` | **Open technical:** VICE keyboard test `test_tab_no_match_does_not_fire` failing (`docs/testing.md`) |
-| Size ledger: `9353b44` (tool) and `docs/size-ledger.tsv` | **Open technical:** full suite not run on the tag candidate. Unverified: no run is recorded for `3dd2264`; `docs/process.md` requires one frozen tip per milestone |
-| Land tooling: `86187ad` (`tools/land.sh`), `fb4653e` (names dirty files and owners) | **Open technical:** image write to the physical 1541 for the candidate. Partly unverified: the docs record an image written and 5 of 5 boots on 2026-11-02, and a closed read-back on 2026-11-06 (image from `4ec614f`); nothing is recorded for `3dd2264` |
-| Branch-state docs: `c9a4a15` (`docs/wip.md`) | |
+The base system is by Konstantinos Patronas and is MIT licensed; `LICENSE` keeps his copyright line as it is, and the boot banner says so ("based on breadbin by ..."). The fork's own code follows the same licence. Ported upstream code carries a "Ported from upstream" header naming the commit. GPL/LGPL code is not brought in (`CLAUDE.md`, licence policy). Commodore and drive ROMs are never in the repo.
