@@ -1084,8 +1084,11 @@ glob:   lda zp1
 g_store:
         lda gpos+1
         bne @full
-        lda gpos
-        cmp #256-64
+        lda gpos            ; the record is d + 15 name bytes + NUL: gpos+d+16 <= 256
+        clc
+        adc g_d
+        bcs @full
+        adc #15
         bcs @full
         lda #<gbuf
         clc

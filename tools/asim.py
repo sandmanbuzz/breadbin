@@ -50,6 +50,7 @@ class Result:
         self.header = None            # the CX header of the program's image, for inspection
         self.spawns = []              # SPAWN calls: (path, argv, pin, pout, flags), children are not run
         self.cwd = "/"               # CHDIR moves it; GETCWD answers it
+        self.mem = None              # the 64 KB memory at exit, for tests that look at the program's variables
 
 
 def cx_load(data, page):
@@ -268,4 +269,5 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
         if n > limit:
             raise RuntimeError("no exit after %d steps, pc $%04X" % (n, cpu.pc))
     res.steps = n
+    res.mem = mem
     return res
