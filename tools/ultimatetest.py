@@ -167,7 +167,10 @@ class UltimateTarget(Target):
         self.u.reset()
         time.sleep(self.settle)  # let the old screen go before waiting for the new one
         self.wait_for("ready.", timeout=60)
-        self.type('load"*",8,1\n')
+        # the bus of drive A on the Ultimate: 8 unless BREADBIN_ULTIMATE_BUS says otherwise (a bench with the
+        # physical 1541 on bus 8 runs drive A on bus 9, so the load must name 9)
+        bus = int(os.environ.get("BREADBIN_ULTIMATE_BUS", "8"))
+        self.type(f'load"*",{bus},1\n')
         self.wait_for("ready.", timeout=self.boot_timeout, after="load")
         self.type("run\n")
 

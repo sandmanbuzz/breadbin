@@ -34,13 +34,26 @@ def legal_pairs():
 
 
 def committed_table():
-    """(names, rows) from src/bin/as_ops.inc: the 3-byte names in order and 13 opcodes per row."""
+    """(text, names, rows) from src/bin/as_ops.inc: the names in order, and each mnemonic's row of 13
+    entries (0xff where the mode is not legal). A record is: count, mask lo, mask hi, the legal opcodes."""
     with open(os.path.join(ROOT, "src", "bin", "as_ops.inc")) as f:
         text = f.read()
     names = re.findall(r'^\s*\.byte "([a-z]{3})"$', text, re.M)
     rows = {}
-    for m in re.finditer(r"^\s*\.byte ((?:\$[0-9a-f]{2}, ){12}\$[0-9a-f]{2})\s*; ([a-z]{3})$", text, re.M):
-        rows[m.group(2)] = [int(v[1:], 16) for v in m.group(1).split(", ")]
+    for m in re.finditer(r"^\s*\.byte (\d+), \$([0-9a-f]{2}), \$([0-9a-f]{2})((?:, \$[0-9a-f]{2})*)\s*; ([a-z]{3})$",
+                         text, re.M):
+        count, lo, hi = int(m.group(1)), int(m.group(2), 16), int(m.group(3), 16)
+        ops = [int(v[1:], 16) for v in m.group(4).split(", ") if v]
+        mask = lo | (hi << 8)
+        assert count == len(ops) == bin(mask).count("1"), m.group(5)
+        row, k = [], 0
+        for mode in range(13):
+            if mask >> mode & 1:
+                row.append(ops[k])
+                k += 1
+            else:
+                row.append(0xFF)
+        rows[m.group(5)] = row
     return text, names, rows
 
 
@@ -53,6 +66,7 @@ class OpcodeTable(unittest.TestCase):
         _, names, rows = committed_table()
         self.assertEqual(names, sorted(OPS))
         self.assertEqual(len(names), 56)
+        self.assertEqual(len(rows), 56)
         for n in OPS:
             self.assertEqual(rows[n], [OPS[n].get(m, 0xFF) for m in MODES], n)
 

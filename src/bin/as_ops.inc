@@ -57,61 +57,61 @@ mnames:
         .byte "txa"
         .byte "txs"
         .byte "tya"
-; 13 opcodes per mnemonic, by mode
+; per mnemonic: count, mode mask (bit m = mode m, low byte first), legal opcodes by mode
 optab:
-        .byte $ff, $ff, $69, $65, $75, $ff, $6d, $7d, $79, $61, $71, $ff, $ff   ; adc
-        .byte $ff, $ff, $29, $25, $35, $ff, $2d, $3d, $39, $21, $31, $ff, $ff   ; and
-        .byte $ff, $0a, $ff, $06, $16, $ff, $0e, $1e, $ff, $ff, $ff, $ff, $ff   ; asl
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $90   ; bcc
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $b0   ; bcs
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $f0   ; beq
-        .byte $ff, $ff, $ff, $24, $ff, $ff, $2c, $ff, $ff, $ff, $ff, $ff, $ff   ; bit
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $30   ; bmi
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $d0   ; bne
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $10   ; bpl
-        .byte $00, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; brk
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $50   ; bvc
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $70   ; bvs
-        .byte $18, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; clc
-        .byte $d8, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; cld
-        .byte $58, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; cli
-        .byte $b8, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; clv
-        .byte $ff, $ff, $c9, $c5, $d5, $ff, $cd, $dd, $d9, $c1, $d1, $ff, $ff   ; cmp
-        .byte $ff, $ff, $e0, $e4, $ff, $ff, $ec, $ff, $ff, $ff, $ff, $ff, $ff   ; cpx
-        .byte $ff, $ff, $c0, $c4, $ff, $ff, $cc, $ff, $ff, $ff, $ff, $ff, $ff   ; cpy
-        .byte $ff, $ff, $ff, $c6, $d6, $ff, $ce, $de, $ff, $ff, $ff, $ff, $ff   ; dec
-        .byte $ca, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; dex
-        .byte $88, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; dey
-        .byte $ff, $ff, $49, $45, $55, $ff, $4d, $5d, $59, $41, $51, $ff, $ff   ; eor
-        .byte $ff, $ff, $ff, $e6, $f6, $ff, $ee, $fe, $ff, $ff, $ff, $ff, $ff   ; inc
-        .byte $e8, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; inx
-        .byte $c8, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; iny
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $4c, $ff, $ff, $ff, $ff, $6c, $ff   ; jmp
-        .byte $ff, $ff, $ff, $ff, $ff, $ff, $20, $ff, $ff, $ff, $ff, $ff, $ff   ; jsr
-        .byte $ff, $ff, $a9, $a5, $b5, $ff, $ad, $bd, $b9, $a1, $b1, $ff, $ff   ; lda
-        .byte $ff, $ff, $a2, $a6, $ff, $b6, $ae, $ff, $be, $ff, $ff, $ff, $ff   ; ldx
-        .byte $ff, $ff, $a0, $a4, $b4, $ff, $ac, $bc, $ff, $ff, $ff, $ff, $ff   ; ldy
-        .byte $ff, $4a, $ff, $46, $56, $ff, $4e, $5e, $ff, $ff, $ff, $ff, $ff   ; lsr
-        .byte $ea, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; nop
-        .byte $ff, $ff, $09, $05, $15, $ff, $0d, $1d, $19, $01, $11, $ff, $ff   ; ora
-        .byte $48, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; pha
-        .byte $08, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; php
-        .byte $68, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; pla
-        .byte $28, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; plp
-        .byte $ff, $2a, $ff, $26, $36, $ff, $2e, $3e, $ff, $ff, $ff, $ff, $ff   ; rol
-        .byte $ff, $6a, $ff, $66, $76, $ff, $6e, $7e, $ff, $ff, $ff, $ff, $ff   ; ror
-        .byte $40, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; rti
-        .byte $60, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; rts
-        .byte $ff, $ff, $e9, $e5, $f5, $ff, $ed, $fd, $f9, $e1, $f1, $ff, $ff   ; sbc
-        .byte $38, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; sec
-        .byte $f8, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; sed
-        .byte $78, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; sei
-        .byte $ff, $ff, $ff, $85, $95, $ff, $8d, $9d, $99, $81, $91, $ff, $ff   ; sta
-        .byte $ff, $ff, $ff, $86, $ff, $96, $8e, $ff, $ff, $ff, $ff, $ff, $ff   ; stx
-        .byte $ff, $ff, $ff, $84, $94, $ff, $8c, $ff, $ff, $ff, $ff, $ff, $ff   ; sty
-        .byte $aa, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; tax
-        .byte $a8, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; tay
-        .byte $ba, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; tsx
-        .byte $8a, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; txa
-        .byte $9a, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; txs
-        .byte $98, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; tya
+        .byte 8, $dc, $07, $69, $65, $75, $6d, $7d, $79, $61, $71   ; adc
+        .byte 8, $dc, $07, $29, $25, $35, $2d, $3d, $39, $21, $31   ; and
+        .byte 5, $da, $00, $0a, $06, $16, $0e, $1e   ; asl
+        .byte 1, $00, $10, $90   ; bcc
+        .byte 1, $00, $10, $b0   ; bcs
+        .byte 1, $00, $10, $f0   ; beq
+        .byte 2, $48, $00, $24, $2c   ; bit
+        .byte 1, $00, $10, $30   ; bmi
+        .byte 1, $00, $10, $d0   ; bne
+        .byte 1, $00, $10, $10   ; bpl
+        .byte 1, $01, $00, $00   ; brk
+        .byte 1, $00, $10, $50   ; bvc
+        .byte 1, $00, $10, $70   ; bvs
+        .byte 1, $01, $00, $18   ; clc
+        .byte 1, $01, $00, $d8   ; cld
+        .byte 1, $01, $00, $58   ; cli
+        .byte 1, $01, $00, $b8   ; clv
+        .byte 8, $dc, $07, $c9, $c5, $d5, $cd, $dd, $d9, $c1, $d1   ; cmp
+        .byte 3, $4c, $00, $e0, $e4, $ec   ; cpx
+        .byte 3, $4c, $00, $c0, $c4, $cc   ; cpy
+        .byte 4, $d8, $00, $c6, $d6, $ce, $de   ; dec
+        .byte 1, $01, $00, $ca   ; dex
+        .byte 1, $01, $00, $88   ; dey
+        .byte 8, $dc, $07, $49, $45, $55, $4d, $5d, $59, $41, $51   ; eor
+        .byte 4, $d8, $00, $e6, $f6, $ee, $fe   ; inc
+        .byte 1, $01, $00, $e8   ; inx
+        .byte 1, $01, $00, $c8   ; iny
+        .byte 2, $40, $08, $4c, $6c   ; jmp
+        .byte 1, $40, $00, $20   ; jsr
+        .byte 8, $dc, $07, $a9, $a5, $b5, $ad, $bd, $b9, $a1, $b1   ; lda
+        .byte 5, $6c, $01, $a2, $a6, $b6, $ae, $be   ; ldx
+        .byte 5, $dc, $00, $a0, $a4, $b4, $ac, $bc   ; ldy
+        .byte 5, $da, $00, $4a, $46, $56, $4e, $5e   ; lsr
+        .byte 1, $01, $00, $ea   ; nop
+        .byte 8, $dc, $07, $09, $05, $15, $0d, $1d, $19, $01, $11   ; ora
+        .byte 1, $01, $00, $48   ; pha
+        .byte 1, $01, $00, $08   ; php
+        .byte 1, $01, $00, $68   ; pla
+        .byte 1, $01, $00, $28   ; plp
+        .byte 5, $da, $00, $2a, $26, $36, $2e, $3e   ; rol
+        .byte 5, $da, $00, $6a, $66, $76, $6e, $7e   ; ror
+        .byte 1, $01, $00, $40   ; rti
+        .byte 1, $01, $00, $60   ; rts
+        .byte 8, $dc, $07, $e9, $e5, $f5, $ed, $fd, $f9, $e1, $f1   ; sbc
+        .byte 1, $01, $00, $38   ; sec
+        .byte 1, $01, $00, $f8   ; sed
+        .byte 1, $01, $00, $78   ; sei
+        .byte 7, $d8, $07, $85, $95, $8d, $9d, $99, $81, $91   ; sta
+        .byte 3, $68, $00, $86, $96, $8e   ; stx
+        .byte 3, $58, $00, $84, $94, $8c   ; sty
+        .byte 1, $01, $00, $aa   ; tax
+        .byte 1, $01, $00, $a8   ; tay
+        .byte 1, $01, $00, $ba   ; tsx
+        .byte 1, $01, $00, $8a   ; txa
+        .byte 1, $01, $00, $9a   ; txs
+        .byte 1, $01, $00, $98   ; tya

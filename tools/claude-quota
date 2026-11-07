@@ -1,0 +1,751 @@
+#!/usr/bin/env python3
+"""claude-quota — point-in-time and historical Claude subscription quota.
+
+Uses the unofficial OAuth usage endpoint that Claude Code's /usage calls.
+Stdlib only. Output is JSON by default so agents can parse it.
+
+Commands
+  now      [--record] [--human]      Fetch current utilization (+ burn projection from history)
+  poll     [--quiet]                 Fetch and record; only writes a new row when values change
+  history  [--since 24h] [--bucket five_hour] [--format json|csv]
+  mark     "text" [--tag swarm]      Record a workload event to correlate against usage
+  raw                                Print the raw upstream payload (debug schema drift)
+  status   [--json|--human] [--window-hours N]
+                                     Read ONLY the history DB (no network, no token): latest
+                                     values, burn, last good poll, staleness, recent failures.
+                                     Exit 5 if the DB is missing/empty, 6 if stale.
+
+Env
+  CLAUDE_QUOTA_DB        SQLite path (default ~/.local/share/claude-quota/quota.db; holds raw
+                         payloads: keep private, never commit; created 0600, dir 0700)
+  CLAUDE_QUOTA_TOKEN     OAuth access token (overrides credential lookup)
+  CLAUDE_CREDENTIALS     Path to Claude Code credentials JSON (default ~/.claude/.credentials.json)
+  CLAUDE_QUOTA_BASE_URL  Override API base (default https://api.anthropic.com)
+
+Exit codes: 0 ok, 2 auth problem (token missing/expired), 3 upstream/network error, 4 parse error,
+5 status: DB missing or empty, 6 status: stale (no successful poll in 15 min).
+"""
+import argparse
+import datetime as dt
+import json
+import os
+import platform
+import sqlite3
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+BASE_URL = os.environ.get("CLAUDE_QUOTA_BASE_URL", "https://api.anthropic.com")
+USAGE_PATH = "/api/oauth/usage"
+BETA_HEADER = "oauth-2025-04-20"
+DB_PATH = os.path.expanduser(
+    os.environ.get("CLAUDE_QUOTA_DB", "~/.local/share/claude-quota/quota.db"))
+CRED_PATH = os.path.expanduser(
+    os.environ.get("CLAUDE_CREDENTIALS", "~/.claude/.credentials.json"))
+
+
+class QuotaError(Exception):
+    def __init__(self, msg, code):
+        super().__init__(msg)
+        self.code = code
+
+
+# ---------------------------------------------------------------- time utils
+
+def utcnow():
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def iso(t):
+    return t.astimezone(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def parse_ts(v):
+    """Accept ISO strings or unix seconds; return aware datetime or None."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return dt.datetime.fromtimestamp(v, dt.timezone.utc)
+    s = str(v).replace("Z", "+00:00")
+    try:
+        t = dt.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+
+
+def parse_since(s):
+    """'24h', '7d', '90m' or an ISO timestamp."""
+    if s is None:
+        return None
+    units = {"m": 60, "h": 3600, "d": 86400}
+    if s[-1:] in units and s[:-1].replace(".", "", 1).isdigit():
+        return utcnow() - dt.timedelta(seconds=float(s[:-1]) * units[s[-1]])
+    t = parse_ts(s)
+    if not t:
+        raise QuotaError(f"can't parse --since {s!r}", 4)
+    return t
+
+
+# ---------------------------------------------------------------- auth
+
+def get_token():
+    tok = os.environ.get("CLAUDE_QUOTA_TOKEN")
+    if tok:
+        return tok.strip()
+    blob = None
+    if os.path.exists(CRED_PATH):
+        with open(CRED_PATH) as f:
+            blob = f.read()
+    elif platform.system() == "Darwin":
+        try:
+            blob = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                capture_output=True, text=True, check=True, timeout=10).stdout
+        except (subprocess.SubprocessError, FileNotFoundError):
+            blob = None
+    if not blob:
+        raise QuotaError("no OAuth token: log in with Claude Code, or set CLAUDE_QUOTA_TOKEN", 2)
+    try:
+        oauth = json.loads(blob).get("claudeAiOauth", {})
+    except json.JSONDecodeError:
+        raise QuotaError("credentials blob is not JSON", 2)
+    tok = oauth.get("accessToken")
+    if not tok:
+        raise QuotaError("credentials found but no claudeAiOauth.accessToken", 2)
+    exp = oauth.get("expiresAt")  # ms epoch
+    if exp and exp / 1000 < utcnow().timestamp():
+        raise QuotaError("OAuth token expired; run any Claude Code command to refresh it", 2)
+    return tok
+
+
+# ---------------------------------------------------------------- fetch + normalize
+
+def fetch_raw():
+    req = urllib.request.Request(BASE_URL + USAGE_PATH, headers={
+        "Authorization": f"Bearer {get_token()}",
+        "anthropic-beta": BETA_HEADER,
+        "Content-Type": "application/json",
+        "User-Agent": "claude-quota/1.0",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            body = r.read().decode()
+    except urllib.error.HTTPError as e:
+        code = 2 if e.code in (401, 403) else 3
+        raise QuotaError(f"HTTP {e.code} from usage endpoint", code)
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise QuotaError(f"network error: {e}", 3)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        raise QuotaError("usage endpoint returned non-JSON", 4)
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize(raw):
+    """Collapse whatever shape upstream sends into {bucket: {utilization, resets_at}}.
+
+    Handles the flat keys (five_hour, seven_day, seven_day_<model>) and a
+    generic `limits` array, since the schema has been drifting between the two.
+    """
+    buckets = {}
+
+    def add(name, obj):
+        if not isinstance(obj, dict):
+            return
+        u = _num(obj.get("utilization", obj.get("used_percentage", obj.get("percent_used"))))
+        if u is None:
+            return
+        r = parse_ts(obj.get("resets_at", obj.get("reset_at", obj.get("resets"))))
+        buckets[name] = {"utilization": u, "resets_at": iso(r) if r else None}
+
+    for k, v in raw.items():
+        if k in ("limits", "extra_usage"):
+            continue
+        add(k, v)
+
+    for item in raw.get("limits") or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("type") or item.get("id")
+        scope = item.get("scope") or {}
+        model = (scope.get("model") or {}).get("display_name") if isinstance(scope, dict) else None
+        window = item.get("window") or item.get("period")
+        if not name:
+            name = "_".join(str(p) for p in (window, model) if p) or "limit"
+        elif model and model.lower() not in str(name).lower():
+            name = f"{name}_{model}"
+        add(str(name).lower().replace(" ", "_"), item)
+
+    extra = raw.get("extra_usage")
+    if isinstance(extra, dict) and extra.get("is_enabled"):
+        buckets["extra_usage"] = {
+            "utilization": _num(extra.get("utilization")),
+            "resets_at": None,
+            "used_credits": _num(extra.get("used_credits")),
+            "monthly_limit": _num(extra.get("monthly_limit")),
+        }
+    return buckets
+
+
+def fingerprint(buckets):
+    return json.dumps(buckets, sort_keys=True)
+
+
+# ---------------------------------------------------------------- storage
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS snapshots (
+  id INTEGER PRIMARY KEY,
+  first_seen TEXT NOT NULL,     -- when these values were first observed
+  last_seen  TEXT NOT NULL,     -- last poll that still saw them (unchanged)
+  fingerprint TEXT NOT NULL,
+  raw TEXT NOT NULL             -- full upstream payload, for re-parsing after schema drift
+);
+CREATE TABLE IF NOT EXISTS buckets (
+  snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+  bucket TEXT NOT NULL,
+  utilization REAL,
+  resets_at TEXT,
+  PRIMARY KEY (snapshot_id, bucket)
+);
+CREATE TABLE IF NOT EXISTS marks (
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL,
+  tag TEXT,
+  text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS polls (
+  ts TEXT PRIMARY KEY,
+  ok INTEGER NOT NULL,
+  changed INTEGER,
+  error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_snap_first ON snapshots(first_seen);
+CREATE INDEX IF NOT EXISTS idx_marks_ts ON marks(ts);
+"""
+
+
+def db(create=True):
+    """Open the history DB. create=False: read-only, None if it does not exist."""
+    if not create:
+        if not os.path.exists(DB_PATH):
+            return None
+        con = sqlite3.connect("file:" + urllib.parse.quote(DB_PATH) + "?mode=ro",
+                              uri=True, timeout=30)
+        con.row_factory = sqlite3.Row
+        return con
+    d = os.path.dirname(DB_PATH)
+    if d and not os.path.isdir(d):
+        os.makedirs(d, mode=0o700, exist_ok=True)
+    if not os.path.exists(DB_PATH):
+        os.close(os.open(DB_PATH, os.O_CREAT | os.O_WRONLY, 0o600))
+    con = sqlite3.connect(DB_PATH, timeout=30)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")  # concurrent agents reading while cron writes
+    con.executescript(SCHEMA)
+    return con
+
+
+def record(con, raw, buckets, now):
+    """Insert a snapshot only if values changed; otherwise extend last_seen."""
+    fp = fingerprint(buckets)
+    last = con.execute("SELECT id, fingerprint FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
+    with con:
+        if last and last["fingerprint"] == fp:
+            con.execute("UPDATE snapshots SET last_seen=? WHERE id=?", (iso(now), last["id"]))
+            changed = False
+        else:
+            cur = con.execute(
+                "INSERT INTO snapshots(first_seen,last_seen,fingerprint,raw) VALUES (?,?,?,?)",
+                (iso(now), iso(now), fp, json.dumps(raw)))
+            con.executemany(
+                "INSERT INTO buckets VALUES (?,?,?,?)",
+                [(cur.lastrowid, b, v.get("utilization"), v.get("resets_at"))
+                 for b, v in buckets.items()])
+            changed = True
+        con.execute("INSERT OR REPLACE INTO polls VALUES (?,?,?,NULL)", (iso(now), 1, int(changed)))
+    return changed
+
+
+def log_failure(con, now, err):
+    with con:
+        con.execute("INSERT OR REPLACE INTO polls VALUES (?,?,NULL,?)", (iso(now), 0, str(err)))
+
+
+# ---------------------------------------------------------------- analysis
+
+RESET_SLOP = 120  # seconds
+
+
+def burn(con, bucket, current, now):
+    """Linear fit of utilization over the current window (resets_at within 120 s).
+
+    Returns rate in %/hour and projected utilization at reset. Uses both
+    first_seen and last_seen of each snapshot so plateaus count as data.
+    """
+    resets_at = current.get("resets_at")
+    if not resets_at or current.get("utilization") is None:
+        return None
+    reset_t = parse_ts(resets_at)
+    rows = []
+    if con is not None:
+        # resets_at jitters by a few seconds between polls: match within RESET_SLOP
+        for r in con.execute("""
+                SELECT s.first_seen, s.last_seen, b.utilization, b.resets_at
+                FROM buckets b JOIN snapshots s ON s.id=b.snapshot_id
+                WHERE b.bucket=? AND b.resets_at IS NOT NULL ORDER BY s.first_seen""",
+                (bucket,)):
+            t = parse_ts(r["resets_at"])
+            if t and abs((t - reset_t).total_seconds()) <= RESET_SLOP:
+                rows.append(r)
+    pts = []
+    for r in rows:
+        for t in {r["first_seen"], r["last_seen"]}:
+            pts.append((parse_ts(t).timestamp(), r["utilization"]))
+    pts.append((now.timestamp(), current["utilization"]))
+    pts = sorted(set(pts))
+    out = {"hours_to_reset": round((reset_t - now).total_seconds() / 3600, 2)}
+    if len(pts) < 2 or pts[-1][0] - pts[0][0] < 300:
+        out["note"] = "not enough history in this window for a rate"
+        return out
+    n = len(pts)
+    mx = sum(p[0] for p in pts) / n
+    my = sum(p[1] for p in pts) / n
+    den = sum((p[0] - mx) ** 2 for p in pts)
+    slope = sum((p[0] - mx) * (p[1] - my) for p in pts) / den if den else 0.0  # %/sec
+    rate_h = slope * 3600
+    remaining = max(0.0, 100.0 - current["utilization"])
+    out["rate_pct_per_hour"] = round(rate_h, 3)
+    out["projected_at_reset"] = round(
+        current["utilization"] + rate_h * out["hours_to_reset"], 1)
+    out["hours_until_cap"] = round(remaining / rate_h, 2) if rate_h > 0 else None
+    out["will_cap_before_reset"] = bool(
+        out["hours_until_cap"] is not None and out["hours_until_cap"] < out["hours_to_reset"])
+    out["samples"] = n
+    return out
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_now(a):
+    now = utcnow()
+    raw = fetch_raw()
+    buckets = normalize(raw)
+    if not buckets:
+        raise QuotaError("payload had no recognizable buckets; run `claude-quota raw`", 4)
+    con = db() if a.record else db(create=False)
+    changed = record(con, raw, buckets, now) if a.record else None
+    result = {"fetched_at": iso(now), "buckets": {}}
+    for name, v in buckets.items():
+        entry = dict(v)
+        if v.get("utilization") is not None:
+            entry["remaining"] = round(100 - v["utilization"], 1)
+        b = burn(con, name, v, now)
+        if b:
+            entry["burn"] = b
+        result["buckets"][name] = entry
+    if a.record:
+        result["recorded"] = changed
+    if a.human:
+        print_human(result)
+    else:
+        print(json.dumps(result, indent=2))
+
+
+def print_human(result):
+    print(f"as of {result['fetched_at']}")
+    for name, v in result["buckets"].items():
+        u = v.get("utilization")
+        line = f"  {name:<22} {u if u is not None else '-':>6}%"
+        if v.get("resets_at"):
+            line += f"  resets {v['resets_at']}"
+        b = v.get("burn") or {}
+        if "rate_pct_per_hour" in b:
+            line += f"  {b['rate_pct_per_hour']:+.2f}%/h → {b['projected_at_reset']}% at reset"
+            if b.get("will_cap_before_reset"):
+                line += f"  ⚠ caps in {b['hours_until_cap']}h"
+        print(line)
+
+
+def cmd_poll(a):
+    now = utcnow()
+    con = db()
+    try:
+        raw = fetch_raw()
+        buckets = normalize(raw)
+        if not buckets:
+            raise QuotaError("payload had no recognizable buckets", 4)
+    except QuotaError as e:
+        log_failure(con, now, e)
+        raise
+    changed = record(con, raw, buckets, now)
+    if not a.quiet:
+        print(json.dumps({"ts": iso(now), "changed": changed}))
+
+
+STALE_MIN = 15
+
+
+def _status_empty(msg):
+    print(json.dumps({"error": msg, "exit_code": 5}))
+    sys.exit(5)
+
+
+def build_status(con, now, window_hours=None):
+    """Everything `status` reports, from the DB alone. Returns None if no snapshots."""
+    try:
+        snap = con.execute("SELECT id, first_seen, last_seen FROM snapshots "
+                           "ORDER BY id DESC LIMIT 1").fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    if not snap:
+        return None
+    try:
+        return _build_status(con, snap, now, window_hours)
+    except sqlite3.DatabaseError:
+        return None
+
+
+def _build_status(con, snap, now, window_hours):
+    out = {"as_of": iso(now), "snapshot_first_seen": snap["first_seen"],
+           "snapshot_last_seen": snap["last_seen"], "buckets": {}}
+    for r in con.execute("SELECT bucket, utilization, resets_at FROM buckets "
+                         "WHERE snapshot_id=? ORDER BY bucket", (snap["id"],)):
+        cur = {"utilization": r["utilization"], "resets_at": r["resets_at"]}
+        entry = dict(cur)
+        if r["utilization"] is not None:
+            entry["remaining"] = round(100 - r["utilization"], 1)
+        b = burn(con, r["bucket"], cur, now)
+        if b:
+            entry["burn"] = b
+        if window_hours is not None:
+            entry["window"] = window_delta(con, r["bucket"], cur, now, window_hours)
+        out["buckets"][r["bucket"]] = entry
+    ok = con.execute("SELECT ts FROM polls WHERE ok=1 ORDER BY ts DESC LIMIT 1").fetchone()
+    t = parse_ts(ok["ts"]) if ok else None
+    out["last_poll_ok"] = ok["ts"] if ok else None
+    out["last_poll_age_min"] = round((now - t).total_seconds() / 60, 1) if t else None
+    out["stale"] = bool(t is None or (now - t).total_seconds() > STALE_MIN * 60)
+    hour_ago = iso(now - dt.timedelta(hours=1))
+    fails = con.execute("SELECT ts, error FROM polls WHERE ok=0 AND ts>=? ORDER BY ts",
+                        (hour_ago,)).fetchall()
+    out["recent_failures"] = {"count": len(fails),
+                              "last_error": fails[-1]["error"] if fails else None,
+                              "last_at": fails[-1]["ts"] if fails else None}
+    if window_hours is not None:
+        out["window_hours"] = window_hours
+    names = list(out["buckets"])
+    rates, tier_now, reason_now = assess(con, names, now, out["stale"])
+    for name, r in rates.items():
+        out["buckets"][name]["rate"] = {k: v for k, v in r.items() if k != "utilization"}
+    then = now - dt.timedelta(minutes=HOLD_MIN)
+    _, tier_then, reason_then = assess(con, names, then, _stale_at(con, then))
+    has_then = any(_bucket_rate(con, n, then) for n in ("seven_day", "five_hour"))
+    out["tier_now"] = tier_now
+    out["tier_15m_ago"] = tier_then if has_then else None
+    if has_then and TIER_ORDER[tier_then] > TIER_ORDER[tier_now]:
+        out["suggested_tier"] = tier_then
+        out["reason"] = f"held from {HOLD_MIN} min ago (now {tier_now}): {reason_then}"
+    else:
+        out["suggested_tier"] = tier_now
+        out["reason"] = reason_now
+    return out
+
+
+# ---------------------------------------------------------------- rate-driven tier
+
+RATE_WINDOWS = (("1h", 1), ("6h", 6), ("24h", 24))
+GAP_S = 600               # tolerated gap between the last sighting of a value and the cutoff
+MIN_SPAN_S = 600          # a rate needs at least 10 minutes between readings
+G_RATIO, R_RATIO = 0.7, 1.0
+FLOOR_PCT = 97.0          # seven_day at or above this: soft all-stop
+FIVE_HOUR_RED = 90.0      # five_hour at or above this is Red whatever the rate
+HOLD_MIN = 15             # a step toward Green must hold in two readings this far apart
+TIER_ORDER = {"G": 0, "Y": 1, "R": 2, "FLOOR": 3}
+
+
+def _measure(rows, all_rows, T, hours):
+    """Net utilization change over the trailing `hours` as of T, in %/hour.
+
+    rows: this bucket's snapshots (first_seen <= T) in the current quota window, oldest first;
+    all_rows: the same without the window filter. A value is taken to hold from first_seen until
+    the next snapshot, so the baseline at the cutoff is the snapshot covering it. A reset inside
+    the window leaves only the span since the reset (partial).
+    """
+    cutoff = T - dt.timedelta(hours=hours)
+    last = rows[-1]
+    end_t = min(parse_ts(last["last_seen"]), T)
+    base = None
+    for r in rows:
+        # the value must have been seen near the cutoff: a longer gap is unobserved change
+        if (parse_ts(r["first_seen"]) <= cutoff
+                and (parse_ts(r["last_seen"]) - cutoff).total_seconds() >= -GAP_S):
+            base = r
+    partial = base is None
+    if partial:
+        base = next((r for r in rows if parse_ts(r["first_seen"]) > cutoff), rows[0])
+        start_t = parse_ts(base["first_seen"])
+    else:
+        start_t = cutoff
+    reset = any(parse_ts(r["last_seen"]) >= cutoff for r in all_rows if r not in rows)
+    stamps = set()
+    for r in rows:
+        stamps.add(parse_ts(r["first_seen"]))
+        stamps.add(min(parse_ts(r["last_seen"]), T))
+    span = (end_t - start_t).total_seconds()
+    out = {"pct_per_hour": None, "span_hours": round(max(span, 0) / 3600, 2),
+           "partial": partial, "reset_in_window": reset}
+    if len(stamps) < 2 or span < MIN_SPAN_S:
+        return out
+    out["pct_per_hour"] = round((last["utilization"] - base["utilization"]) / (span / 3600), 3)
+    return out
+
+
+def _bucket_rate(con, bucket, T):
+    """The `rate` block for one bucket as the DB stood at T, or None without data."""
+    q = ("SELECT s.first_seen, s.last_seen, b.utilization, b.resets_at FROM buckets b "
+         "JOIN snapshots s ON s.id=b.snapshot_id WHERE b.bucket=? AND b.utilization IS NOT NULL "
+         "AND s.first_seen<=? ORDER BY s.first_seen, s.id")
+    all_rows = con.execute(q, (bucket, iso(T))).fetchall()
+    if not all_rows:
+        return None
+    cur = all_rows[-1]
+    reset_t = parse_ts(cur["resets_at"])
+    rows = [r for r in all_rows if reset_t is None or (
+        parse_ts(r["resets_at"]) and abs((parse_ts(r["resets_at"]) - reset_t).total_seconds())
+        <= RESET_SLOP)]
+    util = cur["utilization"]
+    rate = {"utilization": util,
+            "windows": {n: _measure(rows, all_rows, T, h) for n, h in RATE_WINDOWS},
+            "basis": None, "measured_pct_per_hour": None,
+            "hours_to_reset": None, "budget_rate_pct_per_hour": None, "ratio": None}
+    for n, _ in RATE_WINDOWS:
+        v = rate["windows"][n]["pct_per_hour"]
+        if v is not None:
+            rate["basis"], rate["measured_pct_per_hour"] = n, v
+            break
+    if reset_t is not None:
+        h = (reset_t - T).total_seconds() / 3600
+        rate["hours_to_reset"] = round(h, 2)
+        if h > 0:
+            budget = max(0.0, 100.0 - util) / h
+            rate["budget_rate_pct_per_hour"] = round(budget, 3)
+            m = rate["measured_pct_per_hour"]
+            if m is not None:
+                if budget > 0:  # at 100% there is no budget: _bucket_tier calls that R
+                    rate["ratio"] = round(m / budget, 3)
+    if bucket == "seven_day":
+        rate["floor_headroom_pct"] = round(FLOOR_PCT - util, 1)
+    return rate
+
+
+def _bucket_tier(name, rate):
+    """(tier, reason) for seven_day or five_hour from its rate block."""
+    util = rate["utilization"]
+    if name == "seven_day" and util >= FLOOR_PCT:
+        return "FLOOR", f"seven_day at {util:g}% (floor {FLOOR_PCT:g}%): soft all-stop: hand to owner"
+    if util >= 100:
+        return "R", f"{name} at {util:g}%: at cap"
+    if name == "five_hour" and util >= FIVE_HOUR_RED:
+        return "R", f"five_hour at {util:g}% (>= {FIVE_HOUR_RED:g}%)"
+    if rate["hours_to_reset"] is not None and rate["hours_to_reset"] <= 0:
+        return "Y", f"{name} reset time has passed; data is old"
+    ratio = rate["ratio"]
+    if ratio is None:
+        m = rate["measured_pct_per_hour"]
+        if m is not None and m > 0 and rate["budget_rate_pct_per_hour"] == 0:
+            return "R", f"{name} has no budget left and is still burning"
+        return "Y", f"{name}: rate unknown"
+    desc = f"{name}: {rate['measured_pct_per_hour']:+.2f}%/h ({rate['basis']}) vs budget " \
+           f"{rate['budget_rate_pct_per_hour']:.2f}%/h, ratio {ratio:.2f}"
+    if ratio >= R_RATIO:
+        return "R", desc + " (projected to cap before reset)"
+    if ratio >= G_RATIO:
+        return "Y", desc
+    return "G", desc
+
+
+def assess(con, bucket_names, T, stale):
+    """Rate blocks per bucket plus the overall tier as the DB stood at T."""
+    rates, tiers = {}, []
+    for name in bucket_names:
+        r = _bucket_rate(con, name, T)
+        if r is None:
+            continue
+        rates[name] = r
+        if name in ("seven_day", "five_hour"):
+            r["tier"], r["tier_reason"] = _bucket_tier(name, r)
+            tiers.append((r["tier"], r["tier_reason"]))
+    if not tiers:
+        tier, reason = "Y", "no seven_day or five_hour data"
+    else:
+        tier, reason = max(tiers, key=lambda x: TIER_ORDER[x[0]])
+    if stale and TIER_ORDER[tier] < TIER_ORDER["Y"]:
+        tier, reason = "Y", "poller stale (no good poll in %d min); " % STALE_MIN + reason
+    return rates, tier, reason
+
+
+def _stale_at(con, T):
+    ok = con.execute("SELECT ts FROM polls WHERE ok=1 AND ts<=? ORDER BY ts DESC LIMIT 1",
+                     (iso(T),)).fetchone()
+    t = parse_ts(ok["ts"]) if ok else None
+    return bool(t is None or (T - t).total_seconds() > STALE_MIN * 60)
+
+
+def window_delta(con, bucket, cur, now, hours):
+    """Net change in utilization over the last `hours`, from snapshots.
+
+    Baseline: the newest snapshot first seen at or before the cutoff, else the oldest one
+    in the window (partial=true). A reset inside the window makes the delta net, maybe negative.
+    """
+    cutoff = iso(now - dt.timedelta(hours=hours))
+    q = ("SELECT s.first_seen, b.utilization, b.resets_at FROM buckets b "
+         "JOIN snapshots s ON s.id=b.snapshot_id WHERE b.bucket=? AND b.utilization IS NOT NULL ")
+    base = con.execute(q + "AND s.first_seen<=? ORDER BY s.first_seen DESC LIMIT 1",
+                       (bucket, cutoff)).fetchone()
+    partial = base is None
+    if partial:
+        base = con.execute(q + "ORDER BY s.first_seen LIMIT 1", (bucket,)).fetchone()
+    if base is None or cur.get("utilization") is None:
+        return {"delta": None}
+    a, b = parse_ts(base["resets_at"]), parse_ts(cur.get("resets_at"))
+    reset = bool(a and b and abs((a - b).total_seconds()) > RESET_SLOP)
+    return {"delta": round(cur["utilization"] - base["utilization"], 2),
+            "from": base["utilization"], "from_ts": base["first_seen"],
+            "partial": partial, "reset_in_window": reset}
+
+
+def cmd_status(a):
+    now = utcnow()
+    con = db(create=False)
+    st = build_status(con, now, a.window_hours) if con is not None else None
+    if st is None:
+        _status_empty("history DB missing or empty; run `claude-quota poll`")
+    if a.human:
+        print(f"as of {st['as_of']}")
+        print(f"  tier: {st['suggested_tier']} ({st['reason']}); now {st['tier_now']}, "
+              f"{HOLD_MIN} min ago {st['tier_15m_ago']}")
+        for name, v in st["buckets"].items():
+            u = v.get("utilization")
+            line = f"  {name:<22} {u if u is not None else '-':>6}%"
+            if v.get("resets_at"):
+                line += f"  resets {v['resets_at']}"
+            b = v.get("burn") or {}
+            if "rate_pct_per_hour" in b:
+                line += f"  {b['rate_pct_per_hour']:+.2f}%/h -> {b['projected_at_reset']}% at reset"
+                if b.get("will_cap_before_reset"):
+                    line += f"  CAPS in {b['hours_until_cap']}h"
+            w = v.get("window")
+            if w and w.get("delta") is not None:
+                line += f"  {w['delta']:+.1f} over {st['window_hours']}h"
+            print(line)
+            rt = v.get("rate")
+            if rt:
+                m, bd, ra = rt["measured_pct_per_hour"], rt["budget_rate_pct_per_hour"], rt["ratio"]
+                print("    rate " + ("unknown" if m is None else f"{m:+.2f}%/h ({rt['basis']})")
+                      + "  budget " + ("-" if bd is None else f"{bd:.2f}%/h")
+                      + "  ratio " + ("-" if ra is None else f"{ra:.2f}")
+                      + (f"  tier {rt['tier']}" if "tier" in rt else "")
+                      + (f"  floor headroom {rt['floor_headroom_pct']}%"
+                         if "floor_headroom_pct" in rt else ""))
+        print(f"  last good poll: {st['last_poll_ok']} ({st['last_poll_age_min']} min ago)"
+              + ("  STALE" if st["stale"] else ""))
+        rf = st["recent_failures"]
+        if rf["count"]:
+            print(f"  failures in last hour: {rf['count']}; last: {rf['last_error']}")
+    else:
+        print(json.dumps(st, indent=2))
+    if st["stale"]:
+        sys.exit(6)
+
+
+def cmd_history(a):
+    con = db()
+    since = parse_since(a.since)
+    q = """SELECT s.first_seen, s.last_seen, b.bucket, b.utilization, b.resets_at
+           FROM buckets b JOIN snapshots s ON s.id=b.snapshot_id WHERE 1=1"""
+    args = []
+    if since:
+        q += " AND s.last_seen >= ?"
+        args.append(iso(since))
+    if a.bucket:
+        q += " AND b.bucket = ?"
+        args.append(a.bucket)
+    q += " ORDER BY s.first_seen, b.bucket"
+    rows = [dict(r) for r in con.execute(q, args)]
+    mq = "SELECT ts, tag, text FROM marks" + (" WHERE ts >= ?" if since else "") + " ORDER BY ts"
+    marks = [dict(r) for r in con.execute(mq, [iso(since)] if since else [])]
+    if a.format == "csv":
+        import csv
+        w = csv.writer(sys.stdout)
+        w.writerow(["kind", "first_seen", "last_seen", "bucket", "utilization", "resets_at", "tag", "text"])
+        for r in rows:
+            w.writerow(["usage", r["first_seen"], r["last_seen"], r["bucket"],
+                        r["utilization"], r["resets_at"], "", ""])
+        for m in marks:
+            w.writerow(["mark", m["ts"], m["ts"], "", "", "", m["tag"] or "", m["text"]])
+    else:
+        print(json.dumps({"usage": rows, "marks": marks}, indent=2))
+
+
+def cmd_mark(a):
+    con = db()
+    now = iso(utcnow())
+    with con:
+        con.execute("INSERT INTO marks(ts,tag,text) VALUES (?,?,?)", (now, a.tag, a.text))
+    print(json.dumps({"ts": now, "tag": a.tag, "text": a.text}))
+
+
+def cmd_raw(a):
+    print(json.dumps(fetch_raw(), indent=2))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="claude-quota", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("now", help="current utilization + burn projection")
+    s.add_argument("--record", action="store_true", help="also store it in the history DB")
+    s.add_argument("--human", action="store_true", help="readable output instead of JSON")
+    s.set_defaults(fn=cmd_now)
+    s = sub.add_parser("poll", help="fetch and record if changed (for cron/launchd)")
+    s.add_argument("--quiet", action="store_true")
+    s.set_defaults(fn=cmd_poll)
+    s = sub.add_parser("history", help="dump recorded usage and marks")
+    s.add_argument("--since", help="e.g. 24h, 7d, 90m, or an ISO timestamp")
+    s.add_argument("--bucket")
+    s.add_argument("--format", choices=["json", "csv"], default="json")
+    s.set_defaults(fn=cmd_history)
+    s = sub.add_parser("mark", help="record a workload event")
+    s.add_argument("text")
+    s.add_argument("--tag")
+    s.set_defaults(fn=cmd_mark)
+    s = sub.add_parser("status", help="read the DB only: latest, burn, staleness (no network)")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--json", action="store_true", help="JSON output (default)")
+    g.add_argument("--human", action="store_true", help="readable output")
+    s.add_argument("--window-hours", type=float, metavar="N",
+                   help="add net utilization change per bucket over the last N hours")
+    s.set_defaults(fn=cmd_status)
+    s = sub.add_parser("raw", help="print raw upstream payload")
+    s.set_defaults(fn=cmd_raw)
+    a = p.parse_args()
+    try:
+        a.fn(a)
+    except QuotaError as e:
+        print(json.dumps({"error": str(e), "exit_code": e.code}), file=sys.stderr)
+        sys.exit(e.code)
+
+
+if __name__ == "__main__":
+    main()
