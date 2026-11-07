@@ -148,15 +148,15 @@ class Boot(unittest.TestCase):
         self.assertNotIn("count", self.run_("ps"))
 
     def test_15_too_many_processes(self):
-        # init + sh (login has exec'd into it) + 10 jobs fill the 12-slot process table
+        # init + sh (login has exec'd into it) + 8 jobs fill the 10-slot process table
         pids = []
-        for _ in range(10):
+        for _ in range(8):
             pids.append(self.run_("sleep 9999 &").strip("[]"))
         out = self.v.run("sleep 9999 &", clear=False)
         self.assertIn("too many processes", out)
         self.assertTrue(all(p.isdigit() for p in pids), pids)
-        self.v.run("kill " + " ".join(pids[:5]), clear=False)
-        self.v.run("kill " + " ".join(pids[5:]), clear=False)
+        self.v.run("kill " + " ".join(pids[:4]), clear=False)
+        self.v.run("kill " + " ".join(pids[4:]), clear=False)
         self.assertEqual(self.run_("echo alive"), "alive")
         self.assertNotIn("sleep", self.run_("ps"))
 

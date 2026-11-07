@@ -2,7 +2,7 @@
 .include "../../include/breadbin.inc"
 
 KSTART  = $A300     ; must match KRAM in kernel.cfg: the user pool is $0800-KSTART-1
-MAXPROC = 12
+MAXPROC = 10
 NFD     = 8         ; fds per process
 NFILE   = 24        ; system open-file table
 NPIPE   = 4
@@ -17,7 +17,7 @@ FS_C64  = 0
 FS_CBM  = 1
 FT_CBMW = 7         ; open-file type: write to a CBM DOS file
 ZPSAVE  = $3E       ; bytes $02-$3F saved per process
-STKSAVE = 96         ; max saved stack bytes per process (the owner sets this)
+STKSAVE = 128        ; max saved stack bytes per process (the owner sets this)
 SAVESZ  = ZPSAVE + STKSAVE   ; bytes per process in p_save
 CWDLEN  = 48
 NAMELEN = 11

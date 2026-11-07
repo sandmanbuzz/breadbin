@@ -1181,7 +1181,13 @@ unary:  jsr skipsp
         cmp #'-'
         bne @p
         jsr adv
-        jsr unary
+        inc depth           ; a run of minus signs shares the paren-depth limit
+        lda depth
+        cmp #12
+        bcc @ok
+        jmp err_complex
+@ok:    jsr unary
+        dec depth
         jmp negate
 @p:     jmp primary
 
