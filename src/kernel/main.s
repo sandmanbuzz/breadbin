@@ -3,6 +3,7 @@
 
 .import __CODE_LOAD__, __CODE_RUN__, __CODE_SIZE__, __RODATA_SIZE__, __DATA_SIZE__
 .import __JUMPTAB_LOAD__, __JUMPTAB_RUN__, __BSS_RUN__, __BSS_SIZE__
+.import die_redirect, p_sig
 .import __CODEHI_LOAD__, __CODEHI_RUN__, __CODEHI_SIZE__
 .assert __CODEHI_RUN__ + __CODEHI_SIZE__ <= $fffa, error, "CODEHI runs into the hardware vectors"
 
@@ -241,8 +242,18 @@ irq_exit:
         pla
         rti
 
+; BRK from user code kills the process (SIGKILL, status $89) and does not panic. A BRK in
+; the kernel, or with no process running, still panics.
 brk_handler:
-        lda #<s_brk
+        lda in_kernel
+        bne @panic
+        ldx cur
+        cpx #$ff
+        beq @panic
+        lda #SIGKILL
+        sta p_sig,x
+        jmp die_redirect
+@panic: lda #<s_brk
         ldx #>s_brk
         ; fall through
 ; panic: print message (A/X) and halt
