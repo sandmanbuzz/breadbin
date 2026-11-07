@@ -10,7 +10,7 @@ Breadbox is a fork of [Breadbin](https://github.com/kpatr1981/breadbin) by Konst
 
 It is a real kernel, not a shell that prints canned output:
 
-- **Preemptive multitasking.** A timer interrupt drives a round-robin scheduler, so `cmd &` keeps running in the background while you type. Up to 12 processes (`MAXPROC` in `src/kernel/k.inc`).
+- **Preemptive multitasking.** A timer interrupt drives a round-robin scheduler, so `cmd &` keeps running in the background while you type. Up to 10 processes (`MAXPROC` in `src/kernel/k.inc`).
 - **Real programs.** `ls`, `cat`, `grep` and the rest are separate relocatable executables in `/bin`. The shell asks the kernel to `spawn` them and `wait`s for them.
 - **Pipes and redirection.** `cat readme | grep unix | wc`, plus `>`, `>>` and `<`. A pipe is a kernel buffer: readers block when it is empty, writers block when it is full, and writing to a closed pipe raises `SIGPIPE`.
 - **A Unix filesystem on the 1541.** c64fs has inodes, real directories (`mkdir`, `cd`, `..`), files up to 35 KB, and `/dev/console` and `/dev/null` device nodes.
@@ -163,7 +163,7 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 
 ```sh
 tools/ci/run.sh all test-host   # the fast gate: image tools, simulators, the assembler and compiler on the host (484 tests, none skipped)
-tools/ci/sharded.sh             # the whole VICE suite in six containers at once (104 tests)
+tools/ci/sharded.sh             # the whole VICE suite in six containers at once (105 tests)
 tools/ci/shards.py check 6      # host only: every VICE test is in exactly one of at most six shards
 make && make test-host          # the same host tests directly (build first: without build/ the tests that need the kernel skip), with cc65 and py65 installed
 make test                       # boots VICE one test after another (slow)

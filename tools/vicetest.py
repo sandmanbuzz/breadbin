@@ -208,7 +208,25 @@ class Vice(Target):
     def __exit__(self, *a):
         self.close()
 
+    def _stkwatch(self):
+        # local measurement hook: append the stack high-water mark to $STKWATCH_LOG
+        lbl = {}
+        for ln in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build", "kernel.lbl")):
+            f = ln.split()
+            if len(f) == 3 and f[2].startswith(".stk_hwm"):
+                lbl[f[2]] = int(f[1], 16)
+        a = lbl[".stk_hwm"]
+        d = self.mem(a, a + 12)
+        nm = bytes(d[2:13]).split(b"\0")[0].decode(errors="replace")
+        with open(os.environ["STKWATCH_LOG"], "a") as f:
+            f.write(f"{os.environ.get('STKWATCH_TAG', '')}\t{os.path.basename(self.image)}\thwm={d[0]}\tslot={d[1]}\tname={nm}\n")
+
     def close(self):
+        if os.environ.get("STKWATCH_LOG"):
+            try:
+                self._stkwatch()
+            except Exception as e:
+                print("stkwatch failed:", e, file=sys.stderr)
         try:
             self.sock.sendall(b"quit\n")
             time.sleep(0.3)
