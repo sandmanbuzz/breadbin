@@ -238,6 +238,20 @@ class Boot(unittest.TestCase):
         time.sleep(3)
         self.assertEqual(self.run_("cat /home/e.txt | wc"), "     1      2     12")
 
+    def test_28_basic_depth_limit_survives_switches(self):
+        # STKSAVE is 128: the deepest legal expression (11 levels, about 106 bytes of saved
+        # stack) must survive 600 timer-driven context switches (at 96 it was killed
+        # silently, status 139), and no run of minus signs may grow the stack past the cap.
+        e = "(" * 10 + "1" + ")" * 10
+        self.run_(f"echo '10 for i = 1 to 600 : a = {e} : next i : print a' > /home/d11.bas")
+        self.assertEqual(self.run_("basic /home/d11.bas"), "1")
+        self.run_("echo '10 for i = 1 to 600 : a = -----5 : next i : print a' > /home/um.bas")
+        self.assertEqual(self.run_("basic /home/um.bas"), "-5")
+        m = "-" * 40
+        self.run_(f"echo '10 for i = 1 to 600 : a = {m}5 : next i : print a' > /home/u40.bas")
+        self.assertIn("too complex", self.run_("basic /home/u40.bas"))
+        self.assertEqual(self.run_("echo alive"), "alive")
+
     def test_26_error_messages_from_the_file(self):
         """perr looks messages up in /etc/errors; three are built in; a missing file gives 'error N'."""
         self.assertIn("file exists", self.run_("mkdir /bin"))                 # from /etc/errors
