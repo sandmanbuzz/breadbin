@@ -30,6 +30,13 @@ p_fd:     .res MAXPROC*NFD
 p_cwd:    .res MAXPROC*CWDLEN
 p_save:   .res MAXPROC*SAVESZ
 next_pid: .res 1
+.ifdef STKWATCH
+stk_hwm:      .res 1        ; max stack bytes saved at a switch
+stk_hwm_slot: .res 1
+stk_hwm_name: .res NAMELEN
+stk_kills:    .res 1        ; processes killed for a stack too big to save
+.export stk_hwm, stk_hwm_slot, stk_hwm_name, stk_kills
+.endif
 new_slot: .res 1
 wk_ch:    .res 1
 
@@ -90,6 +97,28 @@ sched:
         ; save current context
         tsx
         stx tmp2
+.ifdef STKWATCH
+        ; debug build: high-water mark of the stack bytes a switch has to save
+        lda #$ff
+        sec
+        sbc tmp2
+        cmp stk_hwm
+        bcc @nohwm
+        sta stk_hwm
+        lda cur
+        sta stk_hwm_slot
+        jsr name_off
+        tax
+        ldy #0
+@hn:    lda p_name,x
+        sta stk_hwm_name,y
+        inx
+        iny
+        cpy #NAMELEN
+        bne @hn
+        ldx tmp2
+@nohwm:
+.endif
         cpx #$ff - STKSAVE
         bcs @stkok
         ; the process overflowed its stack area: it cannot be saved, kill it. Its frames
@@ -97,6 +126,9 @@ sched:
         ; so the stack is reset first. proc_exit never returns here.
         ldx #$ff
         txs
+.ifdef STKWATCH
+        inc stk_kills
+.endif
         lda #128+11
         jmp proc_exit
 @stkok: ldx cur

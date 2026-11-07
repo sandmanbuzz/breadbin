@@ -27,7 +27,7 @@ $(BUILD)/nbuf.stamp: FORCE
 	@echo "$(NBUF)" | cmp -s - $@ || echo "$(NBUF)" > $@
 $(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc $(BUILD)/nbuf.stamp
 	@mkdir -p $(dir $@)
-	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) $< -o $@
+	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) $(if $(STKWATCH),-D STKWATCH=1) $< -o $@
 
 $(BUILD)/breadbin.prg: $(KOBJ) src/kernel.cfg
 	@# ld65 warns when a jmp (abs) pointer sits at $$xxFF (6502 page wrap): that is a bug, not a warning
