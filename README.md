@@ -55,11 +55,9 @@ sudo apt install cc65 vice python3 make
 
 ### Build
 
-<!-- owner: fill in the clone URL when the repo is published -->
-
 ```sh
-git clone <URL of this repository>
-cd <the cloned directory>
+git clone https://github.com/sandmanbuzz/breadbin.git
+cd breadbin
 make
 ```
 
