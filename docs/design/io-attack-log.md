@@ -50,3 +50,33 @@ Builds aadea2f (last good hardware series), 8cc3e57 (failed 2026-11-07), 55fd668
 - The machine KERNAL's LOAD of the boot file uses none of this code.
 
 H5: **killed**. Layout did not change bus timing between the good and the bad series. Not modelled: VIC DMA stalls and NMI, which are the same in every build.
+
+## 2026-11-07: the 1541 talker, read in source (research, no run)
+
+Source: the commented Commodore DOS 1541 source (mist64/cbmsrc, `DOS_1541_05`: sertalk, block, jobssf, idlesf). This is a reading of the source, not a run. Full report in the session scratchpad. Only behavior is cited here, not code.
+
+- **The drive does not abandon a byte while holding CLK low.** Its only mid-byte abort is a frame error: DATA is seen low at the start of a bit. That path *releases* every line and goes idle. My H10 as written (frame error then park with CLK low) **does not match the signature.** Retracted in that form.
+- **Bits go out on the drive's own fixed timing, with no per-bit handshake.** After the eighth bit the talker holds CLK low and waits, with no time limit, for the listener's frame acknowledge (DATA pulled low). It tests only ATN while it waits.
+- **So the stall signature is: the drive sent all 8 bits, and our receiver counted only 2 to 6 of them.** The receiver then waits for a CLK rise that never comes, while the drive waits for an acknowledge that never comes. UNTALK frees it. The pointer only advances after the acknowledge, so a fresh TALK resends the interrupted byte. Bytes 195 + 61 = 256 in the ATN probe fit that.
+- **Prediction (by reading, not run):** the resent byte is mangled (shifted, ones in the top bits). Our retry reissues `U1`, which reloads the sector, so the mitigation does not pass corrupt data.
+- **EOI comes with the 256th byte of a `U1` buffer.** So the IOSTAT `io_neoi` count should be 0 on a healthy read.
+- **A read error during LOAD is not an endless hang.** The drive makes about 30 attempts, with head offsets and a bump, then reports error 2x, roughly 6 to 15 s with the motor on (time UNVERIFIED). The LED toggles on each retry. A `LOADING` hang that never ends therefore needs more than one bad sector, or something else.
+- **The Ultimate's FPGA logic never drives IEC RESET (firmware source read).** Whether the board wires the C64 reset to IEC pin 6 is unknown. Do not assume that a REST reset resets the physical drive.
+
+### New lead hypothesis for class S: H11, the C64 CPU is halted for 2 to 6 bit times
+
+Missing 2 to 6 consecutive CLK pulses, and never exactly 1, cannot be badlines. A badline steals about 40 cycles, and the drive holds each bit at least about 25 µs. It needs the 6510 stopped for roughly 150 to 500 µs in the middle of a byte. Interrupts are off in the bit loop. Our NMI handler is a bare `rti`. What remains is DMA: the Ultimate's REST memory access, REU transfers, or the firmware's own use of the bus. That would explain:
+
+- the stall with both our receive code and the ROM's;
+- no stall in stock-KERNAL stress runs, if those ran without host polling;
+- the pulse histogram looking normal, because it only histograms pulses that were *seen*.
+
+The pulse-histogram conclusion of 2026-10-31 ("not short pulses") stands. What it cannot rule out is pulses that were never seen.
+
+**Kill test (no drive needed, no disk wear):** a C64 probe program with interrupts off reads a free-running CIA timer in a tight loop and records the longest gap and a histogram of gaps. Run it on the Ultimate:
+
+1. idle;
+2. while the host issues REST memory reads at the rates the harnesses use;
+3. during REU transfers.
+
+Expected if H11 holds: gaps above 100 µs appear, tied to one of these. Expected if dead: the maximum gap is badline-sized (under about 70 µs) in every condition. Then H11 is killed and class S needs another mechanism.
