@@ -48,6 +48,8 @@ class Result:
         self.conmodes = []            # the mode argument of each CONMODE call, in order
         self.marks = []               # len(out) at each read of fd 0 (stdin=...)
         self.header = None            # the CX header of the program's image, for inspection
+        self.spawns = []              # SPAWN calls: (path, argv, pin, pout, flags), children are not run
+        self.cwd = "/"               # CHDIR moves it; GETCWD answers it
 
 
 def cx_load(data, page):
@@ -62,7 +64,7 @@ def cx_load(data, page):
     return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None):
+def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=()):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
     fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_create=path makes a write-open of that path fail with EIO; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs)."""
@@ -214,6 +216,48 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
                     ret(False, 0)
                 else:
                     ret(True, ENOENT)
+            elif name == "ISATTY":            # fd 0 is the console when tty=True
+                ret(not (fd == 0 and tty), 0)
+            elif name == "GETCWD":            # r0 = buffer, A = its size
+                cwd_b = res.cwd.encode() + b"\0"
+                if len(cwd_b) > fd:
+                    ret(True, ENOENT)
+                else:
+                    mem[r(2):r(2) + len(cwd_b)] = list(cwd_b)
+                    ret(False, 0)
+            elif name == "CHDIR":             # r0 = path; only the directories given in dirs= exist
+                p = cstr(r(2))
+                if p in dirs or p == "/":
+                    res.cwd = p
+                    ret(False, 0)
+                else:
+                    ret(True, ENOENT)
+            elif name == "STAT":              # r0 = path, r1 = 16-byte buffer: type, nlink, size(3), ...
+                p, buf = cstr(r(2)), r(4)
+                if p in res.files or p in dirs or p == "/":
+                    isdir = p in dirs or p == "/"
+                    size = 0 if isdir else len(res.files[p])
+                    mem[buf:buf + 16] = [2 if isdir else 1, 1, size & 0xFF, size >> 8, 0, 0] + [0] * 10
+                    ret(False, 0)
+                else:
+                    ret(True, ENOENT)
+            elif name == "SPAWN":            # r0 = path, r1 = argv pointers (NUL-ended), A = pin, X = pout, Y = flags
+                argv, ap = [], r(4)
+                while r(ap):
+                    argv.append(cstr(r(ap)))
+                    ap += 2
+                res.spawns.append((cstr(r(2)), argv, cpu.a, cpu.x, cpu.y))
+                ret(False, 2 + len(res.spawns))  # a fake pid; the child is recorded, not run
+            elif name == "WAIT":             # A = pid ($FF: any), nothing is ever reaped
+                ret(True)
+            elif name == "KILL":
+                ret(False, 0)
+            elif name == "GETPID":
+                ret(False, 1)
+            elif name == "PROCINFO":         # no process table: the list is empty
+                ret(True)
+            elif name == "PIPE":             # not modelled: a pipeline is refused, not faked
+                ret(True, 38)                # ENOSYS
             else:
                 raise RuntimeError("syscall %s not modelled (pc $%04X)" % (name, cpu.pc))
             continue
