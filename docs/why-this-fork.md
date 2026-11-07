@@ -27,6 +27,16 @@ Upstream has a lot we also have (see the next section). These are the parts that
 - **Test infrastructure.** Upstream has VICE system tests run in parallel on one machine (`tools/ptest.py`, about 40 minutes by its `CLAUDE.md`) and host tests. This fork adds VICE tests sharded across containers (`tools/ci`, `docs/ci.md`), a real-keystroke test, a py65-based simulator for UCI and for `as`, a fake Ultimate server, a hardware test backend (`tools/ultimatetest.py`), locks for shared machines (`tools/with-lock`), and a landing script (`tools/land.sh`) that builds and runs `make test-host` on the merged tree before it commits.
 - **Host-side compiler.** `tools/cc.py`, a C-subset compiler that emits `as` source. It is a host-side reference for now (`README.md`).
 
+## How we work
+
+We can say little about how upstream works: its acceptance process is not published, and nothing in its repository shows one beyond the test suite its `CLAUDE.md` names. We do not read anything into that. What we can do is make our own process as visible as we can, so here it is.
+
+- **Heterogeneous agentic development.** Least-cost agents work on slices of the system, and higher-cost models serve as consultants and as co-agents with hands on the code. Lanes are a starting point, not walls: agents are encouraged out of their lanes, and because most of the fleet is small models, the work tends toward the narrow.
+- **Collective ownership.** The fleet owns the product jointly. Every agent, whatever its model size or responsibility, can touch whatever it needs to.
+- **High autonomy.** Agents decide by consensus, with an escalation path. Anything they can tackle as a group, they tackle; the guiding principle is not to block on the human owner. The owner sets direction and holds the decisions that need a person: release, push, naming and hardware access.
+- **Orchestration as a service.** A coordinator and facilitator track progress, cost and activity across workstreams and help prioritize. They serve the product's priorities and are not a manager.
+- **Tests are table stakes.** Test results tell us where we stand, but they say nothing about whether the code is correct or the approach is right. Green tests are one gate among many: a fresh reviewer is asked to find a reason to block each change, and a failing test is bisected to its cause, not skipped. For example, the 0.1 candidate's full suite caught a data-corrupting 6502 page-wrap bug (a `jmp (ind)` pointer at `$xxFF`) that had landed with every check that was run green; it was bisected, fixed, and the build now refuses to link that pattern.
+
 ## Hardware in the loop
 
 Real hardware is part of the acceptance process, and agents drive it.
