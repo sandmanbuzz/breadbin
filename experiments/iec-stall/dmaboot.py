@@ -50,7 +50,8 @@ base = lbl["io_out"]            # the variables move with every build: read them
 names = "io_out io_base io_b io_n io_to io_pend io_held io_eoi io_inf io_sx io_sy ie_dev ie_sa ie_len ie_len2".split()
 assert lbl["io_n"] == base + 3 and lbl["ie_dev"] == base + 11, "variable layout changed: fix the dump"
 v = u.readmem(base, 15)
-open(img + ".stall", "a").write(str({n: f"{b:02x}" for n, b in zip(names, v)})
+io = {n: f"{x:x}" for n, x in __import__("iostat").iostat_dump(u, lbl).items()}
+open(img + ".stall", "a").write(str({n: f"{b:02x}" for n, b in zip(names, v)}) + (" iostat:" + str(io) if io else "")
                                  + " stack:" + u.readmem(0x1C0, 64).hex() + "\n")
 print(f"STUCK after 170s; last line {lines()[-1]!r}; $90={u.readmem(0x90, 1).hex()} "
       f"$BA={u.readmem(0xBA, 1).hex()} $DD00={dd:02x}")

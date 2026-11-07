@@ -5,6 +5,12 @@
 ; dev 2-4: drives 9-11 (mounted with mount()), same sector commands
 ; Cache is write-through: bwrite writes the buffer to its device at once.
 .include "k.inc"
+.ifndef IOSTAT
+IOSTAT = 0              ; make IOSTAT=1: count block reads, retries, failures (default in the Makefile)
+.endif
+.if IOSTAT
+.import iec_io_n
+.endif
 
 
 REU_STATUS = $df00
@@ -60,6 +66,19 @@ dev_drive: .res NDEV+1  ; drive number of each device; 0: the REU (dev 1; dev 0 
 cmdbuf:  .res 40
 cmdlen:  .res 1
 rd_try:  .res 1
+.if IOSTAT
+; IOSTAT: how often the block-read mitigation fires (read after login or at a stall; never during a transfer)
+io_nread:  .res 2        ; iec_read calls
+io_nretry: .res 2        ; retries taken (each redo)
+io_nfail:  .res 2        ; iec_read gave up after all tries
+io_neoi:   .res 2        ; blocks whose 256th byte arrived without EOI (ST bit 6)
+io_ltrk:   .res 1        ; last timeout: track, sector,
+io_lsct:   .res 1
+io_lidx:   .res 1        ; byte index 0-255 ($FF: before the data, i.e. the command or the talk)
+io_ltry:   .res 1        ; try number 1-3,
+io_lst:    .res 1        ; ST,
+io_lwn:    .res 1        ; and bus_acptr's io_n (ready wait: 3..1 loops left; bit loop: 8..1 bits left; EOI window: stale)
+.endif
 reu_tmp: .res 1
 cache_ok: .res 1         ; attached to a valid REU cache
 cache_on: .res 1         ; reads consult it
@@ -569,6 +588,13 @@ cmd_status:
 ; iec_read: read the block in cmdbuf's t/s into (bp). A talker that stalls
 ; mid-byte (seen on the physical 1541) makes bus_acptr time out; UNTALK under
 ; ATN frees the drive, so ask again, up to three times.
+.if IOSTAT
+; IOSTAT: iec_read and iec_read1 live in CODEHI (below); this hole keeps every later CODE address
+; (the timed loops in iec.s) exactly where the IOSTAT=0 build has them
+iec_read:
+        jmp iec_read_i
+        .res 77-3
+.else
 iec_read:
         lda #3
         sta rd_try
@@ -608,6 +634,7 @@ iec_read1:
 @e:     sec
         rts
 
+.endif
 s_bp:   .byte "B-P:2 0"
 iec_write:
         jsr blk_to_ts
@@ -1137,3 +1164,76 @@ cache_clear_c:
         jsr cache_clear
         clc
         rts
+
+.if IOSTAT
+.segment "CODEHI"
+.assert s_bp - iec_read = 77, error, "iec_read: the hole must match the IOSTAT=0 code size"
+.macro inc16 v
+        inc v
+        bne :+
+        inc v+1
+:
+.endmacro
+
+; iec_read: as the IOSTAT=0 build, plus the counters and the last-event record
+iec_read_i:
+        inc16 io_nread
+        lda #3
+        sta rd_try
+@try:   lda #$ff
+        sta io_lidx
+        jsr iec_read1_i
+        bcc @ok
+        lda ST              ; before UNTALK touches it
+        sta io_lst
+        lda iec_io_n
+        sta io_lwn
+        lda trk
+        sta io_ltrk
+        lda sct
+        sta io_lsct
+        lda #4
+        sec
+        sbc rd_try
+        sta io_ltry
+        dec rd_try
+        bne @redo
+        inc16 io_nfail
+        sec
+@ok:    rts
+@redo:  inc16 io_nretry
+        jsr iec_in_end
+        jmp @try
+
+iec_read1_i:
+        jsr blk_to_ts
+        lda #'1'
+        jsr cmd_us
+        jsr cmd_send
+        bcs @e
+        jsr cmd_status
+        bcs @e
+        lda cur_drv
+        ldx #2
+        jsr iec_in_begin
+        bcs @e
+        ldy #0
+@l:     jsr iec_in_byte
+        sta (bp),y
+        lda ST
+        and #$02
+        bne @t
+        iny
+        bne @l
+        lda ST              ; byte 256 should carry EOI
+        and #$40
+        bne @z
+        inc16 io_neoi
+@z:     jsr iec_in_end
+        clc
+        rts
+@t:     sty io_lidx
+        jsr iec_in_end
+@e:     sec
+        rts
+.endif

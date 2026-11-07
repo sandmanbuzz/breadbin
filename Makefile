@@ -29,9 +29,14 @@ $(BUILD)/nbuf.stamp: FORCE
 $(BUILD)/stkwatch.stamp: FORCE
 	@mkdir -p $(BUILD)
 	@echo "$(STKWATCH)" | cmp -s - $@ || echo "$(STKWATCH)" > $@
-$(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc $(BUILD)/nbuf.stamp $(BUILD)/stkwatch.stamp
+# make IOSTAT=0 drops the block-read counters (default 1; the kernel is then byte-identical to a build without them)
+IOSTAT  ?= 1
+$(BUILD)/iostat.stamp: FORCE
+	@mkdir -p $(BUILD)
+	@echo "$(IOSTAT)" | cmp -s - $@ || echo "$(IOSTAT)" > $@
+$(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc $(BUILD)/nbuf.stamp $(BUILD)/stkwatch.stamp $(BUILD)/iostat.stamp
 	@mkdir -p $(dir $@)
-	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) $(if $(STKWATCH),-D STKWATCH=1) $< -o $@
+	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) -D IOSTAT=$(IOSTAT) $(if $(STKWATCH),-D STKWATCH=1) $< -o $@
 
 $(BUILD)/breadbin.prg: $(KOBJ) src/kernel.cfg
 	@# ld65 warns when a jmp (abs) pointer sits at $$xxFF (6502 page wrap): that is a bug, not a warning
