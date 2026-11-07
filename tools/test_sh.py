@@ -86,21 +86,22 @@ def dirent(name):
 
 @unittest.skipIf(SKIP, SKIP)
 class Glob(unittest.TestCase):
-    def test_long_directory_prefix_does_not_overflow_the_glob_buffer(self):
-        # g_store used to guard only gpos < 192, then copied the whole prefix (up to 121 bytes here)
-        # plus the name: the second match ended 16 bytes past gbuf. The directory itself is read from
-        # the first 46 characters of the prefix, so that is where the entries live in the fake FS.
-        prefix = "/a" * 60 + "/"
-        self.assertEqual(len(prefix), 121)
-        names = ["b" * 14, "c" * 14, "d" * 14]
-        files = {"/a" * 23: b"".join(dirent(n) for n in names)}
+    def test_longest_directory_prefix_does_not_overflow_the_glob_buffer(self):
+        # g_store used to guard only gpos < 192, then copied the whole prefix plus the name. A prefix
+        # longer than 47 characters is now literal, so the longest one that globs (47) is used, with
+        # more matches than gbuf holds: those that fit are kept, the rest are dropped.
+        prefix = "/" + "a" * 45 + "/"
+        self.assertEqual(len(prefix), 47)
+        names = [c * 14 for c in "bcdefg"]
+        files = {prefix[:-1]: b"".join(dirent(n) for n in names)}
         r = sh(("echo " + prefix + "*\n").encode(), files=files)
         gbuf = label("gbuf")
         after = bytes(r.mem[gbuf + 257:gbuf + 256 + 64])    # tpos (first) follows the typed line's length
         control = bytes(sh(b"echo x\n").mem[gbuf + 257:gbuf + 256 + 64])    # the variables after gbuf at rest
         self.assertEqual(after, control, "glob wrote past the end of gbuf")
-        # the matches that fit are kept, the rest are dropped (as for any full buffer)
-        self.assertEqual(argvs(r), [["echo", prefix + names[0]]])
+        got = argvs(r)[0][1:]
+        self.assertEqual(got, [prefix + n for n in names[:len(got)]])
+        self.assertTrue(3 <= len(got) < len(names), got)
 
     def glob_in(self, plen):
         """`echo <prefix>*` where the prefix is plen characters (including its '/') and its directory exists under the full name."""

@@ -1009,7 +1009,11 @@ glob:   lda zp1
         lda #0
         sta g_dir+1
         jmp @open
-@dir:   ldy #0
+@dir:   lda g_d
+        cmp #48             ; g_dir holds 47 characters: a longer prefix stays literal
+        bcc @dn
+        jmp @lit
+@dn:    ldy #0
 @dc:    cpy g_d
         beq @dz
         lda (zp1),y
