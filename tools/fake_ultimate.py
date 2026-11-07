@@ -54,6 +54,9 @@ class FakeUltimate:
         self.runs = []          # dicts: how ("upload" or "file"), size, loaded
         self.streams = {}
         self.menu = bytearray(2000)
+        self.configs = {}       # ("Category", "Item") -> value; /v1/configs/<category>/<item>
+        self.config_puts = []   # (category, item, value) of every PUT, in order
+        self.on_readmem = None  # optional callback(address, length) for every readmem
         self._server = None
 
     # ---- lifecycle
@@ -146,6 +149,8 @@ class FakeUltimate:
             return self._json(h)
         if cmd == "readmem":
             a, ln = int(q["address"], 16), int(q.get("length", 256))
+            if self.on_readmem:
+                self.on_readmem(a, ln)
             if a + ln > 0x10000 or ln < 1:
                 return self._json(h, 400, ["bad range"])
             return self._reply(h, 200, bytes(self.ram[a:a + ln]), "application/octet-stream")
@@ -225,6 +230,19 @@ class FakeUltimate:
         if cmd in ("remove", "reset", "on", "off", "set_mode"):
             return self._json(h)
         self._json(h, 404, [f"unknown drive command {cmd}"])
+
+    def _configs(self, h, method, sub, cmd, q, body):
+        parts = urllib.parse.unquote(sub or "").split("/", 1)
+        if len(parts) != 2 or cmd:
+            return self._json(h, 404, ["config route is /v1/configs/<category>/<item>"])
+        key = (parts[0], parts[1])
+        if method == "PUT":
+            self.configs[key] = q.get("value", "")
+            self.config_puts.append(key + (self.configs[key],))
+            return self._json(h)
+        if key not in self.configs:
+            return self._json(h, 400, ["no such config item"])
+        self._json(h, **{key[0]: {key[1]: {"current": self.configs[key]}}})
 
     def _streams(self, h, method, sub, cmd, q, body):
         if cmd == "start":
