@@ -27,6 +27,16 @@ Upstream has a lot we also have (see the next section). These are the parts that
 - **Test infrastructure.** Upstream has VICE system tests run in parallel on one machine (`tools/ptest.py`, about 40 minutes by its `CLAUDE.md`) and host tests. This fork adds VICE tests sharded across containers (`tools/ci`, `docs/ci.md`), a real-keystroke test, a py65-based simulator for UCI and for `as`, a fake Ultimate server, a hardware test backend (`tools/ultimatetest.py`), locks for shared machines (`tools/with-lock`), and a landing script (`tools/land.sh`) that builds and runs `make test-host` on the merged tree before it commits.
 - **Host-side compiler.** `tools/cc.py`, a C-subset compiler that emits `as` source. It is a host-side reference for now (`README.md`).
 
+## What we think we do differently
+
+Upstream appears, at a glance, to use cutting edge high cost models during development, leaning into test output as its quality gate. Their process isn't published so this is a guess on our part based on interpretation of their commits. We take what we think is a different approach.
+
+- **Heterogenous Agentic Deveopment.** Our process involves least-cost co-agents focusing  slices of the system, with higher-cost models serving as both consultants and co-agents with hands on. Work doesn't have to stay in its lane and workers don't have set boundaries.
+- **Collective Ownership.** The agent fleet owns the product jointly and severally. Every co-agent, no matter what level of responsibility or model complexity it has, can touch whatever it needs to.
+- **High Autonomy.** The co-agents that work on the codebase do consensus decision-making with an escalation path. Anything they can tackle as a whole, they tackle. A guiding principle is to avoid blocking on the human owner. If at all possible, the agent fleet attempts of unblock itself.
+- **Orchestration.** The agent fleet contains a coordinator and facilitator, and it's not a top-level owner. It tracks progress, cost, and helps prioritize work and awareness of  activity across the co-agent's workstreams. The orchestration is used as a service driven by product priorities instead of being a manager.
+- **Tests Are Table Stakes.** Test results tell us where we stand, but they say nothing about the correctness of the code or that the approach being used is the right one. For us, green tests are one gate among many.
+
 ## Hardware in the loop
 
 Real hardware is part of the acceptance process, and agents drive it.
