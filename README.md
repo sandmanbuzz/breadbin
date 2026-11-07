@@ -81,7 +81,7 @@ x64sc -drive9type 1541 -9 other.d64 -autostart build/breadbin.d64   # with a dri
 
 Or attach `build/breadbin.d64` to drive 8 yourself and type `LOAD"*",8,1` and then `RUN`.
 
-**Real hardware.** Breadbox runs in VICE and on a C64 Ultimate, which is the recommended machine (`docs/hardware-notes.md`). Booting from a physical 1541 has a known intermittent root-mount stall: mitigated (a bounded wait and retries in the bus driver), not root-caused; see `docs/hardware-notes.md` before relying on it. It needs a drive that understands the 1541's sector commands (`U1`, `U2`, `B-P`): a real 1541 or 1571, or a 1541 emulation such as the Ultimate 64's. To make a real floppy, write the `.d64` with a tool such as OpenCBM's `d64copy`.
+**Real hardware.** Breadbox runs in VICE and on a C64 Ultimate, which is the recommended machine (`docs/hardware-notes.md`). Booting from a physical 1541 has a known intermittent root-mount stall: mitigated (a bounded wait and retries in the bus driver), not root-caused. On the 0.1 candidate a manual boot reached login, but automated boots from a physical 1541 failed (hangs, a panic, a LOAD error); see `docs/hardware-notes.md` before relying on it. It needs a drive that understands the 1541's sector commands (`U1`, `U2`, `B-P`): a real 1541 or 1571, or a 1541 emulation such as the Ultimate 64's. To make a real floppy, write the `.d64` with a tool such as OpenCBM's `d64copy`.
 
 ## Try it
 
