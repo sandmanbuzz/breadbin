@@ -18,7 +18,7 @@ The roster is `fleet/roster.md` on `fleet-store` (the owner's roster, published 
 
 ## Snapshot (main 45eacff, 2026-11-03)
 
-- **Memory (`make size`, main):** code and data end at `$CD38`; room below `$CF00` is **455 bytes**; BSS and CODEHI end at `$FFEB`; room below `$FFFA` is **14 bytes** (a link-time assert guards it, `src/kernel/main.s`). `KSTART` is `$A300` (`src/kernel/k.inc`), so the user pool is `$0800-$A2FF`, 155 pages. An idle prompt holds 21 pages (B's measurement on main; the older 23-page figure is not reproduced). The figures are kept in `docs/size-ledger.tsv`, one row per commit (`tools/size_ledger.py`; see Open items).
+- **Memory (`make size`, main):** code and data end at `$CD42`; room below `$CF00` is **445 bytes**; BSS and CODEHI end at `$FFCD`; room below `$FFFA` is **44 bytes** (a link-time assert guards it, `src/kernel/main.s`). `KSTART` is `$A300` (`src/kernel/k.inc`), so the user pool is `$0800-$A2FF`, 155 pages. An idle prompt holds 21 pages (B's measurement on main; the older 23-page figure is not reproduced). The figures are kept in `docs/size-ledger.tsv`, one row per commit (`tools/size_ledger.py`; see Open items).
 - **Built and on main:** M0 (own interrupt entry, keyboard, screen, serial bus and channels); the REU block cache; the footprint pass; kernel modules (the `mod` command), the CBM DOS module, UCI v1 as a module (`mount uci`), `exec`, `turbo`.
 - **Hardware (Ultimate, firmware 1.1.0):** the Boot and Console subsets pass on the tip; the JiffyDOS-ROM drive set passes in the container (Boot.test_02, Drives 6 of 6). UCI measured: read and write round trips, one entry per READ DIR chunk, ABORT stops a listing after its chunk, LOAD REU at the end of 2 MB, RENAME onto an existing name answers FILE EXISTS. Full list and dates in `docs/hardware-notes.md`.
 - **Physical 1541:** boots the tip image to login in 22 s (5 of 5 on 2026-11-02, after the nibbler copy of the image). The disk is not compared sector by sector: the whole-disk reader stalled four times at sector 0 (`docs/hardware-notes.md`, "four stalls").
@@ -104,7 +104,7 @@ Replaced by the roster: `fleet/roster.md` on `fleet-store`. Claims, results and 
 
 - **Physical-1541 stall:** mitigated (bounded `bus_acptr` wait ~2 s, `iec_read` retried 3x with UNTALK), 13 of 13 boots; root cause unknown. Agent 2's JiffyDOS-drive A/B (with and without the mitigation) is the open test.
 - **REU cache:** two disks written elsewhere with the same build id and label can be confused if they alternate on one REU; the first write of a boot costs one extra superblock write.
-- **High region room is 14 bytes** (above the BSS and `CODEHI`, up to `$FFFA`): any change near it fails the `.assert` in `main.s`. Procedure: shrink BSS or move code out first; do not raise the assert.
+- **High region room is 44 bytes** (above the BSS and `CODEHI`, up to `$FFFA`): any change near it fails the `.assert` in `main.s`. Procedure: shrink BSS or move code out first; do not raise the assert.
 - **Modules are a cooperative trust model:** no file owners or modes, no memory protection (`docs/design/next/modules-v1.md`, "Security model").
 - **Wart list:** the mount call clobbers the caller's first argument register; the argument copier has an inherited bound hole (needs memory the caller does not own); `mod_load` maps a refused `init` to ENODEV.
 - **Tests:** `test_keyboard` sends real X key events in bursts and has lost keys twice in about 20 runs on one host; hardware coverage of the final tip is Agent 2's series.

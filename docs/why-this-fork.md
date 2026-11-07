@@ -70,7 +70,7 @@ The core never requires an REU or an Ultimate.
 - **Physical 1541 root-mount stall: mitigated, not root-caused.** A bounded wait in `bus_acptr` and three retries with UNTALK took about 1 boot in 4 to 13 of 13, and 5 of 5 on a later build (`docs/hardware-notes.md`). On 2026-11-07, with the candidate build, the owner's manual boot after a full power cycle reached the login prompt, but the automated attempts did not: LOAD hangs, a root-mount panic after a power cycle, and a LOAD ERROR. None was chased, and a follow-up is backlogged (`docs/hardware-notes.md`). The 0.1 release does not claim an automated physical-1541 boot. The Ultimate boot is the evidence for the Recommended tier.
 - **Keyboard.** A key drop on hardware has been seen once and not reproduced on demand. The VICE test `test_tab_no_match_does_not_fire` fails in its setUp; cause not identified (`docs/testing.md`, "Known issues").
 - **Scrolling.** The page-boundary scroll bug (`9cab610`) is fixed and checked in VICE and in the py65 simulator. The commit records no hardware run; the owner checked the release candidate by eye on the real machine.
-- **Kernel space is scarce.** 14 bytes above the BSS and `CODEHI`, guarded by a link-time assert; every kernel byte over the room costs user memory a page at a time.
+- **Kernel space is scarce.** 44 bytes above the BSS and `CODEHI`, guarded by a link-time assert; every kernel byte over the room costs user memory a page at a time.
 - **Modules trust each other:** no file owners, modes or memory protection (`docs/design/next/modules-v1.md`).
 - **Non-1541 drives** are nice-to-have. c64fs v1 compatibility is dropped.
 
