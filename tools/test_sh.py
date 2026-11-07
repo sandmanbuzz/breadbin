@@ -20,7 +20,7 @@ UP, DOWN, RET = b"\x10", b"\x0e", b"\n"
 
 
 def sh(stdin, tty=False, **kw):
-    return asim.run("sh", [], {}, stdin=stdin, tty=tty, **kw)
+    return asim.run("sh", [], kw.pop("files", {}), stdin=stdin, tty=tty, **kw)
 
 
 def argvs(r):
@@ -68,6 +68,38 @@ class Commands(unittest.TestCase):
     def test_pipeline_is_refused_not_faked(self):
         r = sh(b"echo a | echo b\n")
         self.assertEqual(r.spawns, [])                    # PIPE failed: nothing is spawned
+
+
+def label(name):
+    """Address of a sh variable in the host image (build/p/sh.lbl holds offsets from the load address)."""
+    with open(os.path.join(ROOT, "build", "p", "sh.lbl")) as f:
+        for ln in f:
+            w = ln.split()
+            if len(w) == 3 and w[2] == "." + name:
+                return (asim.BASE_PAGE << 8) + int(w[1], 16)
+    raise KeyError(name)
+
+
+def dirent(name):
+    return b"\x02" + name.encode().ljust(15, b"\0")
+
+
+@unittest.skipIf(SKIP, SKIP)
+class Glob(unittest.TestCase):
+    def test_long_directory_prefix_does_not_overflow_the_glob_buffer(self):
+        # g_store used to guard only gpos < 192, then copied the whole prefix (up to 121 bytes here)
+        # plus the name: the second match ended 16 bytes past gbuf. The directory itself is read from
+        # the first 46 characters of the prefix, so that is where the entries live in the fake FS.
+        prefix = "/a" * 60 + "/"
+        self.assertEqual(len(prefix), 121)
+        names = ["b" * 14, "c" * 14, "d" * 14]
+        files = {"/a" * 23: b"".join(dirent(n) for n in names)}
+        r = sh(("echo " + prefix + "*\n").encode(), files=files)
+        gbuf = label("gbuf")
+        after = bytes(r.mem[gbuf + 256:gbuf + 256 + 64])
+        self.assertEqual(after, bytes(64), "glob wrote past the end of gbuf")
+        # the matches that fit are kept, the rest are dropped (as for any full buffer)
+        self.assertEqual(argvs(r), [["echo", prefix + names[0]]])
 
 
 @unittest.skipIf(SKIP, SKIP)
