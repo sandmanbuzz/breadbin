@@ -49,6 +49,7 @@ The repository is the mailbox. Results and requests go in:
 - `docs/hardware-notes.md`: measurements, with the command, the date and the commit. Hardware session writes, kernel session reads.
 - `docs/wip.md`: who is doing what, the work packages, and the "state" block a fresh context needs. Update it when the plan changes, not for every step.
 - A request to another session: a short entry in the other's file ("Request from <role>, <date>: what, why, the smallest version"). Answer it in the same place.
+- `tools/claude-quota`: subscription quota, burn projection and sprint marks for dispatching by remaining quota; see `docs/claude-quota.md`.
 
 Sessions message each other at the addresses on the roster (`fleet/roster.md` on the `fleet-store` branch: `git show fleet-store:fleet/roster.md`); the address of a parked session is dead and a message to it fails quietly. All worktrees share one set of refs, so before you start `git log --oneline -15 main` shows what the others did. Do not `git pull` from origin: it is a stale mirror.
 
