@@ -6,7 +6,7 @@
 # Stops before committing if the merge conflicts or the suite is red: the merge is aborted and the
 # tree is left as it was. The suite runs after make clean, on the merged tree itself, so stale build
 # output cannot make a green branch look red (or the reverse). The build comes first: without build/ the
-# tests that need the kernel skip (77 of 299) and the gate proves less. See docs/process.md, "Landing".
+# tests that need the kernel skip and the gate proves less. See docs/process.md, "Landing".
 set -eu
 
 branch=${1:?usage: land.sh BRANCH [MESSAGE]}
