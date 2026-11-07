@@ -304,7 +304,7 @@ class Burn(QuotaCase):
         self.assertIn("note", self.now_burn())
 
 
-class Status(QuotaCase):
+class StatusBase(QuotaCase):
     """`status` reads only the DB: the env has no usable token and a dead base URL."""
 
     def setUp(self):
@@ -336,6 +336,8 @@ class Status(QuotaCase):
     def reset(self, h=3):
         return iso(self.now + dt.timedelta(hours=h))
 
+
+class Status(StatusBase):
     def test_fresh(self):
         rs = self.reset()
         self.build([(2, {"five_hour": (40.0, rs)}), (1, {"five_hour": (50.0, rs)}),
@@ -429,6 +431,190 @@ class Status(QuotaCase):
         before = self.rows("SELECT count(*) FROM polls")
         self.status()
         self.assertEqual(self.rows("SELECT count(*) FROM polls"), before)
+
+
+class Tier(StatusBase):
+    """Rate-driven tier: synthetic histories, controlled timestamps, DB only."""
+
+    def ramp(self, week=(60.0, 0.1), five=(20.0, 0.1), week_h=48, five_h=3, hours=3, step=0.25,
+             polls=((3, 1, None), (20, 1, None))):
+        """One snapshot every `step` hours over `hours`; each bucket is (util_now, %/h)."""
+        rw, rf = self.reset(week_h), self.reset(five_h)
+        snaps = []
+        n = int(round(hours / step))
+        for i in range(n, -1, -1):
+            age = i * step
+            snaps.append((age, {"seven_day": (round(week[0] - week[1] * age, 3), rw),
+                                "five_hour": (round(five[0] - five[1] * age, 3), rf)}))
+        self.build(snaps, list(polls))
+
+    def tier(self, *args):
+        r, j = self.status(*args)
+        self.assertIn(r.returncode, (0, 6), r.stderr)
+        return j
+
+    def test_steady_low_is_green(self):
+        self.ramp(week=(60.0, 0.1), five=(20.0, 0.3))
+        j = self.tier()
+        self.assertEqual((j["suggested_tier"], j["tier_now"], j["tier_15m_ago"]), ("G", "G", "G"))
+        rt = j["buckets"]["seven_day"]["rate"]
+        self.assertEqual(rt["basis"], "1h")
+        self.assertAlmostEqual(rt["measured_pct_per_hour"], 0.1, delta=0.02)
+        self.assertAlmostEqual(rt["budget_rate_pct_per_hour"], 40 / 48, delta=0.02)
+        self.assertAlmostEqual(rt["ratio"], 0.12, delta=0.03)
+        self.assertAlmostEqual(rt["floor_headroom_pct"], 37.0)
+        self.assertNotIn("floor_headroom_pct", j["buckets"]["five_hour"]["rate"])
+        w = rt["windows"]
+        self.assertFalse(w["1h"]["partial"])
+        self.assertTrue(w["6h"]["partial"])
+        self.assertAlmostEqual(w["6h"]["span_hours"], 3, delta=0.05)
+
+    def test_near_budget_is_yellow(self):
+        self.ramp(week=(60.0, 0.7))  # budget 0.83%/h: ratio 0.84
+        j = self.tier()
+        self.assertEqual(j["suggested_tier"], "Y")
+        self.assertAlmostEqual(j["buckets"]["seven_day"]["rate"]["ratio"], 0.84, delta=0.05)
+
+    def test_over_budget_is_red(self):
+        self.ramp(week=(60.0, 1.5))
+        j = self.tier()
+        self.assertEqual(j["suggested_tier"], "R")
+        self.assertIn("seven_day", j["reason"])
+        self.assertIn("cap", j["reason"])
+
+    def test_five_hour_over_budget_is_red(self):
+        self.ramp(week=(60.0, 0.1), five=(50.0, 20.0), five_h=3)  # budget 16.7%/h
+        self.assertEqual(self.tier()["suggested_tier"], "R")
+
+    def test_negative_rate_is_green(self):
+        self.ramp(week=(60.0, -0.5))
+        j = self.tier()
+        self.assertEqual(j["suggested_tier"], "G")
+        self.assertLess(j["buckets"]["seven_day"]["rate"]["ratio"], 0)
+
+    def test_unknown_rate_is_yellow(self):
+        self.build([(0.0, {"seven_day": (60.0, self.reset(48)), "five_hour": (20.0, self.reset(3))})],
+                   [(1, 1, None)])
+        j = self.tier()
+        rt = j["buckets"]["seven_day"]["rate"]
+        self.assertEqual((j["suggested_tier"], rt["basis"], rt["ratio"]), ("Y", None, None))
+        self.assertIsNone(rt["measured_pct_per_hour"])
+        self.assertIn("rate unknown", j["reason"])
+        self.assertIsNone(j["tier_15m_ago"])  # nothing existed 15 minutes ago
+
+    def test_under_ten_minutes_is_unknown(self):
+        rs, rf = self.reset(48), self.reset(3)
+        self.build([(0.15, {"seven_day": (59.0, rs), "five_hour": (20.0, rf)}),
+                    (0.0, {"seven_day": (60.0, rs), "five_hour": (21.0, rf)})], [(1, 1, None)])
+        self.assertIsNone(self.tier()["buckets"]["seven_day"]["rate"]["measured_pct_per_hour"])
+
+    def test_falls_back_to_longer_window(self):
+        # one reading 5h ago, then nothing until now: 1h has no span
+        rs, rf = self.reset(48), self.reset(3)
+        self.build([(5.0, {"seven_day": (55.0, rs), "five_hour": (5.0, rf)}),
+                    (0.0, {"seven_day": (60.0, rs), "five_hour": (10.0, rf)})], [(1, 1, None)])
+        rt = self.tier()["buckets"]["seven_day"]["rate"]
+        self.assertEqual(rt["basis"], "6h")
+        self.assertAlmostEqual(rt["measured_pct_per_hour"], 1.0, delta=0.02)
+
+    def test_reset_inside_window(self):
+        old, new = self.reset(-1.9), self.reset(4.5)
+        snaps = [(3.0, {"five_hour": (90.0, old)}), (2.5, {"five_hour": (95.0, old)}),
+                 (2.0, {"five_hour": (96.0, old)})]
+        for i in range(6, -1, -1):  # new window from 1.5h ago, +2 points/hour
+            snaps.append((i * 0.25, {"five_hour": (2.0 + 2.0 * (6 - i) * 0.25, new)}))
+        self.build(snaps, [(1, 1, None)])
+        j = self.tier()
+        rt = j["buckets"]["five_hour"]["rate"]
+        for n in ("6h", "24h"):
+            self.assertTrue(rt["windows"][n]["reset_in_window"], n)
+            self.assertTrue(rt["windows"][n]["partial"], n)
+            self.assertAlmostEqual(rt["windows"][n]["pct_per_hour"], 2.0, delta=0.1)
+            self.assertAlmostEqual(rt["windows"][n]["span_hours"], 1.5, delta=0.05)
+        self.assertEqual(rt["tier"], "G")  # not the -90 a naive delta would give, nor red
+
+    def test_floor(self):
+        for week in (97.0, 99.0, 100.0):
+            with self.subTest(week=week):
+                self.newdb()
+                self.ramp(week=(week, 0.0))
+                j = self.tier()
+                self.assertEqual(j["suggested_tier"], "FLOOR")
+                self.assertIn("soft all-stop: hand to owner", j["reason"])
+        self.newdb()
+        self.ramp(week=(96.9, 0.0), week_h=100)
+        self.assertNotEqual(self.tier()["suggested_tier"], "FLOOR")
+
+    def test_five_hour_90_is_red_whatever_the_rate(self):
+        self.ramp(five=(90.0, 0.0))
+        j = self.tier()
+        self.assertEqual(j["suggested_tier"], "R")
+        self.assertIn("five_hour", j["reason"])
+        self.newdb()
+        self.ramp(five=(100.0, 0.0))
+        self.assertEqual(self.tier()["suggested_tier"], "R")
+        self.newdb()
+        self.ramp(five=(89.0, 0.0))
+        self.assertEqual(self.tier()["suggested_tier"], "G")
+
+    def test_stale_poller_forces_yellow(self):
+        self.ramp(polls=((20, 1, None),))
+        r, j = self.status()
+        self.assertEqual(r.returncode, 6)
+        self.assertEqual(j["suggested_tier"], "Y")
+        self.assertIn("stale", j["reason"])
+
+    def test_stale_does_not_mask_red(self):
+        self.ramp(week=(60.0, 1.5), polls=((20, 1, None),))
+        self.assertEqual(self.status()[1]["suggested_tier"], "R")
+
+    def test_no_budget_left_or_reset_passed(self):
+        self.ramp(five=(100.0, 5.0))
+        j = self.tier()
+        self.assertEqual(j["suggested_tier"], "R")
+        self.assertIsNone(j["buckets"]["five_hour"]["rate"]["ratio"])
+        self.newdb()
+        self.ramp(five_h=-1)  # reset time already passed: no division by zero or negative hours
+        j = self.tier()
+        self.assertEqual(j["suggested_tier"], "Y")
+        self.assertIsNone(j["buckets"]["five_hour"]["rate"]["budget_rate_pct_per_hour"])
+
+    def test_hysteresis_green_now_red_then(self):
+        rs, rf = self.reset(48), self.reset(3)
+        ages = [3, 2.5, 2, 1.5, 1.25, 1.1, 1.0, 0.75, 0.5, 0.25, 0.0]
+        snaps = [(a, {"seven_day": (58.0 if a >= 1.25 else 60.0, rs),
+                      "five_hour": (20.0 - 0.1 * a, rf)}) for a in ages]
+        self.build(snaps, [(1, 1, None)])
+        j = self.tier()
+        self.assertEqual((j["tier_now"], j["tier_15m_ago"], j["suggested_tier"]), ("G", "R", "R"))
+        self.assertIn("held", j["reason"])
+
+    def test_step_down_is_immediate(self):
+        self.ramp(week=(60.0, 1.5))
+        j = self.tier()
+        self.assertEqual(j["tier_now"], "R")
+
+    def test_human_lines(self):
+        self.ramp(week=(60.0, 0.7))
+        r = self.run_q("status", "--human")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("tier: Y", r.stdout)
+        self.assertIn("budget", r.stdout)
+        self.assertIn("ratio", r.stdout)
+        self.assertIn("%/h (1h)", r.stdout)
+
+    def test_unknown_human_does_not_crash(self):
+        self.build([(0.0, {"seven_day": (60.0, self.reset(48))})], [(1, 1, None)])
+        r = self.run_q("status", "--human")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("rate unknown", r.stdout)
+
+    def test_no_network_no_write(self):
+        self.ramp()
+        before = self.rows("SELECT (SELECT count(*) FROM polls),(SELECT count(*) FROM snapshots)")
+        self.assertEqual(self.tier()["suggested_tier"], "G")
+        self.assertEqual(before, self.rows(
+            "SELECT (SELECT count(*) FROM polls),(SELECT count(*) FROM snapshots)"))
 
 
 class Installer(unittest.TestCase):
