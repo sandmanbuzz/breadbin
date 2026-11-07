@@ -304,5 +304,189 @@ class Burn(QuotaCase):
         self.assertIn("note", self.now_burn())
 
 
+class Status(QuotaCase):
+    """`status` reads only the DB: the env has no usable token and a dead base URL."""
+
+    def setUp(self):
+        super().setUp()
+        self.env["CLAUDE_QUOTA_TOKEN"] = ""
+        self.env["CLAUDE_QUOTA_BASE_URL"] = "http://127.0.0.1:1"
+        self.now = dt.datetime.now(UTC)
+
+    def build(self, snaps, polls):
+        """snaps: (age_h, {bucket: (util, resets_at)}); polls: (age_min, ok, error)."""
+        self.assertEqual(self.run_q("mark", "init").returncode, 0)
+        con = sqlite3.connect(self.db)
+        with con:
+            for i, (age, bs) in enumerate(snaps):
+                t = iso(self.now - dt.timedelta(hours=age))
+                cur = con.execute("INSERT INTO snapshots(first_seen,last_seen,fingerprint,raw)"
+                                  " VALUES (?,?,?,?)", (t, t, "f%d" % i, "{}"))
+                for b, (u, r) in bs.items():
+                    con.execute("INSERT INTO buckets VALUES (?,?,?,?)", (cur.lastrowid, b, u, r))
+            for age, ok, err in polls:
+                con.execute("INSERT INTO polls VALUES (?,?,?,?)",
+                            (iso(self.now - dt.timedelta(minutes=age)), ok, None, err))
+        con.close()
+
+    def status(self, *args):
+        r = self.run_q("status", *args)
+        return r, (json.loads(r.stdout) if r.stdout.strip() else None)
+
+    def reset(self, h=3):
+        return iso(self.now + dt.timedelta(hours=h))
+
+    def test_fresh(self):
+        rs = self.reset()
+        self.build([(2, {"five_hour": (40.0, rs)}), (1, {"five_hour": (50.0, rs)}),
+                    (0.0, {"five_hour": (60.0, rs)})], [(3, 1, None)])
+        r, j = self.status()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        b = j["buckets"]["five_hour"]
+        self.assertEqual((b["utilization"], b["remaining"]), (60.0, 40.0))
+        self.assertAlmostEqual(b["burn"]["rate_pct_per_hour"], 10, delta=1)
+        self.assertFalse(j["stale"])
+        self.assertAlmostEqual(j["last_poll_age_min"], 3, delta=0.5)
+        self.assertEqual(j["recent_failures"]["count"], 0)
+        self.assertNotIn("window", b)
+
+    def test_stale_exits_6_but_prints(self):
+        self.build([(1, {"five_hour": (50.0, self.reset())})], [(20, 1, None)])
+        r, j = self.status()
+        self.assertEqual(r.returncode, 6)
+        self.assertTrue(j["stale"])
+        self.assertEqual(j["buckets"]["five_hour"]["utilization"], 50.0)
+
+    def test_stale_boundary(self):
+        self.build([(1, {"five_hour": (50.0, self.reset())})], [(14, 1, None)])
+        self.assertEqual(self.status()[0].returncode, 0)
+
+    def test_never_polled_ok_is_stale(self):
+        self.build([(1, {"five_hour": (50.0, self.reset())})], [(2, 0, "boom")])
+        r, j = self.status()
+        self.assertEqual(r.returncode, 6)
+        self.assertIsNone(j["last_poll_ok"])
+
+    def test_missing_db(self):
+        r, j = self.status()
+        self.assertEqual((r.returncode, j["exit_code"]), (5, 5))
+        self.assertFalse(os.path.exists(self.db), "status must not create the DB")
+
+    def test_empty_db(self):
+        self.assertEqual(self.run_q("mark", "init").returncode, 0)
+        r, j = self.status()
+        self.assertEqual(r.returncode, 5)
+        self.assertIn("error", j)
+
+    def test_zero_byte_db(self):
+        os.makedirs(self.dbdir)
+        open(self.db, "w").close()
+        self.assertEqual(self.status()[0].returncode, 5)
+
+    def test_garbage_db(self):
+        os.makedirs(self.dbdir)
+        with open(self.db, "w") as f:
+            f.write("this is not sqlite" * 50)
+        self.assertEqual(self.status()[0].returncode, 5)
+
+    def test_failures(self):
+        self.build([(1, {"five_hour": (50.0, self.reset())})],
+                   [(1, 1, None), (5, 0, "HTTP 500 from usage endpoint"),
+                    (10, 0, "older error"), (90, 0, "too old")])
+        r, j = self.status()
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(j["recent_failures"]["count"], 2)
+        self.assertEqual(j["recent_failures"]["last_error"], "HTTP 500 from usage endpoint")
+
+    def test_window_delta(self):
+        rs = self.reset()
+        self.build([(10, {"five_hour": (5.0, rs)}), (5, {"five_hour": (20.0, rs)}),
+                    (0.5, {"five_hour": (50.0, rs)})], [(1, 1, None)])
+        r, j = self.status("--window-hours", "4")
+        w = j["buckets"]["five_hour"]["window"]
+        self.assertEqual((w["delta"], w["from"], w["partial"]), (30.0, 20.0, False))
+        self.assertEqual(j["window_hours"], 4)
+        w = self.status("--window-hours", "6")[1]["buckets"]["five_hour"]["window"]
+        self.assertEqual((w["delta"], w["partial"]), (45.0, False))
+        w = self.status("--window-hours", "24")[1]["buckets"]["five_hour"]["window"]
+        self.assertEqual((w["delta"], w["partial"]), (45.0, True))
+
+    def test_window_partial_and_reset(self):
+        self.build([(2, {"five_hour": (90.0, self.reset(-1))}),
+                    (0.5, {"five_hour": (4.0, self.reset(5))})], [(1, 1, None)])
+        w = self.status("--window-hours", "48")[1]["buckets"]["five_hour"]["window"]
+        self.assertEqual((w["delta"], w["partial"], w["reset_in_window"]), (-86.0, True, True))
+
+    def test_human(self):
+        self.build([(1, {"five_hour": (50.0, self.reset())})], [(1, 1, None)])
+        r = self.run_q("status", "--human", "--window-hours", "2")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("five_hour", r.stdout)
+        self.assertIn("last good poll", r.stdout)
+
+    def test_status_does_not_write(self):
+        self.build([(1, {"five_hour": (50.0, self.reset())})], [(1, 1, None)])
+        before = self.rows("SELECT count(*) FROM polls")
+        self.status()
+        self.assertEqual(self.rows("SELECT count(*) FROM polls"), before)
+
+
+class Installer(unittest.TestCase):
+    SH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install-quota-timer.sh")
+    REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = os.path.join(self.tmp.name, "home")
+        os.makedirs(self.home)
+        self.bin = os.path.join(self.tmp.name, "bin")
+        os.makedirs(self.bin)
+        self.marker = os.path.join(self.tmp.name, "systemctl.log")
+        stub = os.path.join(self.bin, "systemctl")
+        with open(stub, "w") as f:
+            f.write('#!/bin/sh\necho "$@" >> "%s"\n' % self.marker)
+        os.chmod(stub, 0o755)
+        self.env = dict(os.environ, HOME=self.home, PATH=self.bin + os.pathsep + os.environ["PATH"])
+        self.env.pop("QUOTA_UNIT_DIR", None)
+
+    def run_sh(self, *args):
+        return subprocess.run(["/bin/sh", self.SH, *args], env=self.env, capture_output=True,
+                              text=True, timeout=60)
+
+    def test_dry_run_changes_nothing(self):
+        r = self.run_sh()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("DRY RUN", r.stdout)
+        self.assertEqual(os.listdir(self.home), [])
+        self.assertFalse(os.path.exists(self.marker))
+        self.assertIn("ExecStart=/usr/bin/env python3 %s/tools/claude-quota poll --quiet" % self.REPO,
+                      r.stdout)
+        self.assertIn("OnUnitActiveSec=5min", r.stdout)
+        self.assertNotIn("@REPO@", r.stdout)
+
+    def test_uninstall_dry_run_changes_nothing(self):
+        r = self.run_sh("--uninstall")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("DRY RUN", r.stdout)
+        self.assertFalse(os.path.exists(self.marker))
+
+    def test_yes_installs_and_uninstalls(self):
+        d = os.path.join(self.home, ".config", "systemd", "user")
+        self.assertEqual(self.run_sh("--yes").returncode, 0)
+        with open(os.path.join(d, "claude-quota.service")) as f:
+            self.assertIn("%s/tools/claude-quota poll --quiet" % self.REPO, f.read())
+        self.assertTrue(os.path.exists(os.path.join(d, "claude-quota.timer")))
+        with open(self.marker) as f:
+            log = f.read()
+        self.assertIn("--user enable --now claude-quota.timer", log)
+        self.assertEqual(self.run_sh("--uninstall", "--yes").returncode, 0)
+        self.assertEqual(os.listdir(d), [])
+
+    def test_unknown_arg_rejected(self):
+        self.assertEqual(self.run_sh("--bogus").returncode, 2)
+        self.assertFalse(os.path.exists(self.marker))
+
+
 if __name__ == "__main__":
     unittest.main()
