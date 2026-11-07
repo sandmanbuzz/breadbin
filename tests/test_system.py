@@ -43,8 +43,9 @@ class Boot(unittest.TestCase):
 
     def test_01_banner(self):
         s = self.v.screen()
-        self.assertIn("breadbin 0.2", s)
-        self.assertIn("kpatronas@gmail.com", s)
+        self.assertIn("breadbox 0.1", s)
+        self.assertIn("based on breadbin by kpatronas@gmail.com", s)
+        self.assertIn("based on breadbin by kpatronas@gmail.com\nmemory:", s)
 
     def test_02_echo(self):
         self.assertEqual(self.run_("echo hello world"), "hello world")
@@ -203,7 +204,8 @@ class Boot(unittest.TestCase):
         self.assertTrue(self.run_("uptime").startswith("up "))
         self.run_("date 13:45:10")
         self.assertTrue(self.run_("date").startswith("13:4"))
-        self.assertEqual(self.run_("version"), "breadbin 0.2 by kpatronas@gmail.com")
+        self.assertEqual(self.run_("version"),
+                         "breadbox 0.1\nbased on breadbin by kpatronas@gmail.com")
         size = os.path.getsize(os.path.join(ROOT, "rootfs", "etc", "motd"))
         self.assertIn("size: %d" % size, self.run_("stat /etc/motd"))
         self.assertIn("0000: 77 65 6c 63", self.run_("hexdump /etc/motd | head -1"))
