@@ -269,6 +269,11 @@ class DriverRuns(unittest.TestCase):
             p.stdout.close()
             p.stderr.close()
         self.assertEqual(p.returncode, 130)
+        # each stub writes its stopped file from its TERM trap, after the driver's wait can already
+        # have returned: poll for it (a fixed read right after p.wait was a race)
+        deadline = time.time() + 60
+        while time.time() < deadline and len([f for f in os.listdir(self.d) if f.startswith("stopped.")]) < n:
+            time.sleep(0.2)
         stopped = [f for f in os.listdir(self.d) if f.startswith("stopped.")]
         self.assertEqual(len(stopped), n, "every shard's run.sh must get the signal and clean up")
 
