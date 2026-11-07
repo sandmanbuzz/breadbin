@@ -444,7 +444,162 @@ def _build_status(con, snap, now, window_hours):
                               "last_at": fails[-1]["ts"] if fails else None}
     if window_hours is not None:
         out["window_hours"] = window_hours
+    names = list(out["buckets"])
+    rates, tier_now, reason_now = assess(con, names, now, out["stale"])
+    for name, r in rates.items():
+        out["buckets"][name]["rate"] = {k: v for k, v in r.items() if k != "utilization"}
+    then = now - dt.timedelta(minutes=HOLD_MIN)
+    _, tier_then, reason_then = assess(con, names, then, _stale_at(con, then))
+    has_then = any(_bucket_rate(con, n, then) for n in ("seven_day", "five_hour"))
+    out["tier_now"] = tier_now
+    out["tier_15m_ago"] = tier_then if has_then else None
+    if has_then and TIER_ORDER[tier_then] > TIER_ORDER[tier_now]:
+        out["suggested_tier"] = tier_then
+        out["reason"] = f"held from {HOLD_MIN} min ago (now {tier_now}): {reason_then}"
+    else:
+        out["suggested_tier"] = tier_now
+        out["reason"] = reason_now
     return out
+
+
+# ---------------------------------------------------------------- rate-driven tier
+
+RATE_WINDOWS = (("1h", 1), ("6h", 6), ("24h", 24))
+GAP_S = 600               # tolerated gap between the last sighting of a value and the cutoff
+MIN_SPAN_S = 600          # a rate needs at least 10 minutes between readings
+G_RATIO, R_RATIO = 0.7, 1.0
+FLOOR_PCT = 97.0          # seven_day at or above this: soft all-stop
+FIVE_HOUR_RED = 90.0      # five_hour at or above this is Red whatever the rate
+HOLD_MIN = 15             # a step toward Green must hold in two readings this far apart
+TIER_ORDER = {"G": 0, "Y": 1, "R": 2, "FLOOR": 3}
+
+
+def _measure(rows, all_rows, T, hours):
+    """Net utilization change over the trailing `hours` as of T, in %/hour.
+
+    rows: this bucket's snapshots (first_seen <= T) in the current quota window, oldest first;
+    all_rows: the same without the window filter. A value is taken to hold from first_seen until
+    the next snapshot, so the baseline at the cutoff is the snapshot covering it. A reset inside
+    the window leaves only the span since the reset (partial).
+    """
+    cutoff = T - dt.timedelta(hours=hours)
+    last = rows[-1]
+    end_t = min(parse_ts(last["last_seen"]), T)
+    base = None
+    for r in rows:
+        # the value must have been seen near the cutoff: a longer gap is unobserved change
+        if (parse_ts(r["first_seen"]) <= cutoff
+                and (parse_ts(r["last_seen"]) - cutoff).total_seconds() >= -GAP_S):
+            base = r
+    partial = base is None
+    if partial:
+        base = next((r for r in rows if parse_ts(r["first_seen"]) > cutoff), rows[0])
+        start_t = parse_ts(base["first_seen"])
+    else:
+        start_t = cutoff
+    reset = any(parse_ts(r["last_seen"]) >= cutoff for r in all_rows if r not in rows)
+    stamps = set()
+    for r in rows:
+        stamps.add(parse_ts(r["first_seen"]))
+        stamps.add(min(parse_ts(r["last_seen"]), T))
+    span = (end_t - start_t).total_seconds()
+    out = {"pct_per_hour": None, "span_hours": round(max(span, 0) / 3600, 2),
+           "partial": partial, "reset_in_window": reset}
+    if len(stamps) < 2 or span < MIN_SPAN_S:
+        return out
+    out["pct_per_hour"] = round((last["utilization"] - base["utilization"]) / (span / 3600), 3)
+    return out
+
+
+def _bucket_rate(con, bucket, T):
+    """The `rate` block for one bucket as the DB stood at T, or None without data."""
+    q = ("SELECT s.first_seen, s.last_seen, b.utilization, b.resets_at FROM buckets b "
+         "JOIN snapshots s ON s.id=b.snapshot_id WHERE b.bucket=? AND b.utilization IS NOT NULL "
+         "AND s.first_seen<=? ORDER BY s.first_seen, s.id")
+    all_rows = con.execute(q, (bucket, iso(T))).fetchall()
+    if not all_rows:
+        return None
+    cur = all_rows[-1]
+    reset_t = parse_ts(cur["resets_at"])
+    rows = [r for r in all_rows if reset_t is None or (
+        parse_ts(r["resets_at"]) and abs((parse_ts(r["resets_at"]) - reset_t).total_seconds())
+        <= RESET_SLOP)]
+    util = cur["utilization"]
+    rate = {"utilization": util,
+            "windows": {n: _measure(rows, all_rows, T, h) for n, h in RATE_WINDOWS},
+            "basis": None, "measured_pct_per_hour": None,
+            "hours_to_reset": None, "budget_rate_pct_per_hour": None, "ratio": None}
+    for n, _ in RATE_WINDOWS:
+        v = rate["windows"][n]["pct_per_hour"]
+        if v is not None:
+            rate["basis"], rate["measured_pct_per_hour"] = n, v
+            break
+    if reset_t is not None:
+        h = (reset_t - T).total_seconds() / 3600
+        rate["hours_to_reset"] = round(h, 2)
+        if h > 0:
+            budget = max(0.0, 100.0 - util) / h
+            rate["budget_rate_pct_per_hour"] = round(budget, 3)
+            m = rate["measured_pct_per_hour"]
+            if m is not None:
+                if budget > 0:  # at 100% there is no budget: _bucket_tier calls that R
+                    rate["ratio"] = round(m / budget, 3)
+    if bucket == "seven_day":
+        rate["floor_headroom_pct"] = round(FLOOR_PCT - util, 1)
+    return rate
+
+
+def _bucket_tier(name, rate):
+    """(tier, reason) for seven_day or five_hour from its rate block."""
+    util = rate["utilization"]
+    if name == "seven_day" and util >= FLOOR_PCT:
+        return "FLOOR", f"seven_day at {util:g}% (floor {FLOOR_PCT:g}%): soft all-stop: hand to owner"
+    if util >= 100:
+        return "R", f"{name} at {util:g}%: at cap"
+    if name == "five_hour" and util >= FIVE_HOUR_RED:
+        return "R", f"five_hour at {util:g}% (>= {FIVE_HOUR_RED:g}%)"
+    if rate["hours_to_reset"] is not None and rate["hours_to_reset"] <= 0:
+        return "Y", f"{name} reset time has passed; data is old"
+    ratio = rate["ratio"]
+    if ratio is None:
+        m = rate["measured_pct_per_hour"]
+        if m is not None and m > 0 and rate["budget_rate_pct_per_hour"] == 0:
+            return "R", f"{name} has no budget left and is still burning"
+        return "Y", f"{name}: rate unknown"
+    desc = f"{name}: {rate['measured_pct_per_hour']:+.2f}%/h ({rate['basis']}) vs budget " \
+           f"{rate['budget_rate_pct_per_hour']:.2f}%/h, ratio {ratio:.2f}"
+    if ratio >= R_RATIO:
+        return "R", desc + " (projected to cap before reset)"
+    if ratio >= G_RATIO:
+        return "Y", desc
+    return "G", desc
+
+
+def assess(con, bucket_names, T, stale):
+    """Rate blocks per bucket plus the overall tier as the DB stood at T."""
+    rates, tiers = {}, []
+    for name in bucket_names:
+        r = _bucket_rate(con, name, T)
+        if r is None:
+            continue
+        rates[name] = r
+        if name in ("seven_day", "five_hour"):
+            r["tier"], r["tier_reason"] = _bucket_tier(name, r)
+            tiers.append((r["tier"], r["tier_reason"]))
+    if not tiers:
+        tier, reason = "Y", "no seven_day or five_hour data"
+    else:
+        tier, reason = max(tiers, key=lambda x: TIER_ORDER[x[0]])
+    if stale and TIER_ORDER[tier] < TIER_ORDER["Y"]:
+        tier, reason = "Y", "poller stale (no good poll in %d min); " % STALE_MIN + reason
+    return rates, tier, reason
+
+
+def _stale_at(con, T):
+    ok = con.execute("SELECT ts FROM polls WHERE ok=1 AND ts<=? ORDER BY ts DESC LIMIT 1",
+                     (iso(T),)).fetchone()
+    t = parse_ts(ok["ts"]) if ok else None
+    return bool(t is None or (T - t).total_seconds() > STALE_MIN * 60)
 
 
 def window_delta(con, bucket, cur, now, hours):
@@ -478,6 +633,8 @@ def cmd_status(a):
         _status_empty("history DB missing or empty; run `claude-quota poll`")
     if a.human:
         print(f"as of {st['as_of']}")
+        print(f"  tier: {st['suggested_tier']} ({st['reason']}); now {st['tier_now']}, "
+              f"{HOLD_MIN} min ago {st['tier_15m_ago']}")
         for name, v in st["buckets"].items():
             u = v.get("utilization")
             line = f"  {name:<22} {u if u is not None else '-':>6}%"
@@ -492,6 +649,15 @@ def cmd_status(a):
             if w and w.get("delta") is not None:
                 line += f"  {w['delta']:+.1f} over {st['window_hours']}h"
             print(line)
+            rt = v.get("rate")
+            if rt:
+                m, bd, ra = rt["measured_pct_per_hour"], rt["budget_rate_pct_per_hour"], rt["ratio"]
+                print("    rate " + ("unknown" if m is None else f"{m:+.2f}%/h ({rt['basis']})")
+                      + "  budget " + ("-" if bd is None else f"{bd:.2f}%/h")
+                      + "  ratio " + ("-" if ra is None else f"{ra:.2f}")
+                      + (f"  tier {rt['tier']}" if "tier" in rt else "")
+                      + (f"  floor headroom {rt['floor_headroom_pct']}%"
+                         if "floor_headroom_pct" in rt else ""))
         print(f"  last good poll: {st['last_poll_ok']} ({st['last_poll_age_min']} min ago)"
               + ("  STALE" if st["stale"] else ""))
         rf = st["recent_failures"]
