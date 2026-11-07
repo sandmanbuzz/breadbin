@@ -102,6 +102,31 @@ class Glob(unittest.TestCase):
         # the matches that fit are kept, the rest are dropped (as for any full buffer)
         self.assertEqual(argvs(r), [["echo", prefix + names[0]]])
 
+    def glob_in(self, plen):
+        """`echo <prefix>*` where the prefix is plen characters (including its '/') and its directory exists under the full name."""
+        prefix = "/" + "a" * (plen - 2) + "/"
+        self.assertEqual(len(prefix), plen)
+        names = ["x1", "x2"]
+        files = {prefix[:-1]: b"".join(dirent(n) for n in names)}
+        files.setdefault(prefix[:46], dirent("decoy"))     # what a prefix cut at 46 characters would open
+        return prefix, names, argvs(sh(("echo " + prefix + "*\n").encode(), files=files))
+
+    def test_prefix_of_46_characters_still_globs(self):
+        prefix, names, got = self.glob_in(46)
+        self.assertEqual(got, [["echo", prefix + names[0], prefix + names[1]]])
+
+    def test_prefix_of_47_characters_still_globs(self):
+        # the 47th character is the '/', which is dropped: the directory is the full 46 characters
+        prefix, names, got = self.glob_in(47)
+        self.assertEqual(got, [["echo", prefix + names[0], prefix + names[1]]])
+
+    def test_prefix_too_long_for_the_directory_buffer_stays_literal(self):
+        # g_dir holds 47 characters: a longer prefix was cut short and a truncated directory was read,
+        # while every name still got the full prefix.
+        for plen in (48, 60, 121):
+            prefix, names, got = self.glob_in(plen)
+            self.assertEqual(got, [["echo", prefix + "*"]], plen)
+
 
 @unittest.skipIf(SKIP, SKIP)
 class History(unittest.TestCase):
