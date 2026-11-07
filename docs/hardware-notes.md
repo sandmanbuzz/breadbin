@@ -682,3 +682,16 @@ R13b's listed items (magic read-back, other-drive mount) are done. Shared-machin
 
 Other points from the same read, not yet acted on: (1) the stock-ROM stress runs (393, 227 and 512 reads, the 14 KB load) may have been started after a reset where the Breadbin runs were DMA-loaded into an undisturbed drive state; how each stock run was started should be recorded, and the stress program DMA-loaded into the same state. (2) The converse test was not run: the stock stress program with Breadbin's interrupt handler installed would separate handler from environment more directly than the swap that was done. (3) Five boots per kernel in the bisect cannot tell 25% from 0 to 50%; "the pre-fork kernel stalls too" is supported, not shown. (4) Silent wrong bytes: a timeout in `bus_acptr` always sets ST bit 1 and `iec_read1` stops and retries, so a *detected* stall cannot return bad data; what remains is a data bit sampled wrongly with no timeout (`bus_acptr` reads DATA once after CLK is released, with no second read), and the end of the block: `iec_read1` reads 256 bytes and tests only ST bit 1, not bit 6 (EOI) on the last byte. Logging bit 6 on byte 256 over a boot series is cheap and would show whether requiring it is safe. Nothing in the driver changed for these.
 
+
+### 2026-11-06, `mount uci /u` on the real Ultimate: PASS (hardware lane)
+
+Ultimate firmware 1.1.0, JiffyDOS KERNAL. Image: main 2a27321 build (sha256 `bf504d94…`), mounted on the Ultimate's drive A (bus 9, unlinked), booted by hand with `load"*",9,1` and `run`. Ran under `tools/with-lock -r ultimate`, one run at a time; the physical 1541 (bus 8) was not used.
+
+- `mount` before: `drive 9 on / (c64fs)`, `reu on /tmp (c64fs)`.
+- `mkdir /u`, then `mount uci /u`: no error. `mount` now lists `uci on /u (uci)`.
+- `ls /u`: `SD  Flash  Temp`.
+- `umount /u`: no error; `mount` back to the two lines above.
+
+Found on the way: `mount uci /u` without the mount point fails with `mount: /u: mount point does not exist`. The test backend's own boot (`load"*",8,1`) reads drive 8, which on this bench is the physical 1541; with the physical drive on bus 8 and drive A on bus 9 that boot stalled at `run` (no shell in 240 s). Booting from drive A on bus 9 avoids it.
+
+Not run: `tests.test_system` on the Ultimate for the UCI classes; the physical-disk checksum read-back.
