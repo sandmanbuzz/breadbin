@@ -232,7 +232,7 @@ New device code (UCI, the filesystem interface) all lands in the kernel, so the 
 
 | Module | Bytes | Where the bytes are | Idea |
 |---|---|---|---|
-| `proc` | 4321 | 3315 BSS: per-process save areas (12 × 158 = 1896) | save only the stack and zero page a process actually uses; fewer or smaller slots |
+| `proc` | 4321 | BSS: per-process save areas (10 × 190 = 1900) | save only the stack and zero page a process actually uses; fewer or smaller slots |
 | `file` | 2986 | 2664 code | review for shared helpers and repeated sequences |
 | `fs` | 2847 | 2506 code | the same |
 | `blk` | 2702 | 1628 BSS: six 256-byte cache buffers (1536) | fewer buffers, or put the cache in the REU when there is one |
