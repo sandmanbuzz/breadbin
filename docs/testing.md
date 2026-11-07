@@ -98,7 +98,8 @@ By test name; refine this as we learn what actually catches what.
 | c64fs (`fs.s`) | `test_06`, `test_07`, `test_10`, `test_16`, `Persistence` |
 | Block layer, IEC, CBM DOS, `format`, mounts (`blk.s`, `cbm.s`) | `Drives`, `Persistence`, `REU`, `Cache`, plus a boot |
 | REU, `/tmp`, the REU block cache, the REU root device | `REU`, `REURoot`, `Cache` (about 11 minutes: it boots VICE about 20 times, with a 2 MB REU image kept across boots) |
-| Loader, `as`, `basic` (`exec.s`, `as.s`, `basic.s`) | `test_17`, `test_18`, `test_19` |
+| Loader, `as`, `basic` (`exec.s`, `as.s`, `basic.s`) | `test_17`, `test_18`, `test_19`, `test_28` (the deepest legal expression across context switches; the stack cap) |
+| Context-switch stack (`proc.s`, `STKSAVE`) or anything that deepens a program's stack | measure: `make STKWATCH=1` (rebuild from clean: `rm -rf build`), then `tools/with-lock -r vice -- xvfb-run -a python3 -m unittest tests.stkwatch` (not in the suite; writes `build/stkwatch.txt`: high-water mark per workload and kills). The limit is `STKSAVE` (128) minus 1; keep the worst case at least 17 bytes under it |
 | A single command in `src/bin/` | the test that uses it (`grep -n <name> tests/test_system.py`): `tee`, `tail` and `sort` have `Pipes`, `touch` has `Touch` |
 | The assembler (`as.s`) | `tools/test_as.py` (host: `as` runs under py65 via `tools/asim.py`, 0.1 s per program), then `Boot.test_19` and `test_27` |
 | The compiler (`tools/cc.py`, through slice 3) | `tools/test_cc.py`, `tools/test_cc_run.py` (host; programs run on a 6502 simulator), then `tests.test_compiled.Compiled` on the machine |
