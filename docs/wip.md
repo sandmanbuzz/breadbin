@@ -18,7 +18,7 @@ The roster is `fleet/roster.md` on `fleet-store` (the owner's roster, published 
 
 ## Snapshot (main 45eacff, 2026-11-03)
 
-- **Memory (`make size`, main):** code and data end at `$CD9D`; room below `$CF00` is **354 bytes**; BSS and CODEHI end at `$FFEB`; room below `$FFFA` is **14 bytes** (a link-time assert guards it, `src/kernel/main.s`). `KSTART` is `$A200` (`src/kernel/k.inc`), so the user pool is `$0800-$A1FF`, 154 pages. An idle prompt holds 21 pages (B's measurement on main; the older 23-page figure is not reproduced). The figures are kept in `docs/size-ledger.tsv`, one row per commit (`tools/size_ledger.py`; see Open items).
+- **Memory (`make size`, main):** code and data end at `$CD38`; room below `$CF00` is **455 bytes**; BSS and CODEHI end at `$FFEB`; room below `$FFFA` is **14 bytes** (a link-time assert guards it, `src/kernel/main.s`). `KSTART` is `$A300` (`src/kernel/k.inc`), so the user pool is `$0800-$A2FF`, 155 pages. An idle prompt holds 21 pages (B's measurement on main; the older 23-page figure is not reproduced). The figures are kept in `docs/size-ledger.tsv`, one row per commit (`tools/size_ledger.py`; see Open items).
 - **Built and on main:** M0 (own interrupt entry, keyboard, screen, serial bus and channels); the REU block cache; the footprint pass; kernel modules (the `mod` command), the CBM DOS module, UCI v1 as a module (`mount uci`), `exec`, `turbo`.
 - **Hardware (Ultimate, firmware 1.1.0):** the Boot and Console subsets pass on the tip; the JiffyDOS-ROM drive set passes in the container (Boot.test_02, Drives 6 of 6). UCI measured: read and write round trips, one entry per READ DIR chunk, ABORT stops a listing after its chunk, LOAD REU at the end of 2 MB, RENAME onto an existing name answers FILE EXISTS. Full list and dates in `docs/hardware-notes.md`.
 - **Physical 1541:** boots the tip image to login in 22 s (5 of 5 on 2026-11-02, after the nibbler copy of the image). The disk is not compared sector by sector: the whole-disk reader stalled four times at sector 0 (`docs/hardware-notes.md`, "four stalls").
@@ -38,7 +38,7 @@ The roster is `fleet/roster.md` on `fleet-store` (the owner's roster, published 
 - **Physical-disk compare:** parked. The reader stalls before the first status byte of the first U1; its code and state are intact. The cause is not known. The read-back that exists (`mcdup` with read-back) rewrites every sector and is the owner's call.
 - **UCI:** the disk-full case (Q4) and Q9 (turbo with UCI, low priority) are open. Disk-full is the owner's to run.
 - **Drives split by method:** done and landed (`782fbdf`, six shards, `tools/ci/shards.txt`); the sharded VICE series on it was green three times (see `docs/ci.md`). Nothing open on this lane.
-- **Size ledger:** `tools/size_ledger.py` and `docs/size-ledger.tsv` are on `feat/size-ledger` (9353b44). Land it, then point `CLAUDE.md`'s status at the ledger rather than at a number.
+- **Size ledger:** `tools/size_ledger.py` and `docs/size-ledger.tsv` are on main (9353b44); `CLAUDE.md`'s status points at the ledger.
 - **Tests:** `test_keyboard` needs X (container); the JiffyDOS-ROM subset is partly run (above).
 - **Roster:** `fleet/missing.md` has no writer yet.
 - **Origin and pushes:** the user's decision. Decided: push at first numbered release
