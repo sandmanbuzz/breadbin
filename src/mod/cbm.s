@@ -6,8 +6,8 @@
 ; afterwards the cache for that drive is dropped. Pseudo inodes: 1 = the root directory,
 ; k+2 = directory entry k.
 ;
-; The resident part (src/kernel/cbm.s: mount, umount, mntinfo, diskio, and ten stubs that
-; jump through cbmv) loads this module the first time a CBM disk is mounted; init fills the
+; The resident part (src/kernel/cbm.s: mount, umount, mntinfo, diskio, and ten jmp stubs
+; at cbmv) loads this module the first time a CBM disk is mounted; init fills the
 ; vectors. fini refuses: once loaded it stays (a CBM mount may be using it).
 .include "../kernel/k.inc"
 .include "../kernel/uci.inc"
@@ -38,11 +38,19 @@ init:   lda mod_busy
         beq @no
         lda cbm_up
         bne @no
-        ldx #19                 ; fill the resident vectors
+        ldx #0                  ; point the resident jmp stubs (3 bytes each) at our routines
+        ldy #1
 @l:     lda vtab,x
-        sta cbmv,x
-        dex
-        bpl @l
+        sta cbmv,y
+        lda vtab+1,x
+        sta cbmv+1,y
+        iny
+        iny
+        iny
+        inx
+        inx
+        cpx #20
+        bne @l
         lda #1
         sta cbm_up
         clc

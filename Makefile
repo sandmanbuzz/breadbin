@@ -30,7 +30,12 @@ $(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/bread
 	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) $< -o $@
 
 $(BUILD)/breadbin.prg: $(KOBJ) src/kernel.cfg
-	ld65 -C src/kernel.cfg -m $(BUILD)/kernel.map -Ln $(BUILD)/kernel.lbl -o $@ $(KOBJ)
+	@# ld65 warns when a jmp (abs) pointer sits at $$xxFF (6502 page wrap): that is a bug, not a warning
+	ld65 -C src/kernel.cfg -m $(BUILD)/kernel.map -Ln $(BUILD)/kernel.lbl -o $@ $(KOBJ) 2> $(BUILD)/ld65.err; r=$$?; \
+	cat $(BUILD)/ld65.err >&2; \
+	if grep -q 'across page border' $(BUILD)/ld65.err; then \
+	  echo 'error: jmp (ind) pointer at $$xxFF (page wrap); see the warning(s) above' >&2; rm -f $@; exit 1; fi; \
+	exit $$r
 
 $(BUILD)/lib/%.o: src/lib/%.s src/lib/lib.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
