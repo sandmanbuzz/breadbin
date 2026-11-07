@@ -96,8 +96,9 @@ class Glob(unittest.TestCase):
         files = {"/a" * 23: b"".join(dirent(n) for n in names)}
         r = sh(("echo " + prefix + "*\n").encode(), files=files)
         gbuf = label("gbuf")
-        after = bytes(r.mem[gbuf + 256:gbuf + 256 + 64])
-        self.assertEqual(after, bytes(64), "glob wrote past the end of gbuf")
+        after = bytes(r.mem[gbuf + 257:gbuf + 256 + 64])    # tpos (first) follows the typed line's length
+        control = bytes(sh(b"echo x\n").mem[gbuf + 257:gbuf + 256 + 64])    # the variables after gbuf at rest
+        self.assertEqual(after, control, "glob wrote past the end of gbuf")
         # the matches that fit are kept, the rest are dropped (as for any full buffer)
         self.assertEqual(argvs(r), [["echo", prefix + names[0]]])
 
