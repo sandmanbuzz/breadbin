@@ -1,0 +1,7 @@
+[Unit]
+Description=Record Claude subscription quota usage (claude-quota poll)
+
+[Service]
+Type=oneshot
+# @REPO@ is replaced with the repository path by tools/install-quota-timer.sh.
+ExecStart=/usr/bin/env python3 @REPO@/tools/claude-quota poll --quiet

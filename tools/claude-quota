@@ -10,6 +10,10 @@ Commands
   history  [--since 24h] [--bucket five_hour] [--format json|csv]
   mark     "text" [--tag swarm]      Record a workload event to correlate against usage
   raw                                Print the raw upstream payload (debug schema drift)
+  status   [--json|--human] [--window-hours N]
+                                     Read ONLY the history DB (no network, no token): latest
+                                     values, burn, last good poll, staleness, recent failures.
+                                     Exit 5 if the DB is missing/empty, 6 if stale.
 
 Env
   CLAUDE_QUOTA_DB        SQLite path (default ~/.local/share/claude-quota/quota.db; holds raw
@@ -18,7 +22,8 @@ Env
   CLAUDE_CREDENTIALS     Path to Claude Code credentials JSON (default ~/.claude/.credentials.json)
   CLAUDE_QUOTA_BASE_URL  Override API base (default https://api.anthropic.com)
 
-Exit codes: 0 ok, 2 auth problem (token missing/expired), 3 upstream/network error, 4 parse error.
+Exit codes: 0 ok, 2 auth problem (token missing/expired), 3 upstream/network error, 4 parse error,
+5 status: DB missing or empty, 6 status: stale (no successful poll in 15 min).
 """
 import argparse
 import datetime as dt
@@ -388,6 +393,116 @@ def cmd_poll(a):
         print(json.dumps({"ts": iso(now), "changed": changed}))
 
 
+STALE_MIN = 15
+
+
+def _status_empty(msg):
+    print(json.dumps({"error": msg, "exit_code": 5}))
+    sys.exit(5)
+
+
+def build_status(con, now, window_hours=None):
+    """Everything `status` reports, from the DB alone. Returns None if no snapshots."""
+    try:
+        snap = con.execute("SELECT id, first_seen, last_seen FROM snapshots "
+                           "ORDER BY id DESC LIMIT 1").fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    if not snap:
+        return None
+    try:
+        return _build_status(con, snap, now, window_hours)
+    except sqlite3.DatabaseError:
+        return None
+
+
+def _build_status(con, snap, now, window_hours):
+    out = {"as_of": iso(now), "snapshot_first_seen": snap["first_seen"],
+           "snapshot_last_seen": snap["last_seen"], "buckets": {}}
+    for r in con.execute("SELECT bucket, utilization, resets_at FROM buckets "
+                         "WHERE snapshot_id=? ORDER BY bucket", (snap["id"],)):
+        cur = {"utilization": r["utilization"], "resets_at": r["resets_at"]}
+        entry = dict(cur)
+        if r["utilization"] is not None:
+            entry["remaining"] = round(100 - r["utilization"], 1)
+        b = burn(con, r["bucket"], cur, now)
+        if b:
+            entry["burn"] = b
+        if window_hours is not None:
+            entry["window"] = window_delta(con, r["bucket"], cur, now, window_hours)
+        out["buckets"][r["bucket"]] = entry
+    ok = con.execute("SELECT ts FROM polls WHERE ok=1 ORDER BY ts DESC LIMIT 1").fetchone()
+    t = parse_ts(ok["ts"]) if ok else None
+    out["last_poll_ok"] = ok["ts"] if ok else None
+    out["last_poll_age_min"] = round((now - t).total_seconds() / 60, 1) if t else None
+    out["stale"] = bool(t is None or (now - t).total_seconds() > STALE_MIN * 60)
+    hour_ago = iso(now - dt.timedelta(hours=1))
+    fails = con.execute("SELECT ts, error FROM polls WHERE ok=0 AND ts>=? ORDER BY ts",
+                        (hour_ago,)).fetchall()
+    out["recent_failures"] = {"count": len(fails),
+                              "last_error": fails[-1]["error"] if fails else None,
+                              "last_at": fails[-1]["ts"] if fails else None}
+    if window_hours is not None:
+        out["window_hours"] = window_hours
+    return out
+
+
+def window_delta(con, bucket, cur, now, hours):
+    """Net change in utilization over the last `hours`, from snapshots.
+
+    Baseline: the newest snapshot first seen at or before the cutoff, else the oldest one
+    in the window (partial=true). A reset inside the window makes the delta net, maybe negative.
+    """
+    cutoff = iso(now - dt.timedelta(hours=hours))
+    q = ("SELECT s.first_seen, b.utilization, b.resets_at FROM buckets b "
+         "JOIN snapshots s ON s.id=b.snapshot_id WHERE b.bucket=? AND b.utilization IS NOT NULL ")
+    base = con.execute(q + "AND s.first_seen<=? ORDER BY s.first_seen DESC LIMIT 1",
+                       (bucket, cutoff)).fetchone()
+    partial = base is None
+    if partial:
+        base = con.execute(q + "ORDER BY s.first_seen LIMIT 1", (bucket,)).fetchone()
+    if base is None or cur.get("utilization") is None:
+        return {"delta": None}
+    a, b = parse_ts(base["resets_at"]), parse_ts(cur.get("resets_at"))
+    reset = bool(a and b and abs((a - b).total_seconds()) > RESET_SLOP)
+    return {"delta": round(cur["utilization"] - base["utilization"], 2),
+            "from": base["utilization"], "from_ts": base["first_seen"],
+            "partial": partial, "reset_in_window": reset}
+
+
+def cmd_status(a):
+    now = utcnow()
+    con = db(create=False)
+    st = build_status(con, now, a.window_hours) if con is not None else None
+    if st is None:
+        _status_empty("history DB missing or empty; run `claude-quota poll`")
+    if a.human:
+        print(f"as of {st['as_of']}")
+        for name, v in st["buckets"].items():
+            u = v.get("utilization")
+            line = f"  {name:<22} {u if u is not None else '-':>6}%"
+            if v.get("resets_at"):
+                line += f"  resets {v['resets_at']}"
+            b = v.get("burn") or {}
+            if "rate_pct_per_hour" in b:
+                line += f"  {b['rate_pct_per_hour']:+.2f}%/h -> {b['projected_at_reset']}% at reset"
+                if b.get("will_cap_before_reset"):
+                    line += f"  CAPS in {b['hours_until_cap']}h"
+            w = v.get("window")
+            if w and w.get("delta") is not None:
+                line += f"  {w['delta']:+.1f} over {st['window_hours']}h"
+            print(line)
+        print(f"  last good poll: {st['last_poll_ok']} ({st['last_poll_age_min']} min ago)"
+              + ("  STALE" if st["stale"] else ""))
+        rf = st["recent_failures"]
+        if rf["count"]:
+            print(f"  failures in last hour: {rf['count']}; last: {rf['last_error']}")
+    else:
+        print(json.dumps(st, indent=2))
+    if st["stale"]:
+        sys.exit(6)
+
+
 def cmd_history(a):
     con = db()
     since = parse_since(a.since)
@@ -449,6 +564,13 @@ def main():
     s.add_argument("text")
     s.add_argument("--tag")
     s.set_defaults(fn=cmd_mark)
+    s = sub.add_parser("status", help="read the DB only: latest, burn, staleness (no network)")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--json", action="store_true", help="JSON output (default)")
+    g.add_argument("--human", action="store_true", help="readable output")
+    s.add_argument("--window-hours", type=float, metavar="N",
+                   help="add net utilization change per bucket over the last N hours")
+    s.set_defaults(fn=cmd_status)
     s = sub.add_parser("raw", help="print raw upstream payload")
     s.set_defaults(fn=cmd_raw)
     a = p.parse_args()
