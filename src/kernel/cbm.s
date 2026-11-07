@@ -35,22 +35,24 @@ magic:   .byte "C64FS"
 
 ; ---------------------------------------------------------------------
 ; The CBM filesystem lives in /lib/km/cbm (src/mod/cbm.s). These stubs are what file.s and
-; fs.s call; the module's init points cbmv at its routines.
+; fs.s call; the module's init points them at its routines by writing the jmp operands
+; (like uci.s). They are jmp, not jmp (ind): the 6502 reads a pointer at $xxFF across the
+; page, and where cbmv lands moves with every byte added before it.
 .segment "DATA"
-cbmv:   .word cbm_none, cbm_none, cbm_none, cbm_none, cbm_none
-        .word cbm_none, cbm_none, cbm_none, cbm_none, cbm_none
+cbmv:
+cbm_iget:       jmp cbm_none
+cbm_lookup:     jmp cbm_none
+cbm_read:       jmp cbm_none
+cbm_readdir:    jmp cbm_none
+cbm_open_write: jmp cbm_none
+cbm_write:      jmp cbm_none
+cbm_wclose:     jmp cbm_none
+cbm_scratch:    jmp cbm_none
+cbm_rename:     jmp cbm_none
+cbm_fsinfo:     jmp cbm_none
+.assert * - cbmv = 30, error, "the stubs and vtab in src/mod/cbm.s differ in length"
 
 .segment "CODEHI"            ; runs above the BSS, out of the way of the user pool
-cbm_iget:       jmp (cbmv+0)
-cbm_lookup:     jmp (cbmv+2)
-cbm_read:       jmp (cbmv+4)
-cbm_readdir:    jmp (cbmv+6)
-cbm_open_write: jmp (cbmv+8)
-cbm_write:      jmp (cbmv+10)
-cbm_wclose:     jmp (cbmv+12)
-cbm_scratch:    jmp (cbmv+14)
-cbm_rename:     jmp (cbmv+16)
-cbm_fsinfo:     jmp (cbmv+18)
 cbm_none:       lda #ENODEV
         sec
         rts
