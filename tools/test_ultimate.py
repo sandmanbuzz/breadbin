@@ -228,6 +228,25 @@ class Target(Base):
         UltimateTarget(f.name, client=self.u, settle=0)
         self.assertEqual(self.fake.paused_at_reset, [False])    # the pause did not reach the reset
 
+    def test_boot_loads_from_the_bus_the_environment_names(self):
+        import os
+        import tempfile
+        self.fake.ram[0x0289] = 10
+        self.fake.poke(0x0400, b"\x20" * 1000)
+        self.fake.poke(0x0400, bytes([0x12, 0x05, 0x01, 0x04, 0x19, 0x2E]))      # "ready."
+        seen = self.drain()
+        with tempfile.NamedTemporaryFile(suffix=".d64", delete=False) as f:
+            f.write(b"IMG" * 50)
+        self.addCleanup(os.unlink, f.name)
+        os.environ["BREADBIN_ULTIMATE_BUS"] = "9"
+        self.addCleanup(os.environ.pop, "BREADBIN_ULTIMATE_BUS", None)
+        UltimateTarget(f.name, client=self.u, settle=0)
+        deadline = time.time() + 5
+        want = bytes(petscii(c) for c in 'load"*",9,1\nrun\n')
+        while len(seen) < len(want) and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(bytes(seen), want)
+
     def test_boot_mounts_resets_and_types_the_load_command(self):
         import os
         import tempfile
