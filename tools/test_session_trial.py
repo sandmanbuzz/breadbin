@@ -44,9 +44,13 @@ class Sim:
         self.seen_resets, self.seen_runs = 0, 0
         self.lines = []
         self.events = []          # (virtual time, what)
+        self.loading = False
+        self.reads = []           # (virtual time, address, length) of every readmem
         self.big_reads = []       # (virtual time, address, length) of reads >= 256 bytes
         self.pending = []         # (time, fn)
         self.kbuf = ""
+        self.run_after = False    # RUN queued in the key buffer, read by BASIC after READY.
+        self.marks = []           # (time, "start"|"terminal"): a transfer begins / its end is on screen
         fake.on_readmem = self.on_read
         self.sync_screen()
 
@@ -61,10 +65,12 @@ class Sim:
             self.step()
 
     def on_read(self, a, ln):
+        self.reads.append((self.t, a, ln))
         if ln >= 256:
             self.big_reads.append((self.t, a, ln))
 
     def sync_screen(self):
+        self.fake.ram[0xD6] = min(len(self.lines), 24)        # the cursor row
         self.fake.ram[0x0400:0x0400 + 1000] = screen_codes(self.lines)
 
     def at(self, dt, fn):
@@ -79,10 +85,12 @@ class Sim:
             self.lines = [] if ran else ["**** commodore 64 ****", "ready."]
             self.events.append((self.t, "run_prg" if ran else "reset"))
             if ran:
+                self.marks.append((self.t, "start"))
                 self.boot(40)
         if f.ram[0xC6]:
             n = f.ram[0xC6]
-            text = bytes(f.ram[0x0277:0x0277 + n]).decode("latin-1").lower()
+            text = bytes(f.ram[0x0277:0x0277 + n]).decode("latin-1").translate(
+                {0xCF: "O", 0xD5: "U"}).lower()          # shifted O, U: the l-O and r-U abbreviations
             f.ram[0xC6] = 0
             self.kbuf += text                 # keys arrive 8 at a time; a line ends at Return
             *done, self.kbuf = self.kbuf.split("\r")
@@ -95,9 +103,18 @@ class Sim:
         self.sync_screen()
 
     def command(self, cmd):
+        if cmd.startswith('lo"'):
+            cmd = "load" + cmd[2:]
+        if cmd == "ru":
+            cmd = "run"
         self.events.append((self.t, cmd))
+        if cmd == "run" and (self.lines[-1:] != ["ready."] or self.loading):
+            self.run_after = True              # typed ahead: BASIC reads it after READY.
+            return
         self.lines.append(cmd)
         if cmd.startswith("load"):
+            self.marks.append((self.t, "start"))
+            self.loading = True
             how = self.loads.pop(0)
             self.lines += ["searching for " + cmd.split('"')[1], "loading"]
             ctrl = cmd.endswith(",8")
@@ -106,7 +123,11 @@ class Sim:
             if how == "hang":
                 return
             if how == "error":
-                self.at(5, lambda: self.lines.extend(["?load error", "ready."]))
+                def err():
+                    self.lines.extend(["?load error", "ready."])
+                    self.loading, self.run_after = False, False
+                    self.marks.append((self.t, "terminal"))
+                self.at(5, err)
                 return
             if how == "corrupt":
                 data = bytes([data[0] ^ 1]) + data[1:]
@@ -119,21 +140,31 @@ class Sim:
                 f.ram[0x2B:0x2D] = (0x0801).to_bytes(2, "little")
                 f.ram[0xAE:0xB0] = (addr + len(data)).to_bytes(2, "little")
                 self.lines.append("ready.")
+                self.loading = False
+                self.marks.append((self.t, "terminal"))
+                if self.run_after:
+                    self.run_after = False
+                    self.command("run")
             self.at(8, done)
         elif cmd == "run":
             self.boot(25)
 
     def boot(self, dt):
         how = self.boots.pop(0)
+        self.lines = []                       # Breadbin clears the screen
         if how == "ok":
             def login():
+                self.marks.append((self.t, "terminal"))
                 for n, a in self.labels.items():
                     self.fake.ram[a] = {"io_nread": 200, "io_nretry": 3, "io_nfail": 0,
                                         "io_neoi": 9}.get(n, 0x55)
                 self.lines.append("login:")
             self.at(dt, login)
         elif how == "panic":
-            self.at(10, lambda: self.lines.append("kernel panic: root mount"))
+            def panic():
+                self.lines.append("kernel panic: root mount")
+                self.marks.append((self.t, "terminal"))
+            self.at(10, panic)
         elif how == "hang":
             self.fake.ram[0x90] = 0x02       # a receive timeout in ST: the class S signature
             self.fake.ram[0xDD00] = 0x87
@@ -270,19 +301,68 @@ class Full(Base):
         # the configuration was applied: soft IEC off during the run
         self.assertIn(("SoftIEC Drive Settings", "IEC Drive", "Disabled"), self.fake.config_puts)
 
-    def test_dma_rule_no_screen_read_early_in_a_transfer(self):
+    def dma_run(self, mode):
         sim = Sim(self.fake, self.prg, loads=["ok"] * 3, boots=["ok", "ok"], labels=self.labels)
-        self.run_session(sim, plan="1 C 1\n2 KBD 1\n")
-        starts = [t for t, what in sim.events if what.startswith("load") or what == "run"
-                  or what == "run_prg"]
-        self.assertEqual(len(starts), 5)           # C load, K load, B load, B run, D run_prg
-        screen_reads = [t for t, a, ln in sim.big_reads if a == 0x0400]
-        for t0 in starts:
-            # the sim notices a command up to one 0.5 s step after the runner sent it
-            early = [t for t in screen_reads if t0 <= t < t0 + session.FIRST_READ - 1]
-            self.assertEqual(early, [], f"screen-sized read inside {session.FIRST_READ} s of {t0}")
-        # and big reads of the loaded range happen only after READY. (K/C verification)
-        self.assertTrue(screen_reads)
+        self.run_session(sim, plan="1 C 1\n2 KBD 1\n", extra=["--poll-mode", mode])
+        self.assertEqual(self.status, 0)
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual([r["outcome"] for r in rows], ["pass"] * 4)
+        for r in rows:
+            self.assertIn("poll=" + mode, r["detail"])
+        self.assertTrue(any(f"poll mode {mode}" in c for c in self.comments()))
+        return sim
+
+    def windows(self, sim):
+        """(start, terminal) per transfer, from the stand-in C64's own marks."""
+        out, start = [], None
+        for t, m in sim.marks:
+            if m == "start" and start is None:
+                start = t
+            elif m == "terminal" and start is not None:
+                out.append((start, t))
+                start = None
+        return out
+
+    def test_poll_mode_none_reads_nothing_during_a_trial(self):
+        sim = self.dma_run("none")
+        w = self.windows(sim)
+        self.assertEqual(len(w), 4)               # C, K, B (load + RUN count as one start), D
+        limits = [120, 120, 150, 170]
+        for (start, term), lim in zip(w, limits):
+            # not one readmem, of any length, from the start until the limit (one second of slack for
+            # the stand-in's half-second steps); the final screen read is at the limit
+            inside = [r for r in sim.reads if start <= r[0] < start + lim - 1]
+            self.assertEqual(inside, [], f"read inside a trial: {inside}")
+            at_limit = [r for r in sim.reads if start + lim - 1 <= r[0] <= start + lim + 1
+                        and r[2] == 1000]
+            self.assertEqual(len(at_limit), 1)
+
+    def test_poll_mode_byte_reads_one_byte_before_the_terminal_state(self):
+        sim = self.dma_run("byte")
+        w = self.windows(sim)
+        self.assertEqual(len(w), 4)
+        polls = 0
+        for start, term in w:
+            inside = [r for r in sim.reads if start <= r[0] < term]
+            self.assertTrue(all(r[2] == 1 for r in inside), f"long read before terminal: {inside}")
+            polls += len(inside)
+            # at most one byte read per 2 s
+            ts = [r[0] for r in inside]
+            self.assertTrue(all(b - a >= 2 - 1e-9 for a, b in zip(ts, ts[1:])))
+            # and the full screen read comes only after the terminal state is on screen
+            after = [r for r in sim.reads if r[0] >= term and r[2] == 1000]
+            self.assertTrue(after)
+        self.assertGreater(polls, 3)
+
+    def test_poll_mode_byte_hang_reads_the_screen_only_at_the_limit(self):
+        sim = Sim(self.fake, self.prg, loads=["hang"], labels=self.labels)
+        self.run_session(sim, plan="2 K 1\n", extra=["--poll-mode", "byte"])
+        start = [t for t, m in sim.marks if m == "start"][0]
+        big = [r for r in sim.reads if r[2] >= 256 and r[1] == 0x0400]
+        self.assertEqual(len(big), 2)               # idle READY. check, then the limit
+        self.assertGreaterEqual(big[1][0], start + 120 - 1)
+        row = [r for r in self.rows() if r["outcome"] != "NOTE"][0]
+        self.assertEqual(row["outcome"], "LOADING hang")
 
     def test_missing_labels_leave_counters_blank(self):
         os.remove(self.p("b.lbl"))
@@ -394,7 +474,7 @@ class Stopping(Base):
 
         def sleep(s):
             state["n"] += 1
-            if state["n"] == 4:
+            if state["n"] == 3:
                 raise KeyboardInterrupt
             real_sleep(s)
         sim.sleep = sleep

@@ -45,6 +45,8 @@ ARMS = "CKBD"
 LIMITS = {"C": 120, "K": 120, "B": 150, "D": 170}      # seconds, protocol
 FIRST_READ = 20           # no DMA read this long after a transfer starts (plainboot)
 POLL = 10                 # then one screen read per this many seconds
+BYTE_FIRST = 2            # --poll-mode byte, KERNAL load: first 1-byte read this long after the command
+BYTE_EVERY = 2            # and at most one 1-byte read per this many seconds
 SETTLE = 6                # after a reset, before the first read (stockload)
 ARM_FAIL_LIMIT = 5
 WEDGE_LIMIT = 3
@@ -329,8 +331,10 @@ class Rig:
     """Everything that touches the Ultimate for one trial."""
 
     def __init__(self, u, clock, image, labels, control_file, first_read=FIRST_READ, poll=POLL,
-                 settle=SETTLE, limits=None):
+                 settle=SETTLE, limits=None, poll_mode="none"):
         self.u, self.clock = u, clock
+        self.poll_mode = poll_mode
+        self.r0 = 0                  # cursor row ($D6) read on the idle bus before the load command
         self.prg = image
         self.addr, self.body = image[0] | image[1] << 8, image[2:]
         self.labels = labels
@@ -369,17 +373,55 @@ class Rig:
         self.u.reset()
         self.clock.sleep(self.settle)
 
-    def poll_until(self, t_from, t_end, classify):
-        """No read before t_from + first_read, then one screen read per `poll`. -> state or None."""
-        self.clock.sleep(t_from + self.first_read - self.clock.now())
+    def feed_raw(self, data, check=True):
+        """Bytes into the key buffer. check=False writes blind: no readmem at all."""
+        self.u.pause()
+        try:
+            if check and self.u.readmem(0xC6, 1)[0] != 0:
+                raise TimeoutError("key buffer not empty")
+            self.u.writemem(0x0277, bytes(data))
+            self.u.writemem(0xC6, bytes([len(data)]))
+        finally:
+            self.u.resume()
+
+    def wait(self, t_from, t_end, classify, kind):
+        """Wait for a terminal screen state, touching the machine as little as the poll mode allows.
+
+        none: no readmem at all until t_end; then ONE screen read, classified.
+        byte: one 1-byte readmem of $D6 (the cursor row) at most every BYTE_EVERY s; the screen is read
+              in full only after that byte signals a terminal state, or at t_end.
+          kind "load" (KERNAL LOAD, polling from t_from + BYTE_FIRST): the KERNAL prints SEARCHING,
+              LOADING and READY. one line each, so the cursor row sits at r0+4 (r0 = the command's row,
+              read before the command) only once READY. is printed; nothing before that can trigger.
+          kind "boot" (Breadbin running or booting; polling starts FIRST_READ s in, like plainboot,
+              so the root mount is not touched): the console may not keep $D6, so any change of $D6
+              from its first value is taken as activity; if it never changes, the read at t_end
+              decides. Returns the classifier's state or None (timeout).
+        Never reads more than 1 byte before a terminal state or t_end."""
+        if self.poll_mode == "none":
+            self.clock.sleep(t_end - self.clock.now())
+            return classify(self.screen())
+        self.clock.sleep(t_from + (BYTE_FIRST if kind == "load" else self.first_read) - self.clock.now())
+        base = None if kind == "boot" else self.r0
+        fired = None
         while True:
-            st = classify(self.screen())
-            if st:
-                return st
+            b = self.u.readmem(0xD6, 1)[0]
+            if kind == "load":
+                trig = b >= self.r0 + 4 and b != fired
+            else:
+                trig = base is not None and b != base
+                base = b if base is None else base
+            if trig:
+                fired = b
+                if kind == "boot":
+                    base = b
+                st = classify(self.screen())
+                if st:
+                    return st
             left = t_end - self.clock.now()
             if left <= 0:
-                return None
-            self.clock.sleep(min(self.poll, left))
+                return classify(self.screen()) if not trig else None
+            self.clock.sleep(min(BYTE_EVERY, left))
 
     def iostat(self):
         """Counter and last-event labels, read with short reads; blank where a label is absent."""
@@ -447,6 +489,7 @@ class Rig:
         else:
             res.update(outcome="other", detail="no READY. after reset")
             return self._done(res, t0)
+        self.r0 = self.u.readmem(0xD6, 1)[0]
         t0 = self.clock.now()
         self._arm_load(arm, res, t0)
         return self._done(res, t0)
@@ -456,10 +499,13 @@ class Rig:
         return res
 
     def _arm_load(self, arm, res, t0):
+        limit = self.limits[arm]
+        if arm == "B" and self.poll_mode == "none":
+            self._arm_b_blind(res)
+            return
         cmd = f'load"{self.control_file}",8\n' if arm == "C" else 'load"*",8,1\n'
         self.feed(cmd)
-        limit = self.limits[arm]
-        st = self.poll_until(t0, t0 + limit, classify_load)
+        st = self.wait(t0, t0 + limit, classify_load, "load")
         if st == "load_error":
             res.update(outcome="LOAD ERROR", detail=self._errline())
             return
@@ -506,14 +552,41 @@ class Rig:
         else:  # B
             self.feed("run\n")
             t_run = self.clock.now()
-            st = self.poll_until(t_run, t0 + self.limits["B"], classify_boot)
+            st = self.wait(t_run, t0 + self.limits["B"], classify_boot, "boot")
             self._boot_result(res, st, "B")
+
+    def _arm_b_blind(self, res):
+        """Arm B with no reads while the disk is busy: `run` has to be queued before the load starts.
+        The key buffer holds 10 bytes, so: LOAD"*",8,1 as the abbreviation `l`+shift-O (9 bytes) is
+        written first, one second is given for the editor to take it in, then Return and `r`+shift-U
+        (RUN) and Return are written in one blind write. Return starts the load; the RUN stays in the
+        buffer and is read by BASIC after READY. All writes precede the transfer."""
+        self.feed_raw(bytes([0x4C, 0xCF]) + b'"*",8,1')
+        self.clock.sleep(1)
+        self.feed_raw(bytes([0x0D, 0x52, 0xD5, 0x0D]), check=False)
+        t0 = self.clock.now()
+        self.wait(t0, t0 + self.limits["B"], lambda lines: None, "boot")   # sleeps to the limit
+        lines = self.last_lines
+        st = classify_boot(lines)
+        ld = classify_load(lines)
+        if st:
+            self._boot_result(res, st, "B")
+        elif ld == "load_error":
+            res.update(outcome="LOAD ERROR", detail=self._errline())
+        elif ld == "other_error":
+            res.update(outcome="other", detail=self._errline())
+        elif any(l.startswith(("loading", "searching")) for l in lines):
+            self._timeout(res, "LOADING hang", boot_phase=False)
+        elif ld == "loaded":
+            res.update(outcome="other", detail="load finished but RUN never started a boot")
+        else:
+            self._boot_result(res, None, "B")
 
     def _arm_d(self, res):
         self.u.resume()
         t0 = self.clock.now()
         self.u.run_prg(self.prg)         # reset, load by DMA, RUN; $BA mimics device 8
-        st = self.poll_until(t0, t0 + self.limits["D"], classify_boot)
+        st = self.wait(t0, t0 + self.limits["D"], classify_boot, "boot")
         self._boot_result(res, st, "D")
 
     def _boot_result(self, res, st, arm):
@@ -621,7 +694,7 @@ class Session:
         finally:
             io = r.get("iostat") or {}
             self.res.row(**row, outcome=r["outcome"], seconds=r.get("seconds", ""),
-                         detail=r.get("detail", ""), dump=r.get("dump", ""),
+                         detail=(r.get("detail", "") + " poll=" + self.rig.poll_mode).strip(), dump=r.get("dump", ""),
                          io_nread=io.get("io_nread", ""), io_nretry=io.get("io_nretry", ""),
                          io_nfail=io.get("io_nfail", ""), io_neoi=io.get("io_neoi", ""),
                          io_last=io.get("io_last", ""), note="; ".join(note))
@@ -675,6 +748,9 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
     ap.add_argument("--no-prompt", action="store_true",
                     help="tests: skip hand actions; the LED answer is 'n'")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--poll-mode", choices=("none", "byte"), default="none",
+                    help="none: no readmem between a trial's start and its limit, then one screen read; "
+                         "byte: 1-byte reads of $D6 at most every 2 s, full screen only on a terminal state")
     ap.add_argument("--reboot-wait", type=float, default=15)
     ap.add_argument("--set", action="append", default=[], metavar="CATEGORY/ITEM=VALUE",
                     help="extra config to set (and read back); restored to its prior value")
@@ -713,14 +789,16 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
         ask = (lambda text: "n" if text.startswith("Is the drive LED") else "")
 
     log = Results(a.out)
-    rig = Rig(client, clock, prg, labels, a.control_file)
+    rig = Rig(client, clock, prg, labels, a.control_file, poll_mode=a.poll_mode)
     log.comment(f"session {a.session}; plan {os.path.basename(a.plan)}: {len(order)} trials")
     log.comment(f"image {os.path.basename(a.image)} sha256 {sha}; commit {a.commit or '-'}; "
                 f"disk {a.disk_id}; control file {a.control_file}")
     log.comment(f"labels: {'found, ' + str(len(labels)) if labels else 'absent'}; "
                 f"iostat labels present: {[n for n in IO_COUNTERS if n in labels] or 'none'}")
     log.comment(f"drive powered on {a.drive_on_minutes_ago:g} min before session start")
-    log.comment(f"first read {rig.first_read} s, poll {rig.poll} s, limits {rig.limits}")
+    log.comment(f"poll mode {a.poll_mode} (none: no readmem during a trial until its limit; byte: "
+                f"1-byte reads of $D6 every {BYTE_EVERY} s, boot phases from {rig.first_read} s); "
+                f"limits {rig.limits}")
     guard = ConfigGuard(client, clock, log, a.reboot_wait, extra)
 
     def on_signal(signum, frame):
