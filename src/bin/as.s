@@ -56,6 +56,8 @@ esign:  .res 1
 mnem:   .res 1
 mode:   .res 1
 opc:    .res 1
+mmask:  .res 2              ; has_mode: the mode mask, shifted as it is read
+mmode:  .res 1              ; has_mode: the mode asked for
 idx:    .res 1
 srcp:   .res 2
 outp:   .res 2
@@ -681,28 +683,25 @@ instruction:
         ldx #>e_ins
         jmp error
 @found: stx mnem
-        ; tq = &optab[mnem*13]
-        txa
+        ; tq = the record of mnemonic mnem: skip mnem records, each 3 + its count bytes
+        lda #<optab
         sta tq
-        lda #0
+        lda #>optab
         sta tq+1
-        ldy #12
-@m13:   txa                 ; tq += mnem, 12 more times
+        cpx #0
+        beq @rec
+@walk:  ldy #0
+        lda (tq),y          ; the count of legal modes
+        clc
+        adc #3
         clc
         adc tq
         sta tq
-        bcc @mc
+        bcc @wc
         inc tq+1
-@mc:    dey
-        bne @m13
-        lda tq
-        clc
-        adc #<optab
-        sta tq
-        lda tq+1
-        adc #>optab
-        sta tq+1
-        jsr skipsp
+@wc:    dex
+        bne @walk
+@rec:   jsr skipsp
         jsr peek
         beq @noop
         cmp #';'
@@ -828,16 +827,41 @@ bad_mode:
         ldx #>e_mode
         jmp error
 
-; has_mode: A = mode -> carry clear if the mnemonic has it (opc = opcode)
+; has_mode: A = mode -> carry clear if the mnemonic has it (opc = opcode). The record at tq:
+; count, mode mask (2 bytes, bit m = mode m), then the legal opcodes in mode order: the opcode of
+; mode m is the one after the set bits below m.
 has_mode:
+        sta mmode
+        ldy #1
+        lda (tq),y
+        sta mmask
+        iny
+        lda (tq),y
+        sta mmask+1
+        ldx #0              ; X = set bits seen below the mode
+        ldy #0              ; Y = the bit being looked at
+@sh:    cpy mmode
+        beq @bit
+        lsr mmask+1         ; the mask shifts right one bit; carry = the bit at Y
+        ror mmask
+        bcc @nx
+        inx
+@nx:    iny
+        jmp @sh
+@bit:   lsr mmask+1
+        ror mmask
+        bcc @none
+        txa
+        clc
+        adc #3              ; the opcode is after the count and the two mask bytes
         tay
         lda (tq),y
         sta opc
-        cmp #$ff
-        bne @y
-        sec
+        clc
         rts
-@y:     clc
+@none:  lda #$ff
+        sta opc
+        sec
         rts
 
 need_mode:

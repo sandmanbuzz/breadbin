@@ -44,11 +44,15 @@ def render():
     names = sorted(OPS)
     for n in names:
         lines.append(f'        .byte "{n}"')
-    lines.append("; 13 opcodes per mnemonic, by mode")
+    # one record per mnemonic: the count of legal modes, the mode mask (bit m = mode m, low byte
+    # first), then the legal opcodes in mode order (as.s has_mode counts the bits below a mode)
+    lines.append("; per mnemonic: count, mode mask (bit m = mode m, low byte first), legal opcodes by mode")
     lines.append("optab:")
     for n in names:
-        row = [OPS[n].get(m, 0xff) for m in M]
-        lines.append("        .byte " + ", ".join(f"${b:02x}" for b in row) + f"   ; {n}")
+        legal = [OPS[n][m] for m in M if m in OPS[n]]
+        mask = sum(1 << i for i, m in enumerate(M) if m in OPS[n])
+        ops = "".join(f", ${b:02x}" for b in legal)
+        lines.append(f"        .byte {len(legal)}, ${mask & 0xff:02x}, ${mask >> 8:02x}{ops}   ; {n}")
     return "\n".join(lines) + "\n"
 
 
