@@ -29,7 +29,7 @@ Outcomes: `pass`, `LOADING hang`, `LOAD ERROR`, `root-mount panic`, `stall` (cla
 2. **Block 2, Breadbin disk:** the cycle K, B, D repeated 10 times (30 trials). One disk swap.
 3. **Block 3, control, warm:** C x 6. One disk swap.
 
-About 90 minutes in all; three hand actions, plus a drive power cycle after any wedge.
+About 2 hours in all with `--poll-mode none` (no memory reads during a trial; every trial runs to its limit), plus 5 minutes for block 0; three hand actions, plus a drive power cycle after any wedge.
 
 **Limits:** C and K 120 s, B 150 s, D 170 s (the existing `plainboot` limit). On a timeout: stall dump with short DMA reads only (no screen-sized read during a transfer), then a machine reset. If the drive is still busy (LED on), the owner power-cycles it, and the row and the next row say so.
 
