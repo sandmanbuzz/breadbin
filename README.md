@@ -2,7 +2,7 @@
 
 A small Unix-like operating system for the Commodore 64 — the "breadbin".
 
-By kpatronas@gmail.com.
+Based on breadbin by kpatronas@gmail.com.
 
 It is a real kernel, not a shell that prints canned output:
 
