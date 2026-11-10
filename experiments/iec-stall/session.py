@@ -801,6 +801,17 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
                 f"limits {rig.limits}")
     guard = ConfigGuard(client, clock, log, a.reboot_wait, extra)
 
+    def cfg_dump(tag):                        # read-only, redacted (cfgdump.py); never stops a run
+        try:
+            sys.path.insert(0, HERE)
+            import cfgdump
+            path = f"{a.out}.cfg-{tag}.json"
+            d = cfgdump.write_dump(client, path)
+            log.comment(f"config dump {tag}: {os.path.basename(path)}; "
+                        f"{len(cfgdump.non_defaults(d))} item(s) differ from default")
+        except Exception as e:                # noqa: BLE001
+            print(f"config dump {tag} failed: {e}", file=sys.stderr, flush=True)
+
     def on_signal(signum, frame):
         raise StopSession(f"signal {signum}")
 
@@ -812,6 +823,7 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
             pass
     status = 3
     try:
+        cfg_dump("start")
         guard.apply()
         sess = Session(rig, log, order, a, ask, clock, sha)
         status = sess.run()
@@ -823,6 +835,7 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
         status = 3
     finally:
         guard.restore()
+        cfg_dump("end")
         for sg, h in old.items():
             signal.signal(sg, h)
         log.close()
