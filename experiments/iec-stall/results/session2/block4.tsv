@@ -1,0 +1,29 @@
+# session 1; plan session2-b4.plan: 16 trials
+# image b8cc.prg sha256 3110b2f19b04089e; commit 8cc3e57 disk; iostat f5d64de; disk bb-last-agent; control file *
+# dma image iostat-cache0.prg sha256 e73dfc3e6027cbec (arms D, P); disk image b8cc.prg sha256 3110b2f19b04089e (arms K, B)
+# labels disk kernel (K, B): found, 882; iostat labels present: none (counters recorded as absent); ticks label: $004a
+# labels dma kernel (D, P): found, 894; iostat labels present: ['io_nread', 'io_nretry', 'io_nfail', 'io_neoi']; ticks label: $004a
+# drive powered on 231 min before session start
+# poll mode none (none: no readmem during a trial until its limit; byte: 1-byte reads of $D6 every 2 s, boot phases from 20 s); limits {'C': 120, 'K': 120, 'B': 150, 'D': 170, 'P': 170, 'Q': 170, 'J': 120, 'O': 170}
+# config dump start: res-s2b4.tsv.cfg-start.json; 12 item(s) differ from default
+# config before: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config set, read back: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+session	block	trial	arm	start_iso	min_session	min_drive_on	image_sha	commit	disk_id	outcome	seconds	io_nread	io_nretry	io_nfail	io_neoi	io_last	detail	dump	note
+1	4	1	D	2026-11-10T11:00:53-08:00	0.0	231.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	4	2	O	2026-11-10T11:03:43-08:00	2.8	233.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=1b/0.1s		
+1	4	3	D	2026-11-10T11:06:33-08:00	5.7	236.7	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	4	4	O	2026-11-10T11:09:23-08:00	8.5	239.5	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=1b/0.1s		
+1	4	5	D	2026-11-10T11:12:13-08:00	11.3	242.3	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	4	6	O	2026-11-10T11:15:03-08:00	14.2	245.2	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=1b/0.1s		
+1	4	7	D	2026-11-10T11:17:54-08:00	17.0	248.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	4	8	O	2026-11-10T11:20:44-08:00	19.8	250.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=1b/0.1s		
+1	4	9	D	2026-11-10T11:23:34-08:00	22.7	253.7	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	4	10	O	2026-11-10T11:26:24-08:00	25.5	256.5	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=1b/0.1s		
+1	4	11	D	2026-11-10T11:29:14-08:00	28.4	259.4	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	4	12	O	2026-11-10T11:32:04-08:00	31.2	262.2	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=1b/0.1s		
+1	4	13	D	2026-11-10T11:34:54-08:00	34.0	265.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	4	14	O	2026-11-10T11:37:44-08:00	36.9	267.9	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=1b/0.1s		
+1	4	15	D	2026-11-10T11:40:35-08:00	39.7	270.7	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	4	16	O	2026-11-10T11:43:25-08:00	42.5	273.5	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=1b/0.1s		
+# config after restore: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config dump end: res-s2b4.tsv.cfg-end.json; 12 item(s) differ from default
