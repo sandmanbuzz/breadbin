@@ -169,3 +169,21 @@ Effect: H13 can be tested by a diff rather than by inference: `cfgdump.py fromcf
 ## 2026-11-10: WiFi as a candidate H13 item (owner)
 
 The REST interface in use is Ethernet. During the reset the owner brought up both Ethernet and the WiFi interface; whether WiFi was enabled before the reset is not known (it was configured). A radio that is newly on is a change in the Ultimate's load (power draw, firmware servicing, RF near the bus), so it is a candidate H13 item and, through the supply, an H7 one. Not changed in session 1; recorded at bring-up; an arm in session 2 if the pre-reset file shows it was off. The reason for the reset is unrecorded; the owner will review the earlier agent transcript.
+
+## 2026-11-10: session 1, bring-up and block 0 (io/session1 87d3615; hardware)
+
+Cold start: everything powered off for several days; first power-on 06:33 at 73.2 °F room temperature; owner power-cycled again after browsing the menus; physical drive OFF for block 0. Pre-reset config file: not found on the Ultimate's Flash or SD (search continues off-system; the owner saves each change to flash, so flash most likely holds the post-reset state).
+
+Configuration (cfgdump, read-only; `results/session1/cfg-start.json`; unchanged after block 0). Differs from firmware default: Command Interface on; Kernal JiffyDOS; REU on, **16 MB** (the records say 2 MB, banner `reu: 32 x 64k`: a confirmed post-reset change); drive A bus 9, JiffyDOS 1541-II ROM; SID socket items; LED select; **System Mode NTSC-50** (default PAL; never recorded before); **Turbo Control: C64U Turbo Registers** (records: "turbo off"; with registers enabled `/bin/turbo` can change the speed through $D031). At default: Serial Bus Mode All Connected, Burst Mode Patch Off, Badline Timing Enabled, CPU Speed 1, Fast Reset Disabled, Software IEC drive Disabled, Bus Operation Mode Quiet. WiFi settings were redacted whole (owner: WiFi off).
+
+Block 0, halt probe (`results/session1/block0-haltprobe.txt`), 60 s per arm, drive off:
+
+| Arm | Requests | Stolen >= 66 cycles | Largest gap (raw cycles) |
+|---|---|---|---|
+| idle | 0 | 0 | 114 (badline) |
+| 1 byte every 1 s | 60 | 0 | 114 |
+| 1 byte every 0.1 s | 601 | 4 (3 in 66-100, 1 in 401-800) | 734 |
+| 1000 bytes every 2 s | 30 | 20 (15 in 801-1600, 5 over 1600) | 2000 |
+| REU 256 bytes | 2699 transfers | 2699 in 201-400 (expected) | 349 |
+
+Reading against the pre-registered rule (amendment 1): reads steal 150 cycles or more, so **H11 stays alive**, and it is now measured, not inferred. A 1000-byte REST read halts the C64 for about 1-2 ms almost every time; that is several bit times, enough to make the receiver miss pulses or to cause a frame error. A 1-byte read is usually invisible, but 1 in about 600 stole about 680 cycles. Consequences: every harness that read the screen during a transfer (the Ultimate test backend's 0.5 s screen polling, `plainboot`/`dmaboot` after 20 s) was injecting multi-bit CPU halts; even 1-byte polling is not safe, only rarer. Block 2b's poll arm is expected to fail. This does not explain failures with no DMA during the transfer (the disksum control); class S before mitigation remains open.
