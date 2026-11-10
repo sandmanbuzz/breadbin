@@ -201,3 +201,11 @@ Dry run (C, control disk "ULTIMA III GOLD", ID MV, `load"*",8`): pass, 29,547 by
 C x 12, 07:18-07:43, drive powered on 07:09 (9-34 min warm), control disk "ULTIMA III GOLD" (ID MV), `load"*",8` by the JiffyDOS KERNAL, no DMA during a trial (poll mode none). **12 of 12 pass**, every one 29,547 bytes, crc32 d91148a7 (`results/session1/block1.tsv`).
 
 Against the pre-registered table: C did not fail 2 or more of 12, so the cold drive, machine and bus read non-Breadbin media cleanly at this N. Power as stated: a true rate of 25% gives 0 of 12 with 3% probability, the 2026-11-07 rate cannot give it; a rate of 10% or less is not excluded. H1 (cold): no failure seen. H4: the machine's own loader on known-good media is clean. Others: no reading yet.
+
+## 2026-11-10: session 1, block 2 (Breadbin disk; hardware)
+
+K, B, D x 10, 07:46-09:05, drive on 37-115 min, disk "bb-last-agent" (the last disk written in an agent session; K proves it is the 8cc3e57 image: the boot file is byte-identical every time). No DMA during a trial (poll mode none). **30 of 30 pass**: K 10/10 (15,017 bytes identical), B 10/10 (login), D 10/10 (login; IOSTAT kernel `iostat-cache0`, 33 block reads per boot, **0 retries, 0 failures, 0 blocks without EOI**: 330 block reads, 0 retries). `results/session1/block2.tsv`.
+
+Harness note: `io_last` is printed for B although the 8cc3e57 kernel has no IOSTAT labels (value meaningless), and for D it is the BSS start value when no stall occurred; read it only when io_nretry or io_nfail > 0. To fix in session.py before session 2.
+
+Against the pre-registered table: C clean, K clean, B and D clean, and the counters show no retries: "cold hardware is healthy" row. With no DMA during transfers, nothing failed in 42 trials over the first two hours of drive warm-up, and the mitigation never fired in 330 block reads. Per hypothesis: H1 no failure in the first 2 h warm (session 2 runs warm); H2 this disk reads cleanly today (the 11-07 "failed" disk claim is not reproduced); H3 not tested (no old image); H4 settled for today (machine loader clean on both media); H8 the mitigation is not hiding a rate at this N (0/330); H11 untouched by this block (no DMA) and consistent: every failure on record that had DMA during a transfer is absent when there is none. Block 2b (DMA during D) follows.
