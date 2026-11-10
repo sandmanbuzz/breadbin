@@ -39,3 +39,14 @@ The records mix two signatures and I treat them as separate until a trial joins 
 - H5: static cycle tables for aadea2f, 8cc3e57 and HEAD.
 - H10: VICE DATA-glitch repro (branch `io/h10-frame-vice`, never to be merged).
 - Research: the 1541 talker's frame-error path, EOI on byte 256, read-error behavior in LOAD, and the Ultimate's IEC reset.
+
+## 2026-11-07: H5 killed (static analysis, no run)
+
+Builds aadea2f (last good hardware series), 8cc3e57 (failed 2026-11-07), 55fd668, c64fe3a and HEAD were built in scratch worktrees. Cycles were counted from ca65 listings at final addresses. `iec.s` is byte-identical from aadea2f to HEAD. The `blk.s` changes are in `blk_init` only (a9c1c96, 279558c; checked with `git log`).
+
+- No inner poll loop or bit path has a branch that crosses a page differently between builds. `dly` never crosses a page. Timed reads are all `bit PORT`, so the indexed-read page penalty does not apply.
+- Differences are confined to ready-wait exits and timeout paths (±1 cycle), plus +1 cycle per byte on the `iec_read1` loop branch in the new builds. By the analyst's hand sum, the per-byte handshake is 126 cycles in both. Either way, a 1-cycle (1 µs) change sits against windows of 20 µs and more.
+- Talker timing is the same in every build: set-up 84 µs, valid 94 µs, between bytes about 114 µs, EOI hold 84 µs. The listener samples DATA in the same `bit` read that sees CLK high, 0 to 11 cycles after the edge.
+- The machine KERNAL's LOAD of the boot file uses none of this code.
+
+H5: **killed**. Layout did not change bus timing between the good and the bad series. Not modelled: VIC DMA stalls and NMI, which are the same in every build.
