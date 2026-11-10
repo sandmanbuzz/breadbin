@@ -72,3 +72,20 @@ Power: with a true failure rate of 25% (the pre-mitigation stall), 0 failures in
 - **Configuration.** `cfgdump.py` (read-only, network items redacted) runs at session start, after block 0, and at session end; the dumps go with the results, and every item that differs from the firmware default is listed in the log before block 1. No setting is changed in session 1 except the existing per-arm KERNAL/Software IEC changes, which are restored by trap and read back. An IEC/DMA-relevant item that looks wrong becomes a session-2 arm (H13), not a mid-session change.
 - **Control disk.** The owner's known-good disk, write-protected, given at bring-up. Media is not a variable in session 1 (owner: no observable difference between disks).
 - **Dry run first** (the runner's): one K trial with the owner watching the screen, to confirm the `load` / `run` typing lands before the transfer starts. It is logged as a dry run and not counted.
+
+## Session 2, pre-registered (2026-11-10, written after session 1 and before any session-2 trial)
+
+Question: does REST DMA explain the failures of 2026-11-07, which all ran under the old test backend's `wait_for` (a 1000-byte screen read every 0.5 s from the typing of `load` to the login), while the owner's unpolled manual boot that day passed? And is light polling safe?
+
+Same hardware, configuration, disk (`bb-last-agent`, 8cc3e57 image) and kernels as session 1 block 2/2b (disk kernel for K/J; `iostat-cache0` by DMA for D/Q/P/O). Harness `io/session2-harness` (`plans/session2.plan`). Arms alternate within each block; the order is fixed in the plan.
+
+| Block | Arms x pairs | New arm | Prediction (written now) | Reading |
+|---|---|---|---|---|
+| 1 | K, J x 8 | J = K plus 1000 B every 0.5 s from the typed load | J fails (LOADING hang, LOAD ERROR or mismatch) in at least 3 of 8; K 0 of 8 | J >= 3 and K 0: H11 explains class R (the 11-07 KERNAL-load failures). J 0 of 8: it does not; class R stays open (H1/H2/H13) |
+| 2 | D, Q x 8 | Q = D plus 1000 B every 0.5 s from the start (no pass accepted before 3 s) | Q retries far above P's 5-9 per boot; at least 1 of 8 root-mount panics (retries used up); D 0 retries | Q panics: H11 explains the 11-07 root-mount panic |
+| 3 | D, P x 6 | repeat of 2b with the stall record captured | P retries again; record shows lidx 0-255 (inside the data) and lwn 1-8 (bits still to come) or 0 (ready wait) | lwn 2-6 with lidx in the data = the class S signature, caused on demand |
+| 4 | D, O x 8 | O = D plus 1 byte ($D6) every 0.1 s | O retries total over 8 boots between 0 and 3 (block 0: 1 halt >= 400 cycles in 600 reads) | O 0: 1-byte polling at this rate is usable for harnesses; O > 3: no DMA at all during IO |
+
+Stopping rules: as session 1; each poll arm stops at 4 failures (P ends its block). Any mechanical symptom stops everything. Worst case 156 min if every trial times out; expected about 110 min.
+
+Power: block 1, if the true J failure rate were 50%, P(J < 3 of 8) = 14%; at 80% (11-07's look), 0.1%.
