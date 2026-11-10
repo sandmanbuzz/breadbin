@@ -349,11 +349,13 @@ def quote_cfg(cat, item):
 
 
 def config_allowed(reply, cat, item):
-    """The allowed values a config item's GET reports (a list under values / allowed / options), or None."""
+    """The allowed values a config item's GET reports, or None. OEM firmware 1.1.0 lists them under
+    "presets" (seen 2026-11-10: {"current": "JiffyDOS-C64.bin", "presets": ["", "JiffyDOS-C64.bin",
+    "JiffyDOS-kernal.bin"], "default": ""}); the other keys are kept for other firmware."""
     node = reply.get(cat, reply)
     node = node.get(item, node) if isinstance(node, dict) else node
     if isinstance(node, dict):
-        for k in ("values", "allowed", "options", "allowed_values"):
+        for k in ("presets", "values", "allowed", "options", "allowed_values"):
             if isinstance(node.get(k), list):
                 return [str(x) for x in node[k]]
     return None

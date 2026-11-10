@@ -829,6 +829,15 @@ class Session3(Base):
             self.assertIn("refuse to run", str(cm.exception))
             self.assertEqual(self.fake.config_puts, [], vals)               # nothing was changed
 
+    def test_reads_the_oem_reply_shape(self):
+        # the reply OEM firmware 1.1.0 gave on 2026-11-10 (read-only GET on the real machine)
+        reply = {"C64 and Cartridge Settings": {"Kernal ROM": {
+            "current": "JiffyDOS-C64.bin", "presets": ["", "JiffyDOS-C64.bin", "JiffyDOS-kernal.bin"],
+            "default": ""}}, "errors": []}
+        allowed = session.config_allowed(reply, *session.KERNAL_ITEM)
+        self.assertEqual(allowed, ["", "JiffyDOS-C64.bin", "JiffyDOS-kernal.bin"])
+        self.assertEqual(session.pick_stock_kernal(allowed), ("", "empty entry"))
+
     def test_empty_entry_is_the_stock_value_only_when_listed(self):
         self.assertEqual(session.pick_stock_kernal(["JiffyDOS-C64.bin", ""])[0], "")
         self.assertIsNone(session.pick_stock_kernal(["JiffyDOS-C64.bin"])[0])
