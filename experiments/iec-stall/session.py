@@ -21,7 +21,15 @@ Arms: C control (KERNAL load of a non-Breadbin file), K kernal-load of the Bread
 (byte compare), B boot (load, run, login, IOSTAT), D DMA kernel + root mount (plainboot logic),
 P as D but with one 1000-byte screen read every 2 s from 3 s after the start (block 2b, the causal
 poll arm; its own failure count, 4 failures end the block). A block may be a word ("2b", "dry").
---dma-image: the kernel arms D and P load by DMA, when it is not the one on the disk (--image,
+Session 2 poll arms (table POLL_ARMS; each has its own failure count, 4 stop that arm; they can end
+early when the screen shows the login / READY., as P does):
+  Q  as D plus a 1000-byte screen read every 0.5 s from the start (the old test backends' wait_for);
+     limit 170 s.
+  J  as K (machine's own `load"*",8,1`, bytes compared; outcomes LOADING hang / LOAD ERROR / mismatch /
+     pass) plus a 1000-byte read every 0.5 s from the moment the load command is typed; limit 120 s.
+  O  as D plus a 1-byte read of $D6 every 0.1 s from the start; limit 170 s (one screen read at the
+     limit). The detail column names the poll (poll=1000b/0.5s, poll=1b/0.1s).
+--dma-image: the kernel arms D, P, Q and O load by DMA, when it is not the one on the disk (--image,
 --d64: what K compares and B boots). Each has its own labels file (IOSTAT counters, `ticks`).
 
 The DMA rule (README): no screen-sized read while a disk transfer may be in progress. Every wait
@@ -47,17 +55,32 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import iostat  # noqa: E402 - uptime(); no side effects at import
 
-ARMS = "CKBDP"
-LIMITS = {"C": 120, "K": 120, "B": 150, "D": 170, "P": 170}      # seconds, protocol
+# Poll arms: a base arm plus a deliberate poll of the machine while the transfer runs. One dict row each.
+#   base      the arm whose steps it runs (D: DMA kernel + root mount; K: KERNAL load, bytes compared)
+#   nbytes    bytes per read: 1000 = the whole screen (classified, so the arm can end early on the
+#             login / READY.), 1 = the byte at $D6 only (nothing classified until the limit)
+#   accept    (all poll arms: ACCEPT_AFTER) a screen read earlier than this many seconds after the start
+#             is never classified: the previous trial's login / READY. may still be on screen
+#   every     seconds between reads;  first  seconds from the start (D bases: the DMA run) or from the
+#             typed load command (K base) to the first read;  limit  seconds;  fail  failures that
+#             stop the arm;  end_block  that many failures end the whole block (P only, amendment 1)
+POLL_ARMS = {
+    "P": dict(base="D", nbytes=1000, every=2, first=3, limit=170, fail=4, end_block=True),
+    "Q": dict(base="D", nbytes=1000, every=0.5, first=0, limit=170, fail=4, end_block=False),
+    "J": dict(base="K", nbytes=1000, every=0.5, first=0, limit=120, fail=4, end_block=False),
+    "O": dict(base="D", nbytes=1, every=0.1, first=0, limit=170, fail=4, end_block=False),
+}
+ACCEPT_AFTER = 3          # poll arms: no screen classification from a read earlier than this after the start
+ARMS = "CKBD" + "".join(POLL_ARMS)
+LIMITS = {"C": 120, "K": 120, "B": 150, "D": 170}      # seconds, protocol
+LIMITS.update({a: v["limit"] for a, v in POLL_ARMS.items()})
 FIRST_READ = 20           # no DMA read this long after a transfer starts (plainboot)
 POLL = 10                 # then one screen read per this many seconds
 BYTE_FIRST = 2            # --poll-mode byte, KERNAL load: first 1-byte read this long after the command
 BYTE_EVERY = 2            # and at most one 1-byte read per this many seconds
 SETTLE = 6                # after a reset, before the first read (stockload)
 ARM_FAIL_LIMIT = 5
-ARM_FAIL_LIMITS = {"P": 4}   # protocol amendment 1: the poll arm ending the block at 4 failures
-POLL_FIRST = 3            # arm P: first 1000-byte read this long after the start
-POLL_EVERY = 2            # and one per this many seconds
+ARM_FAIL_LIMITS = {a: v["fail"] for a, v in POLL_ARMS.items()}   # P: protocol amendment 1
 WEDGE_LIMIT = 3
 IO_RECORD = ("io_ltrk", "io_lsct", "io_lidx", "io_ltry", "io_lst", "io_lwn")
 COLUMNS = ["session", "block", "trial", "arm", "start_iso", "min_session", "min_drive_on",
@@ -131,8 +154,19 @@ def expand(plan):
     return order
 
 
+def base_arm(arm):
+    """The arm whose steps `arm` runs: itself, or for a poll arm its base (D or K)."""
+    return POLL_ARMS[arm]["base"] if arm in POLL_ARMS else arm
+
+
+def poll_label(arm):
+    """'1000b/2s', '1b/0.1s', or None for an arm that does not poll."""
+    v = POLL_ARMS.get(arm)
+    return f"{v['nbytes']}b/{v['every']:g}s" if v else None
+
+
 def arm_kernel(arm):
-    return "dma" if arm in "DP" else "disk"
+    return "dma" if base_arm(arm) == "D" else "disk"
 
 
 def disk_kind(arm):
@@ -151,7 +185,8 @@ def dry_run(order, disk_id, out=print):
         if disk_kind(arm) != kind:
             kind = disk_kind(arm)
             out(f"HAND  {hand_prompt(kind, disk_id)}")
-        out(f"block {block}  trial {idx:3d}  arm {arm}  limit {LIMITS[arm]} s")
+        out(f"block {block}  trial {idx:3d}  arm {arm}  limit {LIMITS[arm]} s"
+            + (f"  poll {poll_label(arm)}" if arm in POLL_ARMS else ""))
     out(f"{len(order)} trials; worst case {sum(LIMITS[a] for _, _, a in order) // 60} min if all time out")
 
 
@@ -512,7 +547,7 @@ class Rig:
         self.cur_labels = self.labels_dma if arm_kernel(arm) == "dma" else self.labels
         res = dict(outcome="other", detail="", dump="", timed_out=False, iostat={})
         t0 = self.clock.now()
-        if arm in "DP":
+        if base_arm(arm) == "D":
             self._arm_d(res, arm)
             return self._done(res, t0)
         self.reset()
@@ -539,7 +574,10 @@ class Rig:
             return
         cmd = f'load"{self.control_file}",8\n' if arm == "C" else 'load"*",8,1\n'
         self.feed(cmd)
-        st = self.wait(t0, t0 + limit, classify_load, "load")
+        if arm in POLL_ARMS:
+            st = self.poll_wait(arm, self.clock.now(), t0 + limit, classify_load)
+        else:
+            st = self.wait(t0, t0 + limit, classify_load, "load")
         if st == "load_error":
             res.update(outcome="LOAD ERROR", detail=self._errline())
             return
@@ -554,7 +592,7 @@ class Rig:
                 res["detail"] = "no loading text; command not run? " + res["detail"]
             return
         # loaded: READY. is back
-        if arm == "K":
+        if base_arm(arm) == "K":
             got = self.u.readmem(self.addr, len(self.body))
             bad = [i for i in range(len(self.body)) if got[i] != self.body[i]]
             if bad:
@@ -620,24 +658,32 @@ class Rig:
         self.u.resume()
         t0 = self.clock.now()
         self.u.run_prg(self.dma_prg)     # reset, load by DMA, RUN; $BA mimics device 8
-        if arm == "P":
-            st = self.poll_wait(t0, t0 + self.limits["P"])
+        if arm in POLL_ARMS:
+            st = self.poll_wait(arm, t0, t0 + self.limits[arm], classify_boot)
         else:
             st = self.wait(t0, t0 + self.limits["D"], classify_boot, "boot")
         self._boot_result(res, st, arm)
 
-    def poll_wait(self, t0, t_end):
-        """Block 2b, arm P: one 1000-byte screen read every POLL_EVERY s from POLL_FIRST s after t0 to
-        the limit (the deliberate DMA load the arm exists to test). Returns the classifier's state or None."""
-        self.clock.sleep(t0 + POLL_FIRST - self.clock.now())
+    def poll_wait(self, arm, t_from, t_end, classify):
+        """Poll arms (POLL_ARMS): one read of nbytes every `every` s from `first` s after t_from to the
+        limit (the deliberate poll the arm exists to test). 1000 bytes: the screen, classified; a
+        terminal state ends the wait early. 1 byte: $D6 only, then one screen read at the limit.
+        Returns the classifier's state or None."""
+        v = POLL_ARMS[arm]
+        self.clock.sleep(t_from + v["first"] - self.clock.now())
         while True:
-            st = classify_boot(self.screen())
-            if st:
-                return st
+            if v["nbytes"] > 1:
+                lines = self.screen()            # always read (the poll is the point) ...
+                if self.clock.now() >= t_from + ACCEPT_AFTER:
+                    st = classify(lines)         # ... but a stale screen is not believed
+                    if st:
+                        return st
+            else:
+                self.u.readmem(0xD6, v["nbytes"])
             left = t_end - self.clock.now()
             if left <= 0:
-                return None
-            self.clock.sleep(min(POLL_EVERY, left))
+                return None if v["nbytes"] > 1 else classify(self.screen())
+            self.clock.sleep(min(v["every"], left))
 
     def _boot_result(self, res, st, arm):
         if st == "login":
@@ -744,7 +790,7 @@ class Session:
         finally:
             io = r.get("iostat") or {}
             self.res.row(**row, outcome=r["outcome"], seconds=r.get("seconds", ""),
-                         detail=(r.get("detail", "") + " poll=" + ("1000b/2s" if arm == "P" else self.rig.poll_mode)).strip(), dump=r.get("dump", ""),
+                         detail=(r.get("detail", "") + " poll=" + (poll_label(arm) or self.rig.poll_mode)).strip(), dump=r.get("dump", ""),
                          io_nread=io.get("io_nread", ""), io_nretry=io.get("io_nretry", ""),
                          io_nfail=io.get("io_nfail", ""), io_neoi=io.get("io_neoi", ""),
                          io_last=io.get("io_last", ""), note="; ".join(note))
@@ -758,7 +804,7 @@ class Session:
             lim = ARM_FAIL_LIMITS.get(arm, ARM_FAIL_LIMIT)
             if self.fail[arm] == lim:
                 self.note(f"arm {arm} reached {lim} failures: stopped from now on", block, idx, arm)
-                if arm == "P":               # the point is made; spare the drive: the whole block ends
+                if POLL_ARMS.get(arm, {}).get("end_block"):    # P: the point is made; spare the drive: the whole block ends
                     self.stopped_blocks.add(block)
         self.wedges = self.wedges + 1 if hands else 0
         if self.wedges >= WEDGE_LIMIT:
@@ -796,7 +842,7 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
     ap.add_argument("--commit", default="", help="kernel commit (git describe of the image's build)")
     ap.add_argument("--session", default="1")
     ap.add_argument("--drive-on-minutes-ago", type=float, default=0.0)
-    ap.add_argument("--dma-image", help="kernel PRG for arms D and P (loaded by DMA) when it is not the "
+    ap.add_argument("--dma-image", help="kernel PRG for arms D, P, Q and O (loaded by DMA) when it is not the "
                     "one on the disk (--image); default: --image")
     ap.add_argument("--labels", help="label file of the DMA kernel (default: DMA-IMAGE.lbl, or IMAGE.lbl)")
     ap.add_argument("--labels-disk", help="label file of the kernel on the disk, arms B (default: IMAGE.lbl)")

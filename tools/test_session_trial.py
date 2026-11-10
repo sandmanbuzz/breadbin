@@ -65,6 +65,8 @@ class Sim:
             self.step()
 
     def on_read(self, a, ln):
+        if len(self.fake.runs) != self.seen_runs:
+            self.step()                # run_prg resets synchronously: a read right after it sees the new boot
         self.reads.append((self.t, a, ln))
         if ln >= 256:
             self.big_reads.append((self.t, a, ln))
@@ -529,6 +531,129 @@ class Session1(Base):
         self.assertEqual("".join(r["arm"] for r in rows[12:42]), "KBD" * 10)
         self.assertEqual("".join(r["arm"] for r in rows[42:58]), "DP" * 8)
         self.assertEqual(len([t for t in self.asked if t.startswith("HAND")]), 3)
+        self.assertConfigRestored()
+
+
+class Session2(Base):
+    """Session-2 poll arms Q, J, O (table POLL_ARMS) against the stand-in."""
+
+    windows_of = staticmethod(Session1.windows_of)
+
+    def run_arms(self, plan, **kw):
+        sim = Sim(self.fake, self.prg, labels=self.labels, **kw)
+        self.run_session(sim, plan=plan)
+        return sim, [r for r in self.rows() if r["outcome"] != "NOTE"]
+
+    def reads_in(self, sim, a, b, addr=None, ln=None):
+        return [t for t, ad, n in sim.reads
+                if a <= t < b and (addr is None or ad == addr) and (ln is None or n == ln)]
+
+    def test_plan_letters_and_table(self):
+        self.assertEqual(session.parse_plan("1 KJ 8\n2 dq 1\n3 DO 2"),
+                         [(1, "KJ", 8), (2, "DQ", 1), (3, "DO", 2)])
+        self.assertEqual([session.poll_label(a) for a in "PQJO"],
+                         ["1000b/2s", "1000b/0.5s", "1000b/0.5s", "1b/0.1s"])
+        self.assertEqual([session.LIMITS[a] for a in "PQJO"], [170, 170, 120, 170])
+        self.assertEqual([session.ARM_FAIL_LIMITS[a] for a in "PQJO"], [4, 4, 4, 4])
+        self.assertEqual([session.arm_kernel(a) for a in "PQJO"], ["dma", "dma", "disk", "dma"])
+
+    def test_arm_q_reads_a_screen_every_half_second(self):
+        sim, rows = self.run_arms("2 DQ 2\n", boots=["ok"] * 4)
+        self.assertEqual([(r["arm"], r["outcome"]) for r in rows], [("D", "pass"), ("Q", "pass")] * 2)
+        self.assertIn("poll=1000b/0.5s", rows[1]["detail"])
+        self.assertEqual(rows[1]["io_nread"], "200")
+        self.assertIn("ltrk=55;", rows[1]["io_last"])
+        w = self.windows_of(sim)
+        for i, (a, b) in enumerate(w):
+            n = [t for t, ad, ln in sim.big_reads if a <= t < b]
+            if i % 2 == 0:
+                self.assertEqual(n, [])
+            else:                      # passes early at the login (40 s), ~2 reads per second until then
+                self.assertGreaterEqual(len(n), 70)
+                self.assertLessEqual(n[0] - a, 0.6)
+                self.assertTrue(all(abs((y - x) - 0.5) < 0.01 for x, y in zip(n[1:], n[2:])), n[:6])
+
+    def test_arm_q_ignores_a_stale_login_read_at_the_start(self):
+        class Stale(Sim):
+            def on_read(self, a, ln):          # the reset is NOT noticed by a read: old screen shows
+                self.reads.append((self.t, a, ln))
+                if ln >= 256:
+                    self.big_reads.append((self.t, a, ln))
+        sim = Stale(self.fake, self.prg, boots=["hang"], labels=self.labels)
+        sim.lines = ["login:"]
+        sim.sync_screen()
+        self.run_session(sim, plan="2 Q 1\n")
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual(rows[0]["outcome"], "stall")
+        self.assertGreaterEqual(float(rows[0]["seconds"]), 169)
+        self.assertEqual(sim.big_reads[0][0], 0.0)           # it did read at t=0
+
+    def test_arm_o_reads_one_byte_every_tenth_of_a_second(self):
+        sim, rows = self.run_arms("4 DO 1\n", boots=["ok"] * 2)
+        self.assertEqual([(r["arm"], r["outcome"]) for r in rows], [("D", "pass"), ("O", "pass")])
+        self.assertIn("poll=1b/0.1s", rows[1]["detail"])
+        self.assertEqual(rows[1]["io_nread"], "200")
+        w = self.windows_of(sim)
+        starts = [t for t, m in sim.marks if m == "start"]
+        d0, o0 = starts[0], starts[1]
+        self.assertEqual(self.reads_in(sim, d0, o0 - 1, 0xD6), [])
+        n = self.reads_in(sim, o0, o0 + 169, 0xD6, 1)
+        self.assertGreaterEqual(len(n), 1600)            # 170 s at 10 per second; no early exit
+        self.assertTrue(all(abs((y - x) - 0.1) < 0.01 for x, y in zip(n, n[1:])))
+        self.assertEqual(self.reads_in(sim, o0 + 1, o0 + 169, None, 1000), [])   # no screen reads before the limit
+        self.assertGreaterEqual(rows[1]["seconds"] and float(rows[1]["seconds"]), 169)
+        self.assertEqual(len(w), 2)
+
+    def test_arm_o_stall_is_a_stall_with_dump(self):
+        sim, rows = self.run_arms("4 O 1\n", boots=["hang"])
+        self.assertEqual(rows[0]["outcome"], "stall")
+        self.assertIn("st=02", rows[0]["dump"])
+        self.assertIn("poll=1b/0.1s", rows[0]["detail"])
+
+    def test_arm_j_pass_polls_the_screen_from_the_typed_command(self):
+        sim, rows = self.run_arms("1 KJ 2\n", loads=["ok"] * 4)
+        self.assertEqual([(r["arm"], r["outcome"]) for r in rows], [("K", "pass"), ("J", "pass")] * 2)
+        self.assertIn("bytes identical", rows[1]["detail"])
+        self.assertIn("poll=1000b/0.5s", rows[1]["detail"])
+        self.assertIn("poll=none", rows[0]["detail"])
+        starts = [t for t, m in sim.marks if m == "start"]
+        for i, (a, b) in enumerate(self.windows_of(sim)):
+            n = [t for t, ad, ln in sim.big_reads if a <= t < b]
+            if i % 2 == 0:
+                self.assertEqual(n, [], "arm K read the screen during the load")
+            else:
+                self.assertGreaterEqual(len(n), 10)       # the 8 s load, read every 0.5 s
+                self.assertTrue(all(abs((y - x) - 0.5) < 0.01 for x, y in zip(n, n[1:])))
+        self.assertEqual(len(starts), 4)
+
+    def test_arm_j_failure_outcomes_are_distinguished(self):
+        sim, rows = self.run_arms("1 J 4\n", loads=["hang", "error", "corrupt", "ok"])
+        self.assertEqual([r["outcome"] for r in rows], ["LOADING hang", "LOAD ERROR", "mismatch", "pass"])
+        self.assertIn("?load", rows[1]["detail"])
+        self.assertIn("1 bytes differ", rows[2]["detail"])
+        self.assertTrue(rows[0]["dump"])
+        for r in rows:
+            self.assertIn("poll=1000b/0.5s", r["detail"])
+        self.assertGreaterEqual(float(rows[0]["seconds"]), 119)     # the hang runs to the limit
+
+    def test_arm_j_four_failures_stop_the_arm_not_the_block(self):
+        sim, rows = self.run_arms("1 KJ 6\n", loads=["ok", "error"] * 4 + ["ok"] * 4)
+        j = [r for r in rows if r["arm"] == "J" and r["outcome"] == "LOAD ERROR"]
+        self.assertEqual(len(j), 4)
+        self.assertEqual(len([r for r in rows if r["arm"] == "K" and r["outcome"] == "pass"]), 6)    # K carried on
+        self.assertEqual(len([r for r in rows if r["arm"] == "J" and r["outcome"] != "skipped"]), 4)
+
+    def test_the_session2_plan_file_runs_end_to_end(self):
+        plan = os.path.join(HERE, "..", "experiments", "iec-stall", "plans", "session2.plan")
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 16, boots=["ok"] * 44, labels=self.labels)
+        self.plan(open(plan).read())
+        self.run_session(sim)
+        self.assertEqual(self.status, 0)
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual(len(rows), 60)
+        self.assertEqual({r["outcome"] for r in rows}, {"pass"})
+        self.assertEqual("".join(r["arm"] for r in rows), "KJ" * 8 + "DQ" * 8 + "DP" * 6 + "DO" * 8)
+        self.assertEqual(len([t for t in self.asked if t.startswith("HAND")]), 1)
         self.assertConfigRestored()
 
 
