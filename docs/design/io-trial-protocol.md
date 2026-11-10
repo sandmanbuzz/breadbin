@@ -17,18 +17,19 @@ One disk serves three arms that split the boot by stage, so a disk swap is not n
 
 ## Configuration (every row records it)
 
-Normal configuration (experiments README) except where noted: JiffyDOS KERNAL host, physical 1541 alone on bus 8, drive A on bus 9 with no disk, Software IEC off, turbo off, REU on, 1581 off the bus. The JiffyDOS drive ROM stays fitted. Columns per row: session, block, trial index, arm, start time, minutes since the drive was powered on, image sha256 prefix, kernel commit, disk id, outcome, seconds, IOSTAT counters (B and D), stall dump if any.
+Normal configuration (experiments README) except where noted: JiffyDOS KERNAL host, physical 1541 alone on bus 8, drive A on bus 9 with no disk, Software IEC off, turbo off, REU on, 1581 off the bus. The Ultimate's `Serial Bus Mode` and `Burst Mode Patch` settings are read back and recorded (never recorded before). The JiffyDOS drive ROM stays fitted. Columns per row: session, block, trial index, arm, start time, minutes since the drive was powered on, image sha256 prefix, kernel commit, disk id, outcome, seconds, IOSTAT counters (B and D), stall dump if any.
 
 Outcomes: `pass`, `LOADING hang`, `LOAD ERROR`, `root-mount panic`, `stall` (class S signature in the dump), `mismatch` (bytes differ: silent corruption, the worst outcome), `other` (described).
 
 ## Order and counts (pre-registered)
 
+0a. **Block 0, CPU-halt probe (H11), no drive needed.** Physical drive off or unplugged from the bus, so it takes no wear. `haltprobe` (branch `io/haltprobe`) runs five arms of 60 s each in a fixed order: idle with no host traffic; 1-byte REST reads every 1 s; every 0.1 s; one 1000-byte read every 2 s; REU transfers. Pass condition: the longest gap is badline-sized (65 cycles or less) in every arm. Any gap of 150 cycles or more, in any arm, is reported before block 1. If one shows up, block 2's harness polling changes before block 2 is run, and that change is logged as a deviation. This block can run while the drive is still cooling down, if the Ultimate itself is not part of the cooldown.
 0. **Cold record.** Hours powered off, room temperature if known. Owner powers on the drive, then the Ultimate. Nothing else touches the drive.
 1. **Block 1, control, cold:** C x 12. One disk insertion.
 2. **Block 2, Breadbin disk:** the cycle K, B, D repeated 10 times (30 trials). One disk swap.
 3. **Block 3, control, warm:** C x 6. One disk swap.
 
-About 90 minutes in all; three hand actions, plus a drive power cycle after any wedge.
+About 2 hours in all with `--poll-mode none` (no memory reads during a trial; every trial runs to its limit), plus 5 minutes for block 0; three hand actions, plus a drive power cycle after any wedge.
 
 **Limits:** C and K 120 s, B 150 s, D 170 s (the existing `plainboot` limit). On a timeout: stall dump with short DMA reads only (no screen-sized read during a transfer), then a machine reset. If the drive is still busy (LED on), the owner power-cycles it, and the row and the next row say so.
 
@@ -57,3 +58,17 @@ Power: with a true failure rate of 25% (the pre-mitigation stall), 0 failures in
 2. The Breadbin disk to use. If the two disks that "failed" on 2026-11-07 failed by visible damage or errors in another drive, use neither, and session 1 waits for a fresh disk written with your go (that write is itself a drive test: `mcdup` verifies each sector).
 3. Can the drive's power be switched without hands (a switched socket)? If yes, every trial in block 2 can start from a drive power cycle, as the brief's trial definition asks. If not, trials start from a machine reset and that is recorded.
 4. The hours of cooldown at the start of the session.
+
+## Amendment 1 (2026-11-10, lead restart; before any trial, for the owner)
+
+- **Block 0 is ready.** `haltprobe` (io/haltprobe 4e999fe) is proven in VICE: screen blanked, no stolen cycles; screen on, at most 58 (badlines); injected REU halts of 150, 256, 600 and 1200 bytes land in the 101-200, 201-400, 401-800 and 801-1600 buckets, every one. VICE shows the probe detects a halt; only the Ultimate shows what its DMA does. Pre-registered reading: a REST read that steals 150 cycles or more in any arm keeps H11 alive; under 100 in every arm kills H11 for the read sizes tested.
+- **Block 2b, causal poll arm (H11), after block 2.** Arm D only, 8 pairs, alternating `none` / `poll`, with `poll` = one 1000-byte screen read every 2 s from 3 s after the start to the limit. IOSTAT counters on every row. Predicted under H11: retries or stalls in `poll`, none in `none`. Stopping: `poll` reaching 4 failures ends the block (the point is made, the drive is spared). Power: if `poll` fails at 50% and `none` at 0%, 8 pairs show it with p of about 0.004 (0 vs 4 or more); a 10% rate difference is not resolvable at this N, and is not the question.
+- **Every stall dump records the kernel's uptime** (jiffy clock), so onset relative to the first DMA read is known.
+
+## Amendment 2 (2026-11-10, after the owner's answers; before any trial)
+
+- **Trial start.** The drive cannot be power-cycled remotely. Every trial starts from `machine:reboot`, which resets the bus and so the drive; the row records it. The owner power-cycles by hand only on a wedge (LED on after a reboot), and that row and the next say so.
+- **Cold baseline.** Several days powered off, all hardware. Block 0 then block 1 run first, before anything else touches the drive. Each row records minutes since power-on, so H1 can be read as a trend within the session.
+- **Configuration.** `cfgdump.py` (read-only, network items redacted) runs at session start, after block 0, and at session end; the dumps go with the results, and every item that differs from the firmware default is listed in the log before block 1. No setting is changed in session 1 except the existing per-arm KERNAL/Software IEC changes, which are restored by trap and read back. An IEC/DMA-relevant item that looks wrong becomes a session-2 arm (H13), not a mid-session change.
+- **Control disk.** The owner's known-good disk, write-protected, given at bring-up. Media is not a variable in session 1 (owner: no observable difference between disks).
+- **Dry run first** (the runner's): one K trial with the owner watching the screen, to confirm the `load` / `run` typing lands before the transfer starts. It is logged as a dry run and not counted.

@@ -23,3 +23,6 @@ experiments/iec-stall/keym.d.nibbler.prg
 *.db
 *.db-wal
 *.db-shm
+
+# openweb computer agent
+.cptr/
