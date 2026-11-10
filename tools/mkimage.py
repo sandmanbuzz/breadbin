@@ -7,7 +7,7 @@ filesystem. Every block is marked allocated in the CBM BAM so the drive's
 own DOS never writes over c64fs.
 
 Usage:
-  mkimage.py build OUT.d64 --boot BOOT.prg --root DIR [--dev NAME:MAJOR ...]
+  mkimage.py build OUT.d64 --boot BOOT.prg --root DIR [--dev NAME:MAJOR ...] [--rev REV]
   mkimage.py reu IMG.d64 OUT.reu
   mkimage.py ls IMG PATH
   mkimage.py cat IMG PATH
@@ -97,7 +97,7 @@ class Image:
         self.data[b * 256:(b + 1) * 256] = buf
 
     # ---- CBM side ----
-    def write_cbm(self, boot_name, boot_data, disk_name=b"BREADBIN", disk_id=b"BB"):
+    def write_cbm(self, boot_name, boot_data, disk_name=b"BREADBIN", disk_id=b"BB", rev=None):
         used = set(range(TRACK_START[18], TRACK_START[19]))
         # boot file: sequential sectors from track 1
         chunks = [boot_data[i:i + 254] for i in range(0, len(boot_data), 254)] or [b""]
@@ -133,6 +133,13 @@ class Image:
         d[5:21] = boot_name.upper()[:16].ljust(16, b"\xa0")
         d[30] = len(blocks) & 0xff
         d[31] = len(blocks) >> 8
+        if rev:
+            # Build stamp: a closed, locked DEL entry (type $C0, lists as DEL<) with 0 blocks and no chain (t/s 0/0), so it
+            # lists as 0 "BUILD <rev>" DEL and DOS VALIDATE has nothing to follow or free.
+            e = d[32:64]
+            e[2] = 0xC0
+            e[5:21] = (b"BUILD " + rev.upper().encode("ascii"))[:16].ljust(16, b"\xa0")
+            d[32:64] = e
         self.put_block(ts_to_block(18, 1), d)
         return used
 
@@ -144,6 +151,19 @@ class Image:
             for e in range(8):
                 ent = d[e * 32:(e + 1) * 32]
                 if ent[2] & 0x07:
+                    out.append((bytes(ent[5:21]).rstrip(b"\xa0"), ent[2]))
+            t, s = d[0], d[1]
+        return out
+
+    def cbm_entries(self):
+        """Every used directory slot as (name, type byte), including the closed, locked DEL stamp (type 0xC0)."""
+        out = []
+        t, s = 18, 1
+        while t:
+            d = self.block(ts_to_block(t, s))
+            for e in range(8):
+                ent = d[e * 32:(e + 1) * 32]
+                if ent[2]:
                     out.append((bytes(ent[5:21]).rstrip(b"\xa0"), ent[2]))
             t, s = d[0], d[1]
         return out
@@ -364,14 +384,20 @@ class FS:
                     self.create(ino, name, f.read())
 
 
-def build(out, boot, root, devs):
+def build(out, boot, root, devs, rev=None):
     img = Image()
     with open(boot, "rb") as f:
         boot_data = f.read()
-    reserved = img.write_cbm(b"BREADBIN", boot_data)
+    reserved = img.write_cbm(b"BREADBIN", boot_data, rev=rev)
     fs = FS(img)
     fs.format(reserved)
     fs.add_tree(root, ROOT_INO)
+    if rev:
+        try:
+            etc = fs.lookup("/etc")
+        except FileNotFoundError:
+            etc = fs.mkdir(ROOT_INO, b"etc")
+        fs.create(etc, b"build", f"breadbin {rev}\n".encode("ascii"))
     if devs:
         try:
             dev = fs.lookup("/dev")
@@ -409,6 +435,7 @@ def main(argv=None):
     b.add_argument("--boot", required=True)
     b.add_argument("--root", required=True)
     b.add_argument("--dev", action="append", default=[])
+    b.add_argument("--rev", default=None, help="source revision stamped on the disk (directory entry and /etc/build)")
     r = sub.add_parser("reu")
     r.add_argument("img")
     r.add_argument("out")
@@ -420,7 +447,7 @@ def main(argv=None):
     c.add_argument("path")
     a = ap.parse_args(argv)
     if a.cmd == "build":
-        img = build(a.out, a.boot, a.root, a.dev)
+        img = build(a.out, a.boot, a.root, a.dev, a.rev)
         print(f"{a.out}: {FS(img).free_blocks()} blocks free")
     elif a.cmd == "reu":
         with open(a.out, "wb") as f:
