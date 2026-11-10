@@ -3,6 +3,7 @@ Ultimate only. A small scripted C64 stand-in turns the runner's keystrokes and P
 screen text on a virtual clock, so a 90-minute plan runs in a second and no real device is touched.
 """
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -655,6 +656,192 @@ class Session2(Base):
         self.assertEqual("".join(r["arm"] for r in rows), "KJ" * 8 + "DQ" * 8 + "DP" * 6 + "DO" * 8)
         self.assertEqual(len([t for t in self.asked if t.startswith("HAND")]), 1)
         self.assertConfigRestored()
+
+
+class Session3(Base):
+    """Session-3 arms Z, S, T, G, H (POLL_ARMS / VARIANT_ARMS) against the stand-in."""
+
+    windows_of = staticmethod(Session1.windows_of)
+    run_arms = Session2.run_arms
+    reads_in = Session2.reads_in
+    KERNAL = ("C64 and Cartridge Settings", "Kernal ROM")
+
+    def setUp(self):
+        super().setUp()
+        self.fake.config_values[self.KERNAL] = ["JiffyDOS-C64.bin", "Original", "other.bin"]
+
+    def idle_sim(self, bus, **kw):
+        """A Sim whose $DD00 follows bus(t); on a hang boot the stall value stays."""
+        sim = Sim(self.fake, self.prg, labels=self.labels, **kw)
+        orig = sim.on_read
+
+        def on_read(a, ln):
+            if a == 0xDD00:
+                self.fake.ram[0xDD00] = bus(sim.t)
+            orig(a, ln)
+        self.fake.on_readmem = on_read
+        return sim
+
+    def test_table_and_plan_files(self):
+        self.assertEqual([session.poll_label(a) for a in "ZSGHT"],
+                         ["1000b/0.5s+pause", "1000b/0.5s", "1000b/0.5s+gate3x1b", "1000b/0.5s+gate3x1b", None])
+        self.assertEqual([session.LIMITS[a] for a in "ZSGHT"], [170, 120, 170, 120, 120])
+        self.assertEqual([session.arm_kernel(a) for a in "ZSGHT"], ["dma", "disk", "dma", "disk", "disk"])
+        self.assertEqual([session.arm_stock(a) for a in "ZSGHTKD"], [False, True, False, False, True, False, False])
+        self.assertEqual([session.ARM_FAIL_LIMITS[a] for a in "ZSGH"], [4, 4, 4, 4])
+        plans = os.path.join(HERE, "..", "experiments", "iec-stall", "plans")
+        whole = session.expand(session.parse_plan(open(os.path.join(plans, "session3.plan")).read()))
+        self.assertEqual("".join(a for _, _, a in whole), "DZ" * 8 + "TS" * 8 + "DG" * 8 + "KH" * 8)
+        parts = []
+        for i in range(1, 5):
+            parts += [a for _, _, a in session.expand(session.parse_plan(
+                open(os.path.join(plans, f"session3-b{i}.plan")).read()))]
+        self.assertEqual(parts, [a for _, _, a in whole])
+
+    def test_arm_z_pauses_around_each_screen_read_and_always_resumes(self):
+        sim, rows = self.run_arms("1 DZ 1\n", boots=["ok"] * 2)
+        self.assertEqual([(r["arm"], r["outcome"]) for r in rows], [("D", "pass"), ("Z", "pass")])
+        self.assertIn("poll=1000b/0.5s+pause", rows[1]["detail"])
+        seq = [p.split(":")[-1] for m, p in self.fake.requests if p.startswith("/v1/machine:") and
+               p.split(":")[-1] in ("pause", "resume", "readmem")]
+        z = seq[seq.index("readmem") - 1:]            # from Z's first screen read on
+        self.assertFalse(self.fake.paused)
+        self.assertGreaterEqual(len([k for k in range(1, len(z) - 1) if z[k - 1:k + 2] == ["pause", "readmem", "resume"]]),
+                                70)
+
+    def test_arm_z_resumes_when_the_screen_read_fails(self):
+        sim = Sim(self.fake, self.prg, boots=["ok"], labels=self.labels)
+        rig = session.Rig(self.u, sim, self.prg, self.labels, "X")
+        self.fake.on_readmem = lambda a, ln: (_ for _ in ()).throw(RuntimeError("read failed"))
+        with self.assertRaises(Exception):
+            rig.poll_screen(session.POLL_ARMS["Z"])
+        self.assertFalse(self.fake.paused)
+
+    def test_a_paused_machine_is_resumed_by_the_restore_trap(self):
+        sim = Sim(self.fake, self.prg, boots=["ok"], labels=self.labels)
+        orig = session.Session.run
+
+        def boom(self_):
+            self.u.pause()
+            raise RuntimeError("harness bug while paused")
+        session.Session.run = boom
+        try:
+            with self.assertRaises(RuntimeError):
+                self.run_session(sim, plan="1 Z 1\n")
+        finally:
+            session.Session.run = orig
+        self.assertFalse(self.fake.paused)
+        self.assertConfigRestored()
+
+    def test_arm_g_gate_reads_three_dd00_bytes_and_polls_only_when_idle(self):
+        # bus busy (DATA out driven, $DD00 = $C5... mask $F8 != $C0 -> 0xCD has bit 3 set) before 10 s, idle after
+        sim = None
+
+        def bus(t):
+            return 0xCD if sim.marks and t - sim.marks[-1][0] < 10 else 0xC7
+        sim = self.idle_sim(bus, boots=["ok"] * 2)
+        self.run_session(sim, plan="3 DG 1\n")
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual([(r["arm"], r["outcome"]) for r in rows], [("D", "pass"), ("G", "pass")])
+        d = rows[1]["detail"]
+        self.assertIn("poll=1000b/0.5s+gate3x1b", d)
+        m = re.search(r"screen_reads=(\d+) skipped=(\d+) dd00=(\S+)", d)
+        self.assertTrue(m, d)
+        done, skipped = int(m.group(1)), int(m.group(2))
+        self.assertGreaterEqual(skipped, 15)
+        self.assertGreaterEqual(done, 40)
+        hist = dict(x.split(":") for x in m.group(3).split(","))
+        self.assertEqual(set(hist), {"cd", "c7"})
+        self.assertEqual(sum(map(int, hist.values())), 3 * (done + skipped))   # every read is in the histogram
+        self.assertNotIn("screen_reads", rows[0]["detail"])                    # D has no gate
+        gg = [(t, a, n) for t, a, n in sim.reads if a == 0xDD00]
+        self.assertTrue(all(n == 1 for _, _, n in gg))
+        # 0.1 s apart inside a poll; no screen read while the bus is busy
+        for (t0, _, _), (t1, _, _) in list(zip(gg[0::3], gg[1::3]))[:20]:
+            self.assertAlmostEqual(t1 - t0, 0.1, places=6)
+        g0 = [t for t, m in sim.marks if m == "start"][1]
+        self.assertEqual([t for t, a, n in sim.big_reads if g0 < t < g0 + 9.5], [])    # none while the bus is busy
+
+    def test_gate_demands_all_three_reads_idle(self):
+        calls = {"n": 0}
+
+        def bus(t):
+            calls["n"] += 1
+            return 0xCD if calls["n"] % 3 == 0 else 0xC7        # the third read of each poll shows busy
+        sim = self.idle_sim(bus, boots=["hang"])
+        self.run_session(sim, plan="3 G 1\n")
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual(rows[0]["outcome"], "stall")
+        self.assertIn("screen_reads=0 skipped=", rows[0]["detail"])
+        self.assertEqual([x for x in sim.big_reads if x[0] < 169], [])
+
+    def test_arm_h_is_the_gated_kernal_load(self):
+        sim = self.idle_sim(lambda t: 0xC7, loads=["ok"] * 2)
+        self.run_session(sim, plan="4 KH 1\n")
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual([(r["arm"], r["outcome"]) for r in rows], [("K", "pass"), ("H", "pass")])
+        self.assertIn("bytes identical", rows[1]["detail"])
+        self.assertIn("skipped=0", rows[1]["detail"])
+        self.assertIn("dd00=c7:", rows[1]["detail"])
+
+    def test_stock_kernal_arms_select_and_restore_the_kernal_rom(self):
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 5, boots=["ok"], labels=self.labels)
+        self.run_session(sim, plan="2 TS 2\n3 D 1\n1 K 1\n")
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual(self.status, 0)
+        self.assertEqual("".join(r["arm"] for r in rows), "TSTSDK")
+        self.assertEqual({r["outcome"] for r in rows}, {"pass"})
+        puts = [v for c, i, v in self.fake.config_puts if (c, i) == self.KERNAL]
+        self.assertEqual(puts[:2], ["Original", "JiffyDOS-C64.bin"])      # once in, once back for D (then the restore)
+        self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
+        self.assertTrue(any("stock Kernal ROM value discovered: 'Original'" in c for c in self.comments()))
+        self.assertConfigRestored()
+
+    def test_kernal_restored_by_trap_after_a_stock_arm_breaks(self):
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 3, labels=self.labels)
+        orig = session.Rig.trial
+        n = {"i": 0}
+
+        def trial(self_, arm):
+            n["i"] += 1
+            r = orig(self_, arm)
+            if n["i"] == 2:
+                raise KeyboardInterrupt
+            return r
+        session.Rig.trial = trial
+        try:
+            self.run_session(sim, plan="2 TS 3\n")
+        finally:
+            session.Rig.trial = orig
+        self.assertEqual(self.status, 3)
+        self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
+        self.assertConfigRestored()
+
+    def test_stock_arm_refuses_when_no_stock_value_is_listed(self):
+        for vals in (["JiffyDOS-C64.bin", "other.bin"], ["Original", "Stock ROM"], None):
+            if vals is None:
+                del self.fake.config_values[self.KERNAL]
+            else:
+                self.fake.config_values[self.KERNAL] = vals
+            sim = Sim(self.fake, self.prg, loads=["ok"] * 2, labels=self.labels)
+            with self.assertRaises(SystemExit) as cm:
+                self.run_session(sim, plan="2 TS 1\n")
+            self.assertIn("refuse to run", str(cm.exception))
+            self.assertEqual(self.fake.config_puts, [], vals)               # nothing was changed
+
+    def test_empty_entry_is_the_stock_value_only_when_listed(self):
+        self.assertEqual(session.pick_stock_kernal(["JiffyDOS-C64.bin", ""])[0], "")
+        self.assertIsNone(session.pick_stock_kernal(["JiffyDOS-C64.bin"])[0])
+        self.assertIsNone(session.pick_stock_kernal([])[0])
+        self.assertEqual(session.pick_stock_kernal(["JiffyDOS Original.bin", "Original"])[0], "Original")
+
+    def test_dry_run_marks_stock_arms(self):
+        self.plan("2 TS 1\n")
+        lines = []
+        session.main([self.p("plan.txt"), "--image", self.p("b.prg"), "--d64", self.p("b.d64"), "--out", self.out,
+                      "--disk-id", "T1", "--control-file", "X", "--dry-run"], out=lines.append)
+        self.assertEqual(sum("stock KERNAL" in l for l in lines), 2)
+        self.assertEqual(self.fake.requests, [])
 
 
 class Stopping(Base):

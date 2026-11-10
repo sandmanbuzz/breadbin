@@ -1,0 +1,2 @@
+# session 3, block 2 alone (split from session3.plan; same trials and order)
+2  TS 8     # KERNAL load of the boot file, STOCK KERNAL: T clean (no reads) vs S (1000 B every 0.5 s from the typed load)
