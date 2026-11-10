@@ -1,0 +1,3 @@
+# Protocol amendment 2: one K trial with the owner watching the screen, to see that the load/run typing
+# lands before the transfer starts. Logged as a dry run, not counted. Use its own --out file.
+dry K 1

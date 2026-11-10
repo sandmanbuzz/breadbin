@@ -1,0 +1,10 @@
+# IO attack, session 1 (docs/design/io-trial-protocol.md, amendments 1 and 2). Fixed order, as listed.
+# Block 0 (haltprobe, no drive) and the config dumps are separate commands: plans/session1-runbook.txt.
+# Stopping rules are in session.py: an arm at 5 failures stops (arm P: 4, which ends block 2b);
+# 3 wedges in a row needing hands stop the block; `stop` at any prompt or Ctrl-C ends the session.
+# Hand actions are asked by the runner: control disk (write-protected) before block 1, the Breadbin
+# disk before block 2 (the 2b trials use the same disk), the control disk again before block 3.
+1  C   12     # control, cold: owner's known-good non-Breadbin disk, KERNAL load
+2  KBD 10     # Breadbin disk (8cc3e57 image): K kernal-load + byte compare, B boot from disk, D DMA kernel + root mount; x10
+2b DP  8      # arm D only, 8 pairs: D (no reads until the limit) then P (1000-byte screen read every 2 s from 3 s)
+3  C   6      # control, warm

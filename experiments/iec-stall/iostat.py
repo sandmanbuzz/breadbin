@@ -25,6 +25,23 @@ def iostat_dump(u, lbl):
     return d
 
 
+def uptime(u, lbl):
+    """Both jiffy clocks, two 3-byte DMA reads, as `ticks_jiffies=N kjiffy_jiffies=M` (`??` if a read fails).
+    ticks: the Breadbin kernel's count of IRQ ticks since boot (zero page, label `ticks`, $4A in the
+    builds so far; little endian, 3 bytes). kjiffy: the stock KERNAL's clock ($A0 high, $A2 low), which is
+    meaningful only while the stock KERNAL is the running system (the load phase). A jiffy is one IRQ
+    tick of the machine's CIA1 timer (about 1/60 s). Short reads only: call after a trial's limit."""
+    out = []
+    for name, addr, little in (("ticks", lbl.get("ticks", 0x4A), True), ("kjiffy", 0xA0, False)):
+        try:
+            b = u.readmem(addr, 3)
+            v = int.from_bytes(b, "little" if little else "big")
+            out.append(f"{name}_jiffies={v}")
+        except Exception:                # noqa: BLE001
+            out.append(f"{name}_jiffies=??")
+    return " ".join(out)
+
+
 if __name__ == "__main__":
     sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.abspath(__file__)))
     from bench_basic import u

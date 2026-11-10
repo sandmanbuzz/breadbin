@@ -18,6 +18,9 @@ for img in sys.argv[1:]:
         return f"{syms[i][1]}+{a - syms[i][0]}"
 
     for ln in open(img + ".stall").read().strip().split("\n"):
+        if ln.startswith("#"):                 # uptime note appended after a stall (iostat.uptime)
+            print(img, ln[2:])
+            continue
         d, _, stk = ln.partition(" stack:")
         d, _, io = d.partition(" iostat:")
         print(img, d)
