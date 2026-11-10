@@ -224,3 +224,9 @@ With block 2's D trials: no DMA, 0 retries in 594 block reads over 18 boots; DMA
 What this does to the record: every pre-mitigation harness that read the screen during the root mount (Ultimate test backend 0.5 s polling, plainboot/dmaboot after 20 s) was injecting this. It is the leading explanation for the historical "3 boots in 4" and for 11-06. It does **not** yet explain failures with no DMA (the disksum control stalled at sector 0; the 11-07 class R failures in the KERNAL loader). Open.
 
 Lost data: the last-stall record of the P trials was not captured (session.py read two bytes of the iec.s routine `io_last` instead of `io_ltrk..io_lwn`; fixed in 08142d8). So whether the DMA retries carry the class S signature (bits counted 2-6, CLK held) is not shown on hardware yet; the VICE experiment (branch io/h11-vice) asks it, and session 2 can repeat P with the fixed record.
+
+## 2026-11-10: session 1, block 3 (control, warm) and session summary
+
+C x 6, 09:40-09:52, drive on 150-161 min: **6 of 6 pass**, 29,547 bytes, crc32 d91148a7 (same as block 1). Configuration identical at start and end of the session (`cfgdump diff`: 0 items changed).
+
+Session 1 in all: 66 trials, 0 failures without DMA (C 18, K 10, B 10, D 18 with 594 block reads and 0 retries); with DMA during the root mount (P, 1000 B / 2 s) 8 of 8 boots needed retries (60 in 264 reads), all absorbed. Verdicts after session 1: **H11 alive and causal for retries**; H1 no effect in the first 2.7 h powered (not killed: no long warm run yet); H2 not reproduced (the "failed" 11-07 disk reads cleanly); H4 settled for today; H8 0 retries without DMA in 594 reads; H3, H6, H7, H13 untested; H9/H10 subsumed for now by H11 as the mechanism of the stall. Next: session 2 (pre-registered in the protocol): does the old backend's 0.5 s screen polling reproduce the 11-07 failures?
