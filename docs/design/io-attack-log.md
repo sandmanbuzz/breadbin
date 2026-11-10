@@ -241,3 +241,19 @@ A CIA2 NMI (ignores the SEI that bus_acptr holds during the bit loop) starts an 
 - Beyond the retry: 2 files with silent wrong bytes (right length, wrong checksum) in 16 boots with long halts and the full handler (none with the lean handler or short halts; too few to say which). 9 of 92 boots with halts hung or panicked, 6 of them in `bus_tksa`'s unbounded wait for the talker to pull CLK after TALK, a wait the mitigation does not bound. None in controls.
 
 Reading: H11 now has a mechanism (VICE) and a causal effect on hardware (session 1 block 2b). Two product defects found that matter whatever the hardware does: (1) `bus_tksa` can wait forever; (2) a halt can corrupt data silently, at least in VICE. Caveats: the NMI handler runs code (real DMA does not), PAL timing, stock ROMs, small N per arm.
+
+## 2026-11-10: session 2, block 1 (K vs J; hardware)
+
+Pre-registered (protocol, "Session 2"): J fails at least 3 of 8, K 0 of 8. Result after 4 pairs (J reached its 4-failure limit and stopped; K continues in later blocks only as D):
+
+| Trial | Arm | Outcome | Detail |
+|---|---|---|---|
+| 1, 3, 5, 7 | K | pass | 15,017 bytes identical |
+| 2 | J | **mismatch** | READY. after 13.4 s, 3,760 bytes differ, first at +11124 |
+| 4 | J | **mismatch** | 13,286 bytes differ, first at +1249 |
+| 6 | J | **mismatch** | 1 byte differs, at +11137 |
+| 8 | J | **mismatch** | 2 bytes differ, first at +6663 |
+
+The machine's own loader (JiffyDOS KERNAL, JiffyDOS drive ROM) under a 1000-byte REST read every 0.5 s finishes the load and prints READY. with corrupted bytes: silent corruption, 4 of 4. No DMA: 4 of 4 clean (14 of 14 in sessions 1-2). The prediction held in rate and was wrong in kind (expected hangs and LOAD ERROR; got silent corruption). JiffyDOS's transfer has no per-bit handshake, so a 1-2 ms CPU halt shifts or drops bits without detection.
+
+Reading for 11-07: every agent boot that day used the backend's 0.5 s full-screen `wait_for` from the typed `load` onward; a corrupted boot file then runs as the kernel. That accounts for the LOADING hangs, the LOAD ERROR then cleared screen, and the root-mount panic, without any hardware fault (inference: the 11-07 boots' memory was never compared). The owner's unpolled manual boot that day passed. **H11 explains class R** (stage a) on this hardware at this N.
