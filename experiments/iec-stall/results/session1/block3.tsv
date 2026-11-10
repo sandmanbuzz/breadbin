@@ -1,0 +1,19 @@
+# session 1; plan session1-b3.plan: 6 trials
+# image b8cc.prg sha256 3110b2f19b04089e; commit 8cc3e57 disk; iostat f5d64de; disk ultima3-MV; control file *
+# dma image iostat-cache0.prg sha256 e73dfc3e6027cbec (arms D, P); disk image b8cc.prg sha256 3110b2f19b04089e (arms K, B)
+# labels disk kernel (K, B): found, 882; iostat labels present: none (counters recorded as absent); ticks label: $004a
+# labels dma kernel (D, P): found, 894; iostat labels present: ['io_nread', 'io_nretry', 'io_nfail', 'io_neoi']; ticks label: $004a
+# drive powered on 150 min before session start
+# poll mode none (none: no readmem during a trial until its limit; byte: 1-byte reads of $D6 every 2 s, boot phases from 20 s); limits {'C': 120, 'K': 120, 'B': 150, 'D': 170, 'P': 170}
+# config dump start: res-b3.tsv.cfg-start.json; 12 item(s) differ from default
+# config before: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config set, read back: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+session	block	trial	arm	start_iso	min_session	min_drive_on	image_sha	commit	disk_id	outcome	seconds	io_nread	io_nretry	io_nfail	io_neoi	io_last	detail	dump	note
+1	3	1	C	2026-11-10T09:39:37-08:00	0.0	150.0	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de	ultima3-MV	pass	120.1						len=29547 crc32=d91148a7 (reference) poll=none		
+1	3	2	C	2026-11-10T09:41:43-08:00	2.1	152.1	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de	ultima3-MV	pass	120.1						len=29547 crc32=d91148a7 poll=none		
+1	3	3	C	2026-11-10T09:43:49-08:00	4.2	154.2	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de	ultima3-MV	pass	120.1						len=29547 crc32=d91148a7 poll=none		
+1	3	4	C	2026-11-10T09:45:55-08:00	6.3	156.3	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de	ultima3-MV	pass	120.1						len=29547 crc32=d91148a7 poll=none		
+1	3	5	C	2026-11-10T09:48:01-08:00	8.4	158.4	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de	ultima3-MV	pass	120.1						len=29547 crc32=d91148a7 poll=none		
+1	3	6	C	2026-11-10T09:50:08-08:00	10.5	160.5	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de	ultima3-MV	pass	120.1						len=29547 crc32=d91148a7 poll=none		
+# config after restore: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config dump end: res-b3.tsv.cfg-end.json; 12 item(s) differ from default
