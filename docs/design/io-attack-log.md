@@ -187,3 +187,11 @@ Block 0, halt probe (`results/session1/block0-haltprobe.txt`), 60 s per arm, dri
 | REU 256 bytes | 2699 transfers | 2699 in 201-400 (expected) | 349 |
 
 Reading against the pre-registered rule (amendment 1): reads steal 150 cycles or more, so **H11 stays alive**, and it is now measured, not inferred. A 1000-byte REST read halts the C64 for about 1-2 ms almost every time; that is several bit times, enough to make the receiver miss pulses or to cause a frame error. A 1-byte read is usually invisible, but 1 in about 600 stole about 680 cycles. Consequences: every harness that read the screen during a transfer (the Ultimate test backend's 0.5 s screen polling, `plainboot`/`dmaboot` after 20 s) was injecting multi-bit CPU halts; even 1-byte polling is not safe, only rarer. Block 2b's poll arm is expected to fail. This does not explain failures with no DMA during the transfer (the disksum control); class S before mitigation remains open.
+
+## 2026-11-10: owner on System Mode and on what may change
+
+NTSC-50 is not a recent change: it is the only mode in which this PAL configuration displays on the owner's NTSC Y/C monitor (1702), so it has been the mode all along and simply was not recorded. It runs PAL timing (50 Hz, PAL cycle counts) with NTSC colour encoding. Demoted as an H13 candidate: not a change between good and bad periods. Turbo Registers, REU 16 MB and WiFi stay candidates.
+
+Owner's standing permission (2026-11-10): the whole Ultimate configuration, machine state, disk contents and media may be changed for this hunt. Only the Ultimate's internal filesystems are closed to destruction without prior notice (they can be copied off first). Physical-disk writes still get announced before each one.
+
+Dry run (C, control disk "ULTIMA III GOLD", ID MV, `load"*",8`): pass, 29,547 bytes (117 blocks), crc32 d91148a7 as the reference; the owner watched and saw a normal load well inside 120 s and the resets as expected. Deviation from amendment 2: the dry run was C, not K, because the control disk was in; K's typing is watched at the first trial of block 2.
