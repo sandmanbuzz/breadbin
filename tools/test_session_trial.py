@@ -193,7 +193,9 @@ class Base(unittest.TestCase):
         # counters at 4 bytes' spacing so the width guess is 4; one last-event label
         open(self.p("b.lbl"), "w").write(
             "al 00C000 .io_nread\nal 00C004 .io_nretry\nal 00C008 .io_nfail\n"
-            "al 00C00C .io_neoi\nal 00C010 .io_last_ev\nal 00C012 .zz\n"
+            "al 00C00C .io_neoi\nal 00C010 .io_ltrk\nal 00C011 .io_lsct\nal 00C012 .io_lidx\n"
+            "al 00C013 .io_ltry\nal 00C014 .io_lst\nal 00C015 .io_lwn\nal 00C016 .zz\n"
+            "al 00C200 .io_last\n"
             "al 00C100 .io_out\nal 00C103 .io_n\nal 00C10B .ie_dev\n")
         self.labels = session.read_labels(self.p("b.lbl"))
         self.out = self.p("res.tsv")
@@ -283,7 +285,7 @@ class Full(Base):
         r = rows[2]                                    # arm B: counters from the labels
         self.assertEqual((r["io_nread"], r["io_nretry"], r["io_nfail"], r["io_neoi"]),
                          ("200", "3", "0", "9"))
-        self.assertIn("io_last_ev=", r["io_last"])
+        self.assertRegex(r["io_last"], r"^ltrk=..;lsct=..;lidx=..;ltry=..;lst=..;lwn=..$")  # not the code label io_last
         self.assertEqual(rows[3]["io_nread"], "200")   # arm D too
         self.assertEqual(rows[1]["io_nread"], "")      # K reads no counters
         self.assertEqual(len(r["image_sha"]), 16)
