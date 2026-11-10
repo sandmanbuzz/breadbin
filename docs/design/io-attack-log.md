@@ -133,3 +133,7 @@ A read-only audit took each recorded hardware series and asked what the harness 
 - **Unknown:** which script drove 2026-11-07 a, b, d and e (`plainboot` cannot show `LOADING`; it loads by DMA). Asked of the owner.
 
 Effect: H11 is **alive for class R and the 2026-11-06 run, doubtful for class S**, and not the single cause the earlier entry today proposed. That entry's "both classes are one cause" is withdrawn as stated. The halt probe still decides whether the 0.5 s screen reads can halt the CPU long enough; the poll arm still decides it causally. New, cheap: every future stall dump records the kernel's uptime (jiffy clock) at the stall, so onset relative to the first DMA is known.
+
+## 2026-11-10: halt probe proven in VICE (io/haltprobe 4e999fe; host test 4 OK, VICE 5 OK; no hardware)
+
+Blanked: 0 stolen cycles in 342,016 loops. Screen on: max 58 stolen (badline). Injected REU halts of 150/256/600/1200 bytes: every transfer in its bucket (max stolen 129/250/594/1194). Limits: about 10% bucket accuracy; a halt inside the probe's slow path or housekeeping is missed; gaps of 65,536 cycles or more alias; VICE's REU is not the Ultimate's DMA. Protocol amendment 1 adds the block-0 reading and the causal poll arm (block 2b).
