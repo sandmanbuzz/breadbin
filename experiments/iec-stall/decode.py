@@ -19,7 +19,10 @@ for img in sys.argv[1:]:
 
     for ln in open(img + ".stall").read().strip().split("\n"):
         d, _, stk = ln.partition(" stack:")
+        d, _, io = d.partition(" iostat:")
         print(img, d)
+        if io:
+            print("    iostat (hex; ltry 1-3, lidx ff = before the data, lwn = bus_acptr io_n):", io)
         st = bytes.fromhex(stk)
         out = [lab(((st[i] << 8) | st[i - 1]) + 1) for i in range(len(st) - 1, 0, -1)
                if 0x8000 <= ((st[i] << 8) | st[i - 1]) + 1 < 0xD000]

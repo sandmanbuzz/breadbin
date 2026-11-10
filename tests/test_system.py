@@ -294,6 +294,26 @@ class Boot(unittest.TestCase):
         # the first run left 42 in its BSS; the program checks it is zero again at the start
         self.assertEqual(self.run_("/home/bigbuf"), "bss ok")
 
+    def test_29_io_counters(self):
+        """IOSTAT (default build): the block-read mitigation counters are in the label file and a
+        healthy boot reads blocks without a retry or a failure. io_neoi is printed, not asserted:
+        it says whether the drive sends EOI on the 256th byte of a U1 read."""
+        lbl = {}
+        with open(os.path.join(ROOT, "build", "kernel.lbl")) as f:
+            for line in f:
+                m = re.match(r"al ([0-9A-F]+) \.(io_n\w+)$", line.strip())
+                if m:
+                    lbl[m.group(2)] = int(m.group(1), 16)
+        if "io_nread" not in lbl:
+            self.skipTest("built with IOSTAT=0")
+        self.run_("ls /bin")
+        self.run_("cat /etc/passwd")
+        n = {k: self.v.mem(a, a + 1)[0] | self.v.mem(a, a + 1)[1] << 8 for k, a in lbl.items()}
+        print("\nIOSTAT", n)
+        self.assertGreater(n["io_nread"], 0)
+        self.assertEqual(n["io_nretry"], 0)
+        self.assertEqual(n["io_nfail"], 0)
+
 
 class Persistence(unittest.TestCase):
     """Files written by Breadbin survive a reboot and are readable on the host."""
