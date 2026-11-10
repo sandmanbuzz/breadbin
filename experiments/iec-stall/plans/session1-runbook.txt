@@ -21,13 +21,13 @@ Everything runs under the machine lock. RES is a results prefix outside the repo
 D. Dry run (one K trial, owner watching the screen; not counted)
    BREADBIN_ULTIMATE=<ADDR> tools/with-lock -r ultimate -- python3 experiments/iec-stall/session.py \
        experiments/iec-stall/plans/session1-dry.plan --image KIT/b8cc.prg --d64 KIT/b8cc.d64 \
-       --dma-image KIT/iostat.prg --out RES-dry.tsv --disk-id ID --control-file CTRLFILE \
+       --dma-image KIT/iostat-cache0.prg --out RES-dry.tsv --disk-id ID --control-file CTRLFILE \
        --commit "8cc3e57 disk; iostat <tip>" --drive-on-minutes-ago N
 
 1-3. Blocks 1, 2, 2b, 3 in one run (64 trials; hand actions: control disk, Breadbin disk, control disk)
    BREADBIN_ULTIMATE=<ADDR> tools/with-lock -r ultimate -- python3 experiments/iec-stall/session.py \
        experiments/iec-stall/plans/session1.plan --image KIT/b8cc.prg --d64 KIT/b8cc.d64 \
-       --dma-image KIT/iostat.prg --out RES.tsv --disk-id ID --control-file CTRLFILE \
+       --dma-image KIT/iostat-cache0.prg --out RES.tsv --disk-id ID --control-file CTRLFILE \
        --commit "8cc3e57 disk; iostat <tip>" --drive-on-minutes-ago N
    (--poll-mode none is the default: no reads during a trial. Preview without the network: add --dry-run.)
 
@@ -42,3 +42,8 @@ CACHE. The REU block cache (default on) serves root-mount reads from the REU onc
 on the same disk may not touch the drive. Use KIT/iostat-cache0.prg for --dma-image (no cache, every read
 on the bus). Arm B boots the 8cc3e57 kernel, which has the cache on and is keyed by the disk's own build
 id: its reads may be cache hits after the first boot of a session, and nothing in a row says so.
+
+Lead's decision (2026-11-10): arms D and P use iostat-cache0 (IOSTAT=1, CACHE=0), so every root-mount
+block is read from the drive; a warm REU cache must not hide a stage-b failure. Arm B runs the disk's
+8cc3e57 kernel with its cache as built; B tests stage a (the machine's KERNAL load) first, and its
+login time is read as a cache marker (a fast login suggests cache hits), not as a stage-b result.
