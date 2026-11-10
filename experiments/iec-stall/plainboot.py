@@ -14,7 +14,7 @@ def lines():
     return [l for l in ("".join(from_codes(c) for c in d[r*40:(r+1)*40]).rstrip().lower() for r in range(25)) if l]
 time.sleep(20)
 while time.time()-t0<170:
-    if any("login:" in l for l in lines()): print(f"OK    login after {time.time()-t0:.0f}s"); sys.exit(0)
+    if any("login:" in l for l in lines()): print(f"OK    login after {time.time()-t0:.0f}s"); sys.exit(0)  # counters: iostat.py LBL, once logged in
     time.sleep(10)
 dd=u.readmem(0xDD00,1)[0]
 try:
@@ -22,7 +22,8 @@ try:
     lbl={m.group(2):int(m.group(1),16) for l in open(sys.argv[1][:-4]+".lbl") for m in [re.match(r"al ([0-9A-F]{6}) \.(\S+)",l)] if m}
     base=lbl["io_out"]; v=u.readmem(base,15); nm="io_out io_base io_b io_n io_to io_pend io_held io_eoi io_inf io_sx io_sy ie_dev ie_sa ie_len ie_len2".split()
     assert lbl["io_n"]==base+3 and lbl["ie_dev"]==base+11, "variable layout changed: fix the dump"
-    open(sys.argv[1]+".stall","a").write(str({n:f"{b:02x}" for n,b in zip(nm,v)})+" stack:"+u.readmem(0x1C0,64).hex()+"\n")
+    io={n:f"{x:x}" for n,x in __import__("iostat").iostat_dump(u,lbl).items()}
+    open(sys.argv[1]+".stall","a").write(str({n:f"{b:02x}" for n,b in zip(nm,v)})+(" iostat:"+str(io) if io else "")+" stack:"+u.readmem(0x1C0,64).hex()+"\n")
 except Exception:
     pass
 print(f"STUCK after 170s; last line {lines()[-1]!r}; $90={u.readmem(0x90,1).hex()} $BA={u.readmem(0xBA,1).hex()} $DD00={dd:02x}")
