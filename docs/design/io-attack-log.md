@@ -137,3 +137,9 @@ Effect: H11 is **alive for class R and the 2026-11-06 run, doubtful for class S*
 ## 2026-11-10: halt probe proven in VICE (io/haltprobe 4e999fe; host test 4 OK, VICE 5 OK; no hardware)
 
 Blanked: 0 stolen cycles in 342,016 loops. Screen on: max 58 stolen (badline). Injected REU halts of 150/256/600/1200 bytes: every transfer in its bucket (max stolen 129/250/594/1194). Limits: about 10% bucket accuracy; a halt inside the probe's slow path or housekeeping is missed; gaps of 65,536 cycles or more alias; VICE's REU is not the Ultimate's DMA. Protocol amendment 1 adds the block-0 reading and the causal poll arm (block 2b).
+
+## 2026-11-10: IOSTAT fixed and reviewed (io/instrument 2a63d2b; VICE only)
+
+First hostile review of 8c7a2c0 blocked on the stall record: `io_lidx` reset at every try (a good retry wiped it) and `io_lwn`/`io_lst` captured after UNTALK. Fixed in 2a63d2b. Forced retry in a scratch merge with `H10=1` (VICE, stock ROMs): nread 33, nretry 1, nfail 0, lidx $64 (the injected byte 100), ltrk 9, lsct 1, ltry 1, lst $02, lwn 1, matching the injection's own bit count. The `io_neoi` increment had to be dropped from that scratch build to fit, so neoi is unproven under a forced retry. Room above BSS 26 bytes (208 on main), below $CF00 445 (unchanged). IOSTAT=0 is byte-identical to main (prg, d64, lbl). make test-host OK, test-smoke 4 OK, test_29 OK. Second review: PASS, low findings only (comment on `lwn` semantics: 0 = ready wait expired, 1-8 = bits left in the bit loop; on the pre-data path `lst`/`lwn` are leftovers and `lidx` $FF marks them unreliable). Full VICE suite on 2a63d2b running (exclusive).
+
+H8: the instrument exists; it is undecided until hardware rows carry counters.
