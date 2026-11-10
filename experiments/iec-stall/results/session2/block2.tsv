@@ -1,0 +1,30 @@
+# session 1; plan session2-b2.plan: 16 trials
+# image b8cc.prg sha256 3110b2f19b04089e; commit 8cc3e57 disk; iostat f5d64de; disk bb-last-agent; control file *
+# dma image iostat-cache0.prg sha256 e73dfc3e6027cbec (arms D, P); disk image b8cc.prg sha256 3110b2f19b04089e (arms K, B)
+# labels disk kernel (K, B): found, 882; iostat labels present: none (counters recorded as absent); ticks label: $004a
+# labels dma kernel (D, P): found, 894; iostat labels present: ['io_nread', 'io_nretry', 'io_nfail', 'io_neoi']; ticks label: $004a
+# drive powered on 186 min before session start
+# poll mode none (none: no readmem during a trial until its limit; byte: 1-byte reads of $D6 every 2 s, boot phases from 20 s); limits {'C': 120, 'K': 120, 'B': 150, 'D': 170, 'P': 170, 'Q': 170, 'J': 120, 'O': 170}
+# config dump start: res-s2b2.tsv.cfg-start.json; 12 item(s) differ from default
+# config before: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config set, read back: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+session	block	trial	arm	start_iso	min_session	min_drive_on	image_sha	commit	disk_id	outcome	seconds	io_nread	io_nretry	io_nfail	io_neoi	io_last	detail	dump	note
+1	2	1	D	2026-11-10T10:15:43-08:00	0.0	186.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	2	2	Q	2026-11-10T10:18:33-08:00	2.8	188.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	root-mount panic	5.1	1	2	1	0	ltrk=13;lsct=00;lidx=85;ltry=03;lst=02;lwn=05	kernel panic: cannot mount root filesyst poll=1000b/0.5s		
+1	2	3	D	2026-11-10T10:18:38-08:00	2.9	188.9	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	2	4	Q	2026-11-10T10:21:28-08:00	5.8	191.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	root-mount panic	11.7	6	5	1	0	ltrk=13;lsct=04;lidx=7d;ltry=03;lst=02;lwn=06	kernel panic: cannot start /bin/init poll=1000b/0.5s		
+1	2	5	D	2026-11-10T10:21:40-08:00	6.0	192.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	2	6	Q	2026-11-10T10:24:30-08:00	8.8	194.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	root-mount panic	10.2	5	6	2	0	ltrk=03;lsct=13;lidx=69;ltry=03;lst=02;lwn=02	kernel panic: cannot start /bin/init poll=1000b/0.5s		
+1	2	7	D	2026-11-10T10:24:40-08:00	9.0	195.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	2	8	Q	2026-11-10T10:27:31-08:00	11.8	197.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	root-mount panic	9.7	4	5	1	0	ltrk=03;lsct=13;lidx=93;ltry=03;lst=02;lwn=05	kernel panic: cannot start /bin/init poll=1000b/0.5s		
+1	2	8	Q	2026-11-10T10:27:40-08:00	12.0					NOTE									arm Q reached 4 failures: stopped from now on
+1	2	9	D	2026-11-10T10:27:40-08:00	12.0	198.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	2	10	Q	2026-11-10T10:30:30-08:00	14.8					skipped									skipped: arm Q reached 4 failures
+1	2	11	D	2026-11-10T10:30:30-08:00	14.8	200.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	2	12	Q	2026-11-10T10:33:21-08:00	17.6					skipped									skipped: arm Q reached 4 failures
+1	2	13	D	2026-11-10T10:33:21-08:00	17.6	203.6	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	2	14	Q	2026-11-10T10:36:11-08:00	20.5					skipped									skipped: arm Q reached 4 failures
+1	2	15	D	2026-11-10T10:36:11-08:00	20.5	206.5	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	ltrk=00;lsct=00;lidx=00;ltry=00;lst=00;lwn=00	poll=none		
+1	2	16	Q	2026-11-10T10:39:01-08:00	23.3					skipped									skipped: arm Q reached 4 failures
+# config after restore: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config dump end: res-s2b2.tsv.cfg-end.json; 12 item(s) differ from default

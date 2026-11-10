@@ -263,3 +263,16 @@ Reading for 11-07: every agent boot that day used the backend's 0.5 s full-scree
 The no-DMA disksum stalls on hardware ("no status byte for the first U1") are withdrawn as drive evidence. `disksum.s` passed the logical file number to `CHKOUT`/`CHKIN` in A; both take it in X. With junk in X the calls fail, the U1 text goes to the screen and the first `CHRIN` waits on the keyboard. Under VICE (stock KERNAL, true-drive 1541): as written, 3 of 3 runs stall at sector 0 with `$99`=0 and `$9A`=3; with `ldx` at the three sites, 6 of 6 runs read 683 of 683 sectors, every checksum matching (`results/disksum-vice.txt`, `tests/disksum_vice.py`). Not shown: that the hardware runs failed the same way (a different junk X could hit an open channel). The fixed reader on hardware, with no DMA during the read, is a later-session item. Not run: JiffyDOS ROMs, a disk with error sectors, the host-side CAP/STALL logic.
 
 **Session 2 block 1, final (10:15):** K 8 of 8 pass, every byte equal; J 4 of 4 mismatch, then skipped at its limit (4 skips). Prediction (J ≥ 3 of 8, K 0 of 8) met. Configuration at block end equals block start (0 items differ). Final rows and both config dumps are in `results/session2/`.
+
+## 2026-11-10: session 2, block 2 (D vs Q; hardware) — the class S signature caused on demand
+
+| Arm | Boots | Outcome | IOSTAT |
+|---|---|---|---|
+| D (no polling) | 8 | 8 pass | 33 reads, 0 retries, every boot |
+| Q (1000 B every 0.5 s) | 4, then stopped at its limit | 4 root-mount panics in 5-12 s (1 `cannot mount root filesystem`, 3 `cannot start /bin/init`) | 1-6 reads, 2-6 retries, 1-2 fails |
+
+Last-stall record of the four Q panics: `ltry=03` (retries used up), `lst=02` (timeout), `lidx` = $85, $7d, $69, $93 (inside the data), `lwn` = 5, 6, 2, 5 (bits still to come). Tracks 19 and 3.
+
+Against the pre-registration: Q "at least 1 of 8 root-mount panics" and "retries far above P": met (4 of 4; P's retry rate was 60 per 264 reads, Q's is roughly 1 per read). D 0 retries: met. Block 3's question (does the stall record show lidx in the data and lwn 1-8) is already answered here: yes, every time, which is the class S signature of 2026-11-07, produced by REST screen reads alone, on the hardware, with nothing else changed. Configuration at the end equals the start (0 items differ).
+
+Reading: H11 explains both 11-07 classes. Class R (KERNAL load) is silent corruption under polling (block 1), class S (our driver) is a mid-byte CLK timeout that exhausts the retries under polling (block 2). Blocks 3 and 4 continue as planned (block 4, 1-byte polling, decides what harnesses may do).
