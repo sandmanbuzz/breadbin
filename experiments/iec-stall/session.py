@@ -59,6 +59,7 @@ ARM_FAIL_LIMITS = {"P": 4}   # protocol amendment 1: the poll arm ending the blo
 POLL_FIRST = 3            # arm P: first 1000-byte read this long after the start
 POLL_EVERY = 2            # and one per this many seconds
 WEDGE_LIMIT = 3
+IO_RECORD = ("io_ltrk", "io_lsct", "io_lidx", "io_ltry", "io_lst", "io_lwn")
 COLUMNS = ["session", "block", "trial", "arm", "start_iso", "min_session", "min_drive_on",
            "image_sha", "commit", "disk_id", "outcome", "seconds", "io_nread", "io_nretry",
            "io_nfail", "io_neoi", "io_last", "detail", "dump", "note"]
@@ -457,12 +458,14 @@ class Rig:
                 except Exception:        # noqa: BLE001
                     out[n] = ""
         last = []
-        for n in sorted(k for k in lb if k.startswith("io_last")):
-            try:
-                w = label_width(lb, n, cap=2)
-                last.append(f"{n}={self.u.readmem(lb[n], w).hex()}")
-            except Exception:            # noqa: BLE001
-                pass
+        # the last-stall record (blk.s): one byte each; a code label "io_last" exists in iec.s, so
+        # match the record's names exactly (the old prefix match read two bytes of that routine)
+        for n in IO_RECORD:
+            if n in lb:
+                try:
+                    last.append(f"{n[3:]}={self.u.readmem(lb[n], 1).hex()}")
+                except Exception:        # noqa: BLE001
+                    pass
         out["io_last"] = ";".join(last) or ("" if any(n in lb for n in IO_COUNTERS) else "iostat absent")
         return out
 
