@@ -80,6 +80,10 @@ set -- "$img" "$@"
 [ -n "$jiffy" ] && set -- -v "$jiffy:/jiffy:ro" "$@"
 [ -n "$broker" ] && set -- -e "BREADBIN_BROKER=$broker" "$@"
 [ -n "${BREADBIN_VICE_PRINT_ARGS:-}" ] && set -- -e "BREADBIN_VICE_PRINT_ARGS=$BREADBIN_VICE_PRINT_ARGS" "$@"
+# The container copies the tree without .git, so the disk's revision stamp is worked out here
+# (the Makefile's BUILDREV rule, run on the host) and passed in; make takes it from the environment.
+rev=${BUILDREV:-$(make -s -C "$repo" --no-print-directory print-buildrev 2>/dev/null || echo unknown)}
+set -- -e "BUILDREV=$rev" "$@"
 set -- -v "$repo:/src:ro" -v "$roms:/roms:ro" "$@"
 [ -n "$mem" ] && set -- "$mem" "$@"
 set -- podman run --rm --init --name "$name" "$@"
