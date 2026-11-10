@@ -1175,19 +1175,20 @@ cache_clear_c:
 :
 .endmacro
 
+.macro io_cap
+        lda ST
+        sta io_lst
+        lda iec_io_n
+        sta io_lwn
+.endmacro
+
 ; iec_read: as the IOSTAT=0 build, plus the counters and the last-event record
 iec_read_i:
         inc16 io_nread
         lda #3
         sta rd_try
-@try:   lda #$ff
-        sta io_lidx
-        jsr iec_read1_i
+@try:   jsr iec_read1_i
         bcc @ok
-        lda ST              ; before UNTALK touches it
-        sta io_lst
-        lda iec_io_n
-        sta io_lwn
         lda trk
         sta io_ltrk
         lda sct
@@ -1232,8 +1233,14 @@ iec_read1_i:
 @z:     jsr iec_in_end
         clc
         rts
-@t:     sty io_lidx
-        jsr iec_in_end
-@e:     sec
+@t:     sty io_lidx          ; the record is written here, at the timeout, and a later good try leaves it
+        io_cap
+        jsr iec_in_end      ; UNTALK reuses io_n and ST, so capture first
+        sec
+        rts
+@e:     lda #$ff            ; failed before the data
+        sta io_lidx
+        io_cap
+        sec
         rts
 .endif

@@ -1,5 +1,5 @@
 """IOSTAT counters of a running kernel (make IOSTAT=1, the default): how often the block-read mitigation fired.
-    BREADBIN_ULTIMATE=host python3 iostat.py IMAGE.prg     # needs IMAGE.lbl next to it; one DMA read, run it after login
+    BREADBIN_ULTIMATE=host python3 iostat.py IMAGE.prg     # needs IMAGE.lbl next to it; a few small DMA reads, run it after login
 imported by dmaboot.py / plainboot.py for the stall dump (decode.py prints it)."""
 import re
 import sys
