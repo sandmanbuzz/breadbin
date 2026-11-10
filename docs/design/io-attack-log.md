@@ -143,3 +143,19 @@ Blanked: 0 stolen cycles in 342,016 loops. Screen on: max 58 stolen (badline). I
 First hostile review of 8c7a2c0 blocked on the stall record: `io_lidx` reset at every try (a good retry wiped it) and `io_lwn`/`io_lst` captured after UNTALK. Fixed in 2a63d2b. Forced retry in a scratch merge with `H10=1` (VICE, stock ROMs): nread 33, nretry 1, nfail 0, lidx $64 (the injected byte 100), ltrk 9, lsct 1, ltry 1, lst $02, lwn 1, matching the injection's own bit count. The `io_neoi` increment had to be dropped from that scratch build to fit, so neoi is unproven under a forced retry. Room above BSS 26 bytes (208 on main), below $CF00 445 (unchanged). IOSTAT=0 is byte-identical to main (prg, d64, lbl). make test-host OK, test-smoke 4 OK, test_29 OK. Second review: PASS, low findings only (comment on `lwn` semantics: 0 = ready wait expired, 1-8 = bits left in the bit loop; on the pre-data path `lst`/`lwn` are leftovers and `lidx` $FF marks them unreliable). Full VICE suite on 2a63d2b running (exclusive).
 
 H8: the instrument exists; it is undecided until hardware rows carry counters.
+
+## 2026-11-10: owner's answers; new H13 (configuration after the Ultimate's config reset)
+
+Owner, from memory (soft evidence, dated):
+- Cooldown: several days, all hardware (drive, C64 Ultimate, everything). Session 1 is therefore the cold baseline the brief asks for.
+- The drive cannot be power-cycled remotely; `machine:reboot` resets the bus, which resets the drive. Trials start from a reboot; the owner power-cycles by hand when asked.
+- Media: plenty, blank sacrificial disks too; no observable difference between disks in any use. The 11-07 disks showed no visible failure. A known-good control disk is provided at bring-up.
+- 11-07, scripted boots: `LOADING` then a hang (never seen before); `?LOAD ERROR` and an immediate clear to `READY.` (looks like RUN/STOP-RESTORE); a root-mount panic. **Every manual test succeeded**, without cooldown, with soft resets and power cycles. Mid-cooldown, a known-good game booted and ran twice with expected speed, and the Breadbin image in the drive at the time.
+- **The rise in failures and the new failure mode coincided with a full configuration reset of the Ultimate and a manual reconfiguration.** The owner aimed for the same configuration; the result is the desired state either way.
+- IOSTAT stays on by default; it can come out once stable.
+
+Reading. Two variables changed on or before 11-07 and only one failure condition is known: scripted runs failed, hand runs did not, after a config reset. That points at the harness (H11) or at the configuration (new H13), not at the drive or media (H1, H2), though one manual series is not a rate and H1 is tested by session 1's cold start anyway.
+
+**H13: an IEC- or DMA-relevant Ultimate setting differs from before the reset**, and that setting matters only under the harness's access pattern or only for class R. No full dump exists from before the reset; only scattered items are recorded (Kernal ROM, Software IEC, drive A bus ID, turbo, REU, DMA Load Mimics ID; `Serial Bus Mode` and `Burst Mode Patch` never). Falsifier: a full read-only dump at bring-up (`cfgdump.py`, in progress on `io/trial-harness`), every item that differs from the firmware default listed and each IEC/DMA/timing one judged; if the owner has a saved configuration file from before the reset, diff against it. H13 is killed for an item only by a trial that varies that item; a plausible item becomes an arm in session 2, not session 1.
+
+Note on `?LOAD ERROR` then an immediate clear to `READY.`: the KERNAL does not clear the screen on a load error. A clear to `READY.` is what an NMI (RESTORE) or the BASIC warm start after a BRK does, or a host action (reset with a fast boot, or a key-buffer write). Ask of the 11-07 transcript, if found: what the script did right after it detected the error.
