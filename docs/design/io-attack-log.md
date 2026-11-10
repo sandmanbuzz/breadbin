@@ -108,3 +108,17 @@ Effect on the hypotheses:
   - **H12 (new):** CLK pulses do not reach the C64's CIA. They could be filtered or delayed in the C64 Ultimate's bus logic (`Serial Bus Mode` routing), or lost to the line.
 
 The halt probe separates the two: CPU gaps over 150 cycles in step with the stalls means H11; no gaps means H12.
+
+## 2026-11-10: lead restart; H11 promoted to the lead hypothesis for both classes (reading, no run)
+
+The previous lead session ended with work in flight. State taken over: `io/instrument` 8c7a2c0 (IOSTAT, hater review never returned), `io/haltprobe` (probe uncommitted, unproven), `io/trial-harness` 293ed52 (`--poll-mode none`), `io/h10-frame-vice` (experiment only). The owner's session-1 answers are still open. Restarted: the haltprobe proof in VICE, the IOSTAT hater review with a forced retry (H10 flag on top of IOSTAT), and a retrospective audit of what every recorded hardware series' harness read over DMA during disk transfers.
+
+Why H11 moves up. Three facts already in the evidence point the same way:
+
+- DMA halts the C64 CPU and a 1000-byte read during a transfer has corrupted loads on the emulated drive (E-4.1 #7, E-2.3); the class S signature needs the receiver to miss 2-6 CLK pulses while the drive goes on clocking (2026-11-07 VICE entry). A CPU halt of roughly 150-500 µs mid-byte does exactly that; nothing in our code can.
+- The asymmetry "stalls under any Breadbin boot, including with the ROM's own ACPTR, never in 1,600+ stock-KERNAL block reads" (E-1.3 #20, #22) is a difference in how the runs were driven, not in the receive code. Breadbin boots ran under harnesses that read the screen; how the stock runs were driven is what the audit is checking.
+- On 2026-11-07 the only attempt with no harness at all, the owner's manual boot, is the only one that reached login (E-2.4 c). The three stage-a failures happened in the machine's KERNAL LOAD (JiffyDOS host, a cycle-timed protocol) while an agent's harness was driving.
+
+If H11 holds, both classes are one cause, the drive and media are not implicated, and the release claim changes: the failure is in our test tooling on the Ultimate, and a user booting by hand never sees it. It is not yet shown: one manual pass is not a rate, and H1/H2 still predict 2026-11-07 as well. What would kill it: the halt probe shows no halt over about 100 cycles for the read sizes the harnesses use; or the audit finds failing series with provably no DMA during the transfer; or the protocol's poll arm (below) fails no more often than the no-poll arm.
+
+Planned protocol amendment, for the owner before session 1: a causal arm. D (DMA boot, root mount by our driver) run in pairs, `--poll-mode none` against a fixed screen read of 1000 bytes every 2 s during the mount, alternating, IOSTAT counters on every row. Predicted under H11: retries or stalls in the poll arm, zero retries in the no-poll arm. The drive is read either way, so the arm costs reads, not writes.
