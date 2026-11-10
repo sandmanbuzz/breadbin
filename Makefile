@@ -8,7 +8,7 @@ LIBSRC  := $(wildcard src/lib/*.s)
 LIBOBJ  := $(BUILD)/lib/breadbin.lib
 ROOTSRC := $(shell find rootfs -type f)
 
-.PHONY: FORCE all clean webdemo test test-host test-smoke test-only test-keyboard test-console size run run-reu run-reu-root
+.PHONY: FORCE all clean webdemo test test-host test-smoke test-only test-keyboard test-console size print-buildrev run run-reu run-reu-root
 .SECONDARY:
 all: $(BUILD)/breadbin.d64
 
@@ -37,7 +37,9 @@ $(BUILD)/iostat.stamp: FORCE
 # The source revision stamped on the disk (directory entry "BUILD <rev>" and /etc/build): the short
 # commit, with + when tracked files outside build/ differ. make BUILDREV=xyz overrides it.
 BUILDREV ?= $(shell r=$$(git rev-parse --short=7 HEAD 2>/dev/null) || r=unknown; \
-  if [ "$$r" != unknown ] && [ -n "$$(git status --porcelain --untracked-files=no -- . ':!build' 2>/dev/null)" ]; then r="$$r+"; fi; echo "$$r")
+  if [ "$$r" != unknown ] && [ -n "$$(git --no-optional-locks status --porcelain --untracked-files=no -- . ':!build' 2>/dev/null)" ]; then r="$$r+"; fi; echo "$$r")
+print-buildrev:
+	@echo "$(BUILDREV)"
 $(BUILD)/rev.txt: FORCE
 	@mkdir -p $(BUILD)
 	@echo "$(BUILDREV)" | cmp -s - $@ || echo "$(BUILDREV)" > $@

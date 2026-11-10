@@ -121,6 +121,10 @@ Run the full suite when a milestone story lands (the M0 stories, a filesystem or
 
 CI runs the build and host tests on every push. It does not run the VICE tests, because they need ROMs that are not in the repo.
 
+## Comparing builds byte for byte
+
+The disk carries its source revision (a locked `DEL` directory entry `BUILD <rev>` after the boot file, and `/etc/build`; `+` marks uncommitted changes to tracked files), so every commit changes `build/breadbin.d64`. To show that two trees build the same disk (a comment-only change, a build switch that should be a no-op), build both with the same fixed stamp, `make BUILDREV=0`, and compare those images. The kernel `.prg` does not carry the stamp. `tools/ci/run.sh` passes the host's revision into the container, which has no `.git`; set `BUILDREV` to override it.
+
 ## Known issues
 
 - **Known flaky: `tools/test_shards.py` `test_ctrl_c_stops_every_shard` (host test, fixed, watch for recurrence).** It failed once inside `tools/land.sh`, then passed alone (twice) and on retry. The fix `fix/shards-ctrlc-race` landed afterwards (merge `9d4edb7`: the test now polls for the stopped count, since the stub's TERM trap can finish after the driver's wait returns). If it recurs, rerun it alone and report.
