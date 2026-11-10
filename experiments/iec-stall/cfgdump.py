@@ -9,7 +9,7 @@ Only GET requests are ever made: no PUT, POST or machine/drive command. The JSON
 
 PRIVACY. A category or item is dropped entirely (name listed under "_redacted", never a value) when
 its name matches, case-insensitively, any of: the substrings network, ethernet, wifi, wlan, gateway,
-netmask, password, ssid, ftp, telnet, http, host, dns, remote, device (as in name-of-device);
+netmask, password, ssid, ftp, telnet, http, host, dns, remote (a "Device Name" item goes by the whole word "name");
 or any whole word (split on non-alphanumerics) ip, lan, mac, web, user, name, net; or when a
 value looks like an IPv4/IPv6 address or a MAC address. A dropped category takes all its items.
 Errs on the side of dropping: "User Interface" goes too.
@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
 
 SUBSTR = ("network", "ethernet", "wifi", "wi-fi", "wlan", "gateway", "netmask", "password", "ssid",
-          "ftp", "telnet", "http", "host", "dns", "remote", "device")
+          "ftp", "telnet", "http", "host", "dns", "remote")
 WORDS = {"ip", "lan", "mac", "web", "user", "name", "net"}
 IPV4 = re.compile(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])")
 MAC = re.compile(r"(?i)(?<![0-9a-f])[0-9a-f]{2}(?:[:-][0-9a-f]{2}){5}(?![0-9a-f])")
