@@ -18,7 +18,11 @@ Plan file: one entry per line, `BLOCK ARMS COUNT` (`#` starts a comment), e.g.
 or JSON: a list of [block, arms, count] (or {"block":..,"arms":..,"count":..}).
 
 Arms: C control (KERNAL load of a non-Breadbin file), K kernal-load of the Breadbin boot file
-(byte compare), B boot (load, run, login, IOSTAT), D DMA kernel + root mount (plainboot logic).
+(byte compare), B boot (load, run, login, IOSTAT), D DMA kernel + root mount (plainboot logic),
+P as D but with one 1000-byte screen read every 2 s from 3 s after the start (block 2b, the causal
+poll arm; its own failure count, 4 failures end the block). A block may be a word ("2b", "dry").
+--dma-image: the kernel arms D and P load by DMA, when it is not the one on the disk (--image,
+--d64: what K compares and B boots). Each has its own labels file (IOSTAT counters, `ticks`).
 
 The DMA rule (README): no screen-sized read while a disk transfer may be in progress. Every wait
 below reads nothing for FIRST_READ seconds after a transfer starts, then one screen read per POLL
@@ -40,15 +44,20 @@ import urllib.parse
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import iostat  # noqa: E402 - uptime(); no side effects at import
 
-ARMS = "CKBD"
-LIMITS = {"C": 120, "K": 120, "B": 150, "D": 170}      # seconds, protocol
+ARMS = "CKBDP"
+LIMITS = {"C": 120, "K": 120, "B": 150, "D": 170, "P": 170}      # seconds, protocol
 FIRST_READ = 20           # no DMA read this long after a transfer starts (plainboot)
 POLL = 10                 # then one screen read per this many seconds
 BYTE_FIRST = 2            # --poll-mode byte, KERNAL load: first 1-byte read this long after the command
 BYTE_EVERY = 2            # and at most one 1-byte read per this many seconds
 SETTLE = 6                # after a reset, before the first read (stockload)
 ARM_FAIL_LIMIT = 5
+ARM_FAIL_LIMITS = {"P": 4}   # protocol amendment 1: the poll arm ending the block at 4 failures
+POLL_FIRST = 3            # arm P: first 1000-byte read this long after the start
+POLL_EVERY = 2            # and one per this many seconds
 WEDGE_LIMIT = 3
 COLUMNS = ["session", "block", "trial", "arm", "start_iso", "min_session", "min_drive_on",
            "image_sha", "commit", "disk_id", "outcome", "seconds", "io_nread", "io_nretry",
@@ -81,6 +90,12 @@ class Clock:
 
 
 # ---------------------------------------------------------------- plan
+def block_id(v):
+    """A block is an int (1, 2, 3) or a word ("2b", "dry"); the order in the file is the order run."""
+    v = str(v).strip()
+    return int(v) if v.isdigit() else v
+
+
 def parse_plan(text):
     """-> [(block, arms, count)] in file order."""
     text = text.strip()
@@ -89,7 +104,7 @@ def parse_plan(text):
         for e in json.loads(text):
             if isinstance(e, dict):
                 e = [e["block"], e["arms"], e["count"]]
-            out.append((int(e[0]), str(e[1]).upper(), int(e[2])))
+            out.append((block_id(e[0]), str(e[1]).upper(), int(e[2])))
     else:
         for n, line in enumerate(text.splitlines(), 1):
             line = line.split("#", 1)[0].strip()
@@ -98,9 +113,9 @@ def parse_plan(text):
             f = line.split()
             if len(f) != 3:
                 raise ValueError(f"plan line {n}: want BLOCK ARMS COUNT, got {line!r}")
-            out.append((int(f[0]), f[1].upper(), int(f[2])))
+            out.append((block_id(f[0]), f[1].upper(), int(f[2])))
     for block, arms, count in out:
-        if not arms or any(a not in ARMS for a in arms) or count < 1 or block < 0:
+        if not arms or any(a not in ARMS for a in arms) or count < 1 or block == "":
             raise ValueError(f"bad plan entry block={block} arms={arms!r} count={count}")
     return out
 
@@ -113,6 +128,10 @@ def expand(plan):
             for a in arms:
                 order.append((block, len(order) + 1, a))
     return order
+
+
+def arm_kernel(arm):
+    return "dma" if arm in "DP" else "disk"
 
 
 def disk_kind(arm):
@@ -331,9 +350,12 @@ class Rig:
     """Everything that touches the Ultimate for one trial."""
 
     def __init__(self, u, clock, image, labels, control_file, first_read=FIRST_READ, poll=POLL,
-                 settle=SETTLE, limits=None, poll_mode="none"):
+                 settle=SETTLE, limits=None, poll_mode="none", dma_image=None, labels_dma=None):
         self.u, self.clock = u, clock
         self.poll_mode = poll_mode
+        self.dma_prg = dma_image if dma_image is not None else image
+        self.labels_dma = labels_dma if labels_dma is not None else labels
+        self.cur_labels = labels      # the labels of the kernel the current trial runs
         self.r0 = 0                  # cursor row ($D6) read on the idle bus before the load command
         self.prg = image
         self.addr, self.body = image[0] | image[1] << 8, image[2:]
@@ -426,21 +448,22 @@ class Rig:
     def iostat(self):
         """Counter and last-event labels, read with short reads; blank where a label is absent."""
         out = {}
+        lb = self.cur_labels
         for n in IO_COUNTERS:
-            if n in self.labels:
+            if n in lb:
                 try:
-                    w = label_width(self.labels, n)
-                    out[n] = int.from_bytes(self.u.readmem(self.labels[n], w), "little")
+                    w = label_width(lb, n)
+                    out[n] = int.from_bytes(self.u.readmem(lb[n], w), "little")
                 except Exception:        # noqa: BLE001
                     out[n] = ""
         last = []
-        for n in sorted(k for k in self.labels if k.startswith("io_last")):
+        for n in sorted(k for k in lb if k.startswith("io_last")):
             try:
-                w = label_width(self.labels, n, cap=2)
-                last.append(f"{n}={self.u.readmem(self.labels[n], w).hex()}")
+                w = label_width(lb, n, cap=2)
+                last.append(f"{n}={self.u.readmem(lb[n], w).hex()}")
             except Exception:            # noqa: BLE001
                 pass
-        out["io_last"] = ";".join(last)
+        out["io_last"] = ";".join(last) or ("" if any(n in lb for n in IO_COUNTERS) else "iostat absent")
         return out
 
     def stall_dump(self, boot_phase):
@@ -453,12 +476,13 @@ class Rig:
             except Exception:            # noqa: BLE001
                 d[n] = None
         txt = " ".join(f"{k}={'??' if v is None else format(v, '02x')}" for k, v in d.items())
-        if boot_phase and "io_out" in self.labels:
+        lb = self.cur_labels
+        if boot_phase and "io_out" in lb:
             try:
-                base = self.labels["io_out"]
+                base = lb["io_out"]
                 names = ("io_out io_base io_b io_n io_to io_pend io_held io_eoi io_inf io_sx io_sy "
                          "ie_dev ie_sa ie_len ie_len2").split()
-                if self.labels.get("io_n") == base + 3 and self.labels.get("ie_dev") == base + 11:
+                if lb.get("io_n") == base + 3 and lb.get("ie_dev") == base + 11:
                     v = self.u.readmem(base, 15)
                     stack = self.u.readmem(0x1C0, 64).hex()
                     self.sidecar.append(str({n: f"{b:02x}" for n, b in zip(names, v)})
@@ -468,18 +492,25 @@ class Rig:
                     txt += " iovars=layout-changed"
             except Exception:            # noqa: BLE001
                 pass
+        txt += " " + self.uptime()
         last = self.last_lines[-1] if self.last_lines else ""
         return txt + f" last={last!r}", d
+
+    def uptime(self):
+        """Protocol amendment 1: the kernel's jiffy count in every stall dump, so the onset of a stall
+        is known relative to the first DMA read. Two 3-byte reads, only here (after the limit)."""
+        return iostat.uptime(self.u, self.cur_labels)
 
     # -- arms
     def trial(self, arm):
         """-> dict(outcome, seconds, detail, dump, timed_out, iostat)."""
         self.sidecar = []
         self.last_lines = []
+        self.cur_labels = self.labels_dma if arm_kernel(arm) == "dma" else self.labels
         res = dict(outcome="other", detail="", dump="", timed_out=False, iostat={})
         t0 = self.clock.now()
-        if arm == "D":
-            self._arm_d(res)
+        if arm in "DP":
+            self._arm_d(res, arm)
             return self._done(res, t0)
         self.reset()
         for _ in range(2):               # idle bus here: a screen read is safe
@@ -582,12 +613,28 @@ class Rig:
         else:
             self._boot_result(res, None, "B")
 
-    def _arm_d(self, res):
+    def _arm_d(self, res, arm="D"):
         self.u.resume()
         t0 = self.clock.now()
-        self.u.run_prg(self.prg)         # reset, load by DMA, RUN; $BA mimics device 8
-        st = self.wait(t0, t0 + self.limits["D"], classify_boot, "boot")
-        self._boot_result(res, st, "D")
+        self.u.run_prg(self.dma_prg)     # reset, load by DMA, RUN; $BA mimics device 8
+        if arm == "P":
+            st = self.poll_wait(t0, t0 + self.limits["P"])
+        else:
+            st = self.wait(t0, t0 + self.limits["D"], classify_boot, "boot")
+        self._boot_result(res, st, arm)
+
+    def poll_wait(self, t0, t_end):
+        """Block 2b, arm P: one 1000-byte screen read every POLL_EVERY s from POLL_FIRST s after t0 to
+        the limit (the deliberate DMA load the arm exists to test). Returns the classifier's state or None."""
+        self.clock.sleep(t0 + POLL_FIRST - self.clock.now())
+        while True:
+            st = classify_boot(self.screen())
+            if st:
+                return st
+            left = t_end - self.clock.now()
+            if left <= 0:
+                return None
+            self.clock.sleep(min(POLL_EVERY, left))
 
     def _boot_result(self, res, st, arm):
         if st == "login":
@@ -621,7 +668,7 @@ class Session:
     def __init__(self, rig, results, order, args, ask, clock, image_sha):
         self.rig, self.res, self.order, self.a = rig, results, order, args
         self.ask, self.clock = ask, clock
-        self.image_sha = image_sha
+        self.image_sha = image_sha if isinstance(image_sha, dict) else {"disk": image_sha, "dma": image_sha}
         self.t_start = clock.now()
         self.fail = {a: 0 for a in ARMS}
         self.stopped_blocks = set()
@@ -647,8 +694,8 @@ class Session:
             for block, idx, arm in self.order:
                 if block in self.stopped_blocks:
                     continue
-                if self.fail[arm] >= ARM_FAIL_LIMIT:
-                    self.note(f"skipped: arm {arm} reached {ARM_FAIL_LIMIT} failures", block, idx, arm,
+                if self.fail[arm] >= ARM_FAIL_LIMITS.get(arm, ARM_FAIL_LIMIT):
+                    self.note(f"skipped: arm {arm} reached {ARM_FAIL_LIMITS.get(arm, ARM_FAIL_LIMIT)} failures", block, idx, arm,
                               outcome="skipped")
                     continue
                 if disk_kind(arm) != self.kind:
@@ -665,7 +712,7 @@ class Session:
         start_iso, m_sess = now_iso(), self.minutes()
         row = dict(session=self.a.session, block=block, trial=idx, arm=arm, start_iso=start_iso,
                    min_session=m_sess, min_drive_on=round(m_sess + self.a.drive_on_minutes_ago, 1),
-                   image_sha=self.image_sha, commit=self.a.commit, disk_id=self.a.disk_id)
+                   image_sha=self.image_sha[arm_kernel(arm)], commit=self.a.commit, disk_id=self.a.disk_id)
         note = [self.carry] if self.carry else []
         self.carry = ""
         interrupted = None
@@ -694,7 +741,7 @@ class Session:
         finally:
             io = r.get("iostat") or {}
             self.res.row(**row, outcome=r["outcome"], seconds=r.get("seconds", ""),
-                         detail=(r.get("detail", "") + " poll=" + self.rig.poll_mode).strip(), dump=r.get("dump", ""),
+                         detail=(r.get("detail", "") + " poll=" + ("1000b/2s" if arm == "P" else self.rig.poll_mode)).strip(), dump=r.get("dump", ""),
                          io_nread=io.get("io_nread", ""), io_nretry=io.get("io_nretry", ""),
                          io_nfail=io.get("io_nfail", ""), io_neoi=io.get("io_neoi", ""),
                          io_last=io.get("io_last", ""), note="; ".join(note))
@@ -705,9 +752,11 @@ class Session:
             raise interrupted
         if r["outcome"] != "pass":
             self.fail[arm] += 1
-            if self.fail[arm] == ARM_FAIL_LIMIT:
-                self.note(f"arm {arm} reached {ARM_FAIL_LIMIT} failures: stopped from now on", block,
-                          idx, arm)
+            lim = ARM_FAIL_LIMITS.get(arm, ARM_FAIL_LIMIT)
+            if self.fail[arm] == lim:
+                self.note(f"arm {arm} reached {lim} failures: stopped from now on", block, idx, arm)
+                if arm == "P":               # the point is made; spare the drive: the whole block ends
+                    self.stopped_blocks.add(block)
         self.wedges = self.wedges + 1 if hands else 0
         if self.wedges >= WEDGE_LIMIT:
             self.stopped_blocks.add(block)
@@ -744,7 +793,10 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
     ap.add_argument("--commit", default="", help="kernel commit (git describe of the image's build)")
     ap.add_argument("--session", default="1")
     ap.add_argument("--drive-on-minutes-ago", type=float, default=0.0)
-    ap.add_argument("--labels", help="label file (default: IMAGE.lbl)")
+    ap.add_argument("--dma-image", help="kernel PRG for arms D and P (loaded by DMA) when it is not the "
+                    "one on the disk (--image); default: --image")
+    ap.add_argument("--labels", help="label file of the DMA kernel (default: DMA-IMAGE.lbl, or IMAGE.lbl)")
+    ap.add_argument("--labels-disk", help="label file of the kernel on the disk, arms B (default: IMAGE.lbl)")
     ap.add_argument("--no-prompt", action="store_true",
                     help="tests: skip hand actions; the LED answer is 'n'")
     ap.add_argument("--dry-run", action="store_true")
@@ -769,7 +821,10 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
     first = d64_first_prg(open(a.d64, "rb").read())
     if first is None or first[1] != prg:
         raise SystemExit("the first PRG on --d64 is not --image: refusing to run with the wrong disk")
-    labels = read_labels(a.labels or a.image[:-4] + ".lbl")
+    dma_prg = open(a.dma_image, "rb").read() if a.dma_image else prg
+    dma_sha = hashlib.sha256(dma_prg).hexdigest()[:16]
+    labels = read_labels(a.labels_disk or a.image[:-4] + ".lbl")
+    labels_dma = read_labels(a.labels or ((a.dma_image or a.image)[:-4] + ".lbl")) if (a.labels or a.dma_image) else labels
 
     extra = []
     for s in a.set:
@@ -789,12 +844,18 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
         ask = (lambda text: "n" if text.startswith("Is the drive LED") else "")
 
     log = Results(a.out)
-    rig = Rig(client, clock, prg, labels, a.control_file, poll_mode=a.poll_mode)
+    rig = Rig(client, clock, prg, labels, a.control_file, poll_mode=a.poll_mode, dma_image=dma_prg,
+              labels_dma=labels_dma)
     log.comment(f"session {a.session}; plan {os.path.basename(a.plan)}: {len(order)} trials")
     log.comment(f"image {os.path.basename(a.image)} sha256 {sha}; commit {a.commit or '-'}; "
                 f"disk {a.disk_id}; control file {a.control_file}")
-    log.comment(f"labels: {'found, ' + str(len(labels)) if labels else 'absent'}; "
-                f"iostat labels present: {[n for n in IO_COUNTERS if n in labels] or 'none'}")
+    if a.dma_image:
+        log.comment(f"dma image {os.path.basename(a.dma_image)} sha256 {dma_sha} (arms D, P); "
+                    f"disk image {os.path.basename(a.image)} sha256 {sha} (arms K, B)")
+    for nm, lb in (("disk kernel (K, B)", labels), ("dma kernel (D, P)", labels_dma)):
+        log.comment(f"labels {nm}: {'found, ' + str(len(lb)) if lb else 'absent'}; "
+                    f"iostat labels present: {[n for n in IO_COUNTERS if n in lb] or 'none (counters recorded as absent)'}; "
+                    f"ticks label: {'$%04x' % lb['ticks'] if 'ticks' in lb else 'absent (reads $004a)'}")
     log.comment(f"drive powered on {a.drive_on_minutes_ago:g} min before session start")
     log.comment(f"poll mode {a.poll_mode} (none: no readmem during a trial until its limit; byte: "
                 f"1-byte reads of $D6 every {BYTE_EVERY} s, boot phases from {rig.first_read} s); "
@@ -825,7 +886,7 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
     try:
         cfg_dump("start")
         guard.apply()
-        sess = Session(rig, log, order, a, ask, clock, sha)
+        sess = Session(rig, log, order, a, ask, clock, {"disk": sha, "dma": dma_sha})
         status = sess.run()
     except (StopSession, KeyboardInterrupt) as e:
         try:

@@ -372,7 +372,7 @@ class Full(Base):
         self.assertEqual(len(rows), 2)
         for r in rows:
             self.assertEqual((r["io_nread"], r["io_nretry"], r["io_nfail"], r["io_neoi"], r["io_last"]),
-                             ("", "", "", "", ""))
+                             ("", "", "", "", "iostat absent"))
 
     def test_failure_outcomes(self):
         sim = Sim(self.fake, self.prg,
@@ -432,6 +432,102 @@ class Timeouts(Base):
         r = [r for r in self.rows() if r["outcome"] != "NOTE"][0]
         self.assertEqual(r["outcome"], "other")
         self.assertIn("no ST timeout bit", r["detail"])
+
+
+class Session1(Base):
+    """Session-1 additions: uptime in stall dumps, the 2b poll arm, a DMA kernel apart from the disk's."""
+
+    def test_stall_dump_has_uptime_in_jiffies(self):
+        self.fake.ram[0x4A:0x4D] = (0x2710).to_bytes(3, "little")      # ticks = 10000
+        self.fake.ram[0xA0:0xA3] = bytes([0x00, 0x01, 0x02])           # stock jiffy clock, $A0 high
+        sim = Sim(self.fake, self.prg, loads=["hang"], boots=["hang"], labels=self.labels)
+        self.run_session(sim, plan="2 KD 1\n")
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual([r["outcome"] for r in rows], ["LOADING hang", "stall"])
+        for r in rows:
+            self.assertIn("ticks_jiffies=10000", r["dump"])
+            self.assertIn("kjiffy_jiffies=258", r["dump"])
+        for t, a, ln in sim.reads:
+            if a in (0x4A, 0xA0):
+                self.assertEqual(ln, 3)
+                self.assertGreaterEqual(t, 120)              # only after the trial's limit
+
+    def test_block_word_and_arm_p_parse(self):
+        self.assertEqual(session.parse_plan("2b DP 8\ndry K 1"), [("2b", "DP", 8), ("dry", "K", 1)])
+
+    def test_arm_p_polls_a_screen_every_2s_and_arm_d_does_not(self):
+        sim = Sim(self.fake, self.prg, boots=["ok"] * 4, labels=self.labels)
+        self.run_session(sim, plan="2b DP 2\n")
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual([(r["block"], r["arm"], r["outcome"]) for r in rows],
+                         [("2b", "DP"[i % 2], "pass") for i in range(4)])
+        self.assertIn("poll=1000b/2s", rows[1]["detail"])
+        self.assertIn("poll=none", rows[0]["detail"])
+        self.assertEqual(rows[1]["io_nread"], "200")
+        w = self.windows_of(sim)
+        self.assertEqual(len(w), 4)
+        for i, (a, b) in enumerate(w):
+            n = [t for t, ad, ln in sim.big_reads if a <= t < b]
+            if i % 2 == 0:
+                self.assertEqual(n, [], "arm D read during the transfer")
+            else:
+                self.assertGreaterEqual(len(n), 10)
+                self.assertGreaterEqual(n[0] - a, 3 - 0.6)           # the stand-in notices a run in 0.5 s steps
+                self.assertTrue(all(y - x <= 2.5 for x, y in zip(n, n[1:])))
+
+    @staticmethod
+    def windows_of(sim):
+        out, start = [], None
+        for t, m in sim.marks:
+            if m == "start" and start is None:
+                start = t
+            elif m == "terminal" and start is not None:
+                out.append((start, t))
+                start = None
+        return out
+
+    def test_arm_p_four_failures_end_block_2b(self):
+        sim = Sim(self.fake, self.prg, boots=["ok", "hang"] * 4 + ["ok"] * 4, labels=self.labels)
+        self.run_session(sim, plan="2b DP 8\n")
+        rows = self.rows()
+        p = [r for r in rows if r["arm"] == "P" and r["outcome"] == "stall"]
+        self.assertEqual(len(p), 4)
+        self.assertTrue(any("arm P reached 4 failures" in r["note"] for r in rows))
+        self.assertEqual(len([r for r in rows if r["outcome"] == "pass"]), 4)   # 4 D passes, then nothing
+        self.assertEqual(len(sim.boots), 4)                                       # D trial 5 never ran
+
+    def test_dma_kernel_apart_from_the_disk_kernel(self):
+        dma = (0x0801).to_bytes(2, "little") + bytes(range(1, 200))
+        open(self.p("dma.prg"), "wb").write(dma)
+        open(self.p("dma.lbl"), "w").write(
+            "al 00C000 .io_nread\nal 00C004 .io_nretry\nal 00C008 .io_nfail\nal 00C00C .io_neoi\n")
+        open(self.p("b.lbl"), "w").write("al 00004A .ticks\nal 00004D .p1\n")      # disk kernel: no IOSTAT
+        sim = Sim(self.fake, self.prg, loads=["ok"], boots=["ok", "ok"],
+                  labels=session.read_labels(self.p("dma.lbl")))
+        self.run_session(sim, plan="2 BD 1\n", extra=["--dma-image", self.p("dma.prg")])
+        self.assertEqual(self.status, 0)
+        b, d = [r for r in self.rows() if r["outcome"] == "pass"]
+        self.assertEqual((b["io_nread"], b["io_last"]), ("", "iostat absent"))
+        self.assertEqual(d["io_nread"], "200")
+        self.assertNotEqual(b["image_sha"], d["image_sha"])
+        self.assertEqual(self.fake.runs[-1]["size"], len(dma))     # D uploaded the DMA kernel, not the disk's
+        self.assertTrue(any("ticks label: $004a" in c for c in self.comments()))
+
+    def test_the_session1_plan_file_runs_end_to_end(self):
+        plan = os.path.join(HERE, "..", "experiments", "iec-stall", "plans", "session1.plan")
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 38, boots=["ok"] * 36, labels=self.labels)
+        self.plan(open(plan).read())
+        self.run_session(sim)
+        self.assertEqual(self.status, 0)
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual(len(rows), 64)
+        self.assertEqual({r["outcome"] for r in rows}, {"pass"})
+        self.assertEqual([r["block"] for r in rows],
+                         ["1"] * 12 + ["2"] * 30 + ["2b"] * 16 + ["3"] * 6)
+        self.assertEqual("".join(r["arm"] for r in rows[12:42]), "KBD" * 10)
+        self.assertEqual("".join(r["arm"] for r in rows[42:58]), "DP" * 8)
+        self.assertEqual(len([t for t in self.asked if t.startswith("HAND")]), 3)
+        self.assertConfigRestored()
 
 
 class Stopping(Base):

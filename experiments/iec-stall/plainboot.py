@@ -26,4 +26,11 @@ try:
     open(sys.argv[1]+".stall","a").write(str({n:f"{b:02x}" for n,b in zip(nm,v)})+(" iostat:"+str(io) if io else "")+" stack:"+u.readmem(0x1C0,64).hex()+"\n")
 except Exception:
     pass
-print(f"STUCK after 170s; last line {lines()[-1]!r}; $90={u.readmem(0x90,1).hex()} $BA={u.readmem(0xBA,1).hex()} $DD00={dd:02x}")
+try:
+    import iostat as _io
+    up=_io.uptime(u,_io.labels(sys.argv[1]) if os.path.exists(sys.argv[1][:-4]+".lbl") else {})   # after the limit, short reads
+except Exception:
+    up="uptime=??"
+try: open(sys.argv[1]+".stall","a").write("# "+up+"\n")
+except Exception: pass
+print(f"STUCK after 170s; last line {lines()[-1]!r}; $90={u.readmem(0x90,1).hex()} $BA={u.readmem(0xBA,1).hex()} $DD00={dd:02x} {up}")

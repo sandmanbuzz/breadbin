@@ -1,0 +1,44 @@
+IO attack session 1: command lines, in order. <ADDR> is the Ultimate's address (host[:port]); never
+write it into a file. KIT is a directory holding the builds, each .prg with its .lbl beside it:
+  b8cc.prg  b8cc.d64  b8cc.lbl     main 8cc3e57, the image on the physical disk (no IOSTAT)
+  iostat.prg iostat.d64 iostat.lbl  this branch, `make` (IOSTAT=1, CACHE=1)
+  iostat-cache0.prg/.lbl            the same with `make CACHE=0` (see CACHE below)
+Everything runs under the machine lock. RES is a results prefix outside the repo.
+
+0. Config dump, before anything touches the machine
+   BREADBIN_ULTIMATE=<ADDR> tools/with-lock -r ultimate -- python3 experiments/iec-stall/cfgdump.py RES-cfg-session-start.json
+   (session.py also dumps at its own start and end: RES.tsv.cfg-start.json, RES.tsv.cfg-end.json)
+
+0a. Block 0, CPU-halt probe (H11), drive off or unplugged, ~5 min
+   BREADBIN_ULTIMATE=<ADDR> tools/with-lock -r ultimate -- python3 experiments/iec-stall/haltprobe.py \
+       --idle 60 --r1 60 --r01 60 --r1000 60 --reu 60
+   Gate: a gap of 150 cycles or more in any arm is reported before block 1 (protocol).
+
+0b. Config dump after block 0
+   BREADBIN_ULTIMATE=<ADDR> tools/with-lock -r ultimate -- python3 experiments/iec-stall/cfgdump.py RES-cfg-after-block0.json
+   (list every non-default item in the log before block 1)
+
+D. Dry run (one K trial, owner watching the screen; not counted)
+   BREADBIN_ULTIMATE=<ADDR> tools/with-lock -r ultimate -- python3 experiments/iec-stall/session.py \
+       experiments/iec-stall/plans/session1-dry.plan --image KIT/b8cc.prg --d64 KIT/b8cc.d64 \
+       --dma-image KIT/iostat.prg --out RES-dry.tsv --disk-id ID --control-file CTRLFILE \
+       --commit "8cc3e57 disk; iostat <tip>" --drive-on-minutes-ago N
+
+1-3. Blocks 1, 2, 2b, 3 in one run (64 trials; hand actions: control disk, Breadbin disk, control disk)
+   BREADBIN_ULTIMATE=<ADDR> tools/with-lock -r ultimate -- python3 experiments/iec-stall/session.py \
+       experiments/iec-stall/plans/session1.plan --image KIT/b8cc.prg --d64 KIT/b8cc.d64 \
+       --dma-image KIT/iostat.prg --out RES.tsv --disk-id ID --control-file CTRLFILE \
+       --commit "8cc3e57 disk; iostat <tip>" --drive-on-minutes-ago N
+   (--poll-mode none is the default: no reads during a trial. Preview without the network: add --dry-run.)
+
+Row semantics: arms K and B use the disk's kernel (8cc3e57: no IOSTAT, counters recorded as absent,
+io_last="iostat absent"); arms D and P DMA-load iostat.prg and mount root from the disk. image_sha is the
+sha of the kernel that arm ran. Every stall dump ends with ticks_jiffies=N (the Breadbin kernel's tick
+count since boot, label `ticks`, $004A) and kjiffy_jiffies=M (the stock KERNAL clock at $A0-$A2, only
+meaningful in the load phase); a jiffy is one CIA1-timer IRQ tick (about 1/60 s). Both are read after the
+trial's limit with two 3-byte reads.
+
+CACHE. The REU block cache (default on) serves root-mount reads from the REU once warm, so a later boot
+on the same disk may not touch the drive. Use KIT/iostat-cache0.prg for --dma-image (no cache, every read
+on the bus). Arm B boots the 8cc3e57 kernel, which has the cache on and is keyed by the disk's own build
+id: its reads may be cache hits after the first boot of a session, and nothing in a row says so.
