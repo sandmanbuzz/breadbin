@@ -1,0 +1,29 @@
+# session 1; plan session1-b2b.plan: 16 trials
+# image b8cc.prg sha256 3110b2f19b04089e; commit 8cc3e57 disk; iostat f5d64de; disk bb-last-agent; control file *
+# dma image iostat-cache0.prg sha256 e73dfc3e6027cbec (arms D, P); disk image b8cc.prg sha256 3110b2f19b04089e (arms K, B)
+# labels disk kernel (K, B): found, 882; iostat labels present: none (counters recorded as absent); ticks label: $004a
+# labels dma kernel (D, P): found, 894; iostat labels present: ['io_nread', 'io_nretry', 'io_nfail', 'io_neoi']; ticks label: $004a
+# drive powered on 117 min before session start
+# poll mode none (none: no readmem during a trial until its limit; byte: 1-byte reads of $D6 every 2 s, boot phases from 20 s); limits {'C': 120, 'K': 120, 'B': 150, 'D': 170, 'P': 170}
+# config dump start: res-b2b.tsv.cfg-start.json; 12 item(s) differ from default
+# config before: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config set, read back: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+session	block	trial	arm	start_iso	min_session	min_drive_on	image_sha	commit	disk_id	outcome	seconds	io_nread	io_nretry	io_nfail	io_neoi	io_last	detail	dump	note
+1	2b	1	D	2026-11-10T09:06:41-08:00	0.0	117.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	io_last=209e	poll=none		
+1	2b	2	P	2026-11-10T09:09:31-08:00	2.8	119.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	39.3	33	6	0	0	io_last=209e	poll=1000b/2s		
+1	2b	3	D	2026-11-10T09:10:10-08:00	3.5	120.5	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	io_last=209e	poll=none		
+1	2b	4	P	2026-11-10T09:13:01-08:00	6.3	123.3	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	37.2	33	9	0	0	io_last=209e	poll=1000b/2s		
+1	2b	5	D	2026-11-10T09:13:38-08:00	6.9	123.9	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	io_last=209e	poll=none		
+1	2b	6	P	2026-11-10T09:16:28-08:00	9.8	126.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	35.2	33	5	0	0	io_last=209e	poll=1000b/2s		
+1	2b	7	D	2026-11-10T09:17:03-08:00	10.4	127.4	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	io_last=209e	poll=none		
+1	2b	8	P	2026-11-10T09:19:53-08:00	13.2	130.2	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	37.2	33	9	0	0	io_last=209e	poll=1000b/2s		
+1	2b	9	D	2026-11-10T09:20:30-08:00	13.8	130.8	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	io_last=209e	poll=none		
+1	2b	10	P	2026-11-10T09:23:21-08:00	16.7	133.7	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	37.2	33	7	0	0	io_last=209e	poll=1000b/2s		
+1	2b	11	D	2026-11-10T09:23:58-08:00	17.3	134.3	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	io_last=209e	poll=none		
+1	2b	12	P	2026-11-10T09:26:48-08:00	20.1	137.1	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	37.2	33	8	0	0	io_last=209e	poll=1000b/2s		
+1	2b	13	D	2026-11-10T09:27:25-08:00	20.7	137.7	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	io_last=209e	poll=none		
+1	2b	14	P	2026-11-10T09:30:15-08:00	23.6	140.6	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	37.2	33	9	0	0	io_last=209e	poll=1000b/2s		
+1	2b	15	D	2026-11-10T09:30:52-08:00	24.2	141.2	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	170.1	33	0	0	0	io_last=209e	poll=none		
+1	2b	16	P	2026-11-10T09:33:42-08:00	27.0	144.0	e73dfc3e6027cbec	8cc3e57 disk; iostat f5d64de	bb-last-agent	pass	41.3	33	7	0	0	io_last=209e	poll=1000b/2s		
+# config after restore: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config dump end: res-b2b.tsv.cfg-end.json; 12 item(s) differ from default

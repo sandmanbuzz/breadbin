@@ -209,3 +209,18 @@ K, B, D x 10, 07:46-09:05, drive on 37-115 min, disk "bb-last-agent" (the last d
 Harness note: `io_last` is printed for B although the 8cc3e57 kernel has no IOSTAT labels (value meaningless), and for D it is the BSS start value when no stall occurred; read it only when io_nretry or io_nfail > 0. To fix in session.py before session 2.
 
 Against the pre-registered table: C clean, K clean, B and D clean, and the counters show no retries: "cold hardware is healthy" row. With no DMA during transfers, nothing failed in 42 trials over the first two hours of drive warm-up, and the mitigation never fired in 330 block reads. Per hypothesis: H1 no failure in the first 2 h warm (session 2 runs warm); H2 this disk reads cleanly today (the 11-07 "failed" disk claim is not reproduced); H3 not tested (no old image); H4 settled for today (machine loader clean on both media); H8 the mitigation is not hiding a rate at this N (0/330); H11 untouched by this block (no DMA) and consistent: every failure on record that had DMA during a transfer is absent when there is none. Block 2b (DMA during D) follows.
+
+## 2026-11-10: session 1, block 2b (DMA during the root mount; hardware)
+
+8 pairs D, P, 09:06-09:35, drive on 117-144 min, same disk and kernel as block 2. P = D plus a 1000-byte REST read every 2 s from 3 s (amendment 1). `results/session1/block2b.tsv`.
+
+| Arm | Boots | Pass | Block reads | Retries | Failures | Boots with a retry |
+|---|---|---|---|---|---|---|
+| D (no DMA) | 8 | 8 | 264 | 0 | 0 | 0 |
+| P (1000 B / 2 s) | 8 | 8 | 264 | **60** (5-9 per boot) | 0 | **8** |
+
+With block 2's D trials: no DMA, 0 retries in 594 block reads over 18 boots; DMA, 60 in 264 over 8 boots, every boot. Fisher exact on boots with a retry, 8/8 vs 0/18: p < 1e-6. The arms alternated, so warm-up time cannot explain it. **H11 is causal for the retry event on this hardware**: a REST read that halts the CPU for 1-2 ms during a block transfer makes the read fail and the mitigation redo it. The mitigation absorbed all 60 (0 failures), which is why P passed. The amendment-1 prediction ("P is expected to fail") was wrong in outcome and right in mechanism: the visible failure is gone because the retry exists, not because the halt is harmless.
+
+What this does to the record: every pre-mitigation harness that read the screen during the root mount (Ultimate test backend 0.5 s polling, plainboot/dmaboot after 20 s) was injecting this. It is the leading explanation for the historical "3 boots in 4" and for 11-06. It does **not** yet explain failures with no DMA (the disksum control stalled at sector 0; the 11-07 class R failures in the KERNAL loader). Open.
+
+Lost data: the last-stall record of the P trials was not captured (session.py read two bytes of the iec.s routine `io_last` instead of `io_ltrk..io_lwn`; fixed in 08142d8). So whether the DMA retries carry the class S signature (bits counted 2-6, CLK held) is not shown on hardware yet; the VICE experiment (branch io/h11-vice) asks it, and session 2 can repeat P with the fixed record.
