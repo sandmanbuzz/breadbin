@@ -89,3 +89,8 @@ Same hardware, configuration, disk (`bb-last-agent`, 8cc3e57 image) and kernels 
 Stopping rules: as session 1; each poll arm stops at 4 failures (P ends its block). Any mechanical symptom stops everything. Worst case 156 min if every trial times out; expected about 110 min.
 
 Power: block 1, if the true J failure rate were 50%, P(J < 3 of 8) = 14%; at 80% (11-07's look), 0.1%.
+
+## Session 3, pre-registered in part (2026-11-10, after session 2 block 2, before any session-3 trial)
+
+- **Arm Z (pause-wrapped polling):** D plus, every 0.5 s from the start, `machine:pause`, one 1000-byte screen read, `machine:resume`. The owner's question: does pause's "good landing" make DMA safe? Prediction: no. Pause lands on a CPU bus cycle, not on an IEC byte boundary; inside a byte the drive clocks bits with no handshake, and a pause lasts the REST round trip (milliseconds), longer than one DMA read. Z panics at least as often as Q (4 of 4 in block 2). Z clean in 8 would refute this and make pause a harness fix. Paired with D, 8 pairs, Z stops at 4 failures.
+- **Fixed disksum on hardware** (`io/disksum-vice` 7b0f809), with no DMA during the read: the drive's own reading of the disk, sector by sector. Prediction: 683 of 683, every checksum matching.
