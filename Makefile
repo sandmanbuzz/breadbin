@@ -34,6 +34,13 @@ IOSTAT  ?= 1
 $(BUILD)/iostat.stamp: FORCE
 	@mkdir -p $(BUILD)
 	@echo "$(IOSTAT)" | cmp -s - $@ || echo "$(IOSTAT)" > $@
+# The source revision stamped on the disk (directory entry "BUILD <rev>" and /etc/build): the short
+# commit, with + when tracked files outside build/ differ. make BUILDREV=xyz overrides it.
+BUILDREV ?= $(shell r=$$(git rev-parse --short=7 HEAD 2>/dev/null) || r=unknown; \
+  if [ "$$r" != unknown ] && [ -n "$$(git status --porcelain --untracked-files=no -- . ':!build' 2>/dev/null)" ]; then r="$$r+"; fi; echo "$$r")
+$(BUILD)/rev.txt: FORCE
+	@mkdir -p $(BUILD)
+	@echo "$(BUILDREV)" | cmp -s - $@ || echo "$(BUILDREV)" > $@
 $(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc $(BUILD)/nbuf.stamp $(BUILD)/stkwatch.stamp $(BUILD)/iostat.stamp
 	@mkdir -p $(dir $@)
 	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) -D IOSTAT=$(IOSTAT) $(if $(STKWATCH),-D STKWATCH=1) $< -o $@
@@ -65,10 +72,10 @@ $(BUILD)/root/bin/%: $(BUILD)/p/%.o $(LIBOBJ) src/prog.cfg tools/cx.py
 	ld65 -C src/prog.cfg -S 256 -o $(BUILD)/p/$*.1 $< $(LIBOBJ)
 	python3 tools/cx.py $(BUILD)/p/$*.0 $(BUILD)/p/$*.1 $(BUILD)/p/$*.lbl $@
 
-$(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(ROOTSRC) tools/mkimage.py
+$(BUILD)/breadbin.d64: $(BUILD)/breadbin.prg $(CX) $(ROOTSRC) tools/mkimage.py $(BUILD)/rev.txt
 	@mkdir -p $(BUILD)/root
 	cp -R rootfs/. $(BUILD)/root/
-	python3 tools/mkimage.py build $@ --boot $(BUILD)/breadbin.prg --root $(BUILD)/root --dev console:1 --dev null:0
+	python3 tools/mkimage.py build $@ --boot $(BUILD)/breadbin.prg --root $(BUILD)/root --dev console:1 --dev null:0 --rev "$$(cat $(BUILD)/rev.txt)"
 
 # the same disk as an REU image (block b at offset b*256, 256 KB): the REU root device
 $(BUILD)/breadbin.reu: $(BUILD)/breadbin.d64 tools/mkimage.py
