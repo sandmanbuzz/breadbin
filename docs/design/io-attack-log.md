@@ -195,3 +195,9 @@ NTSC-50 is not a recent change: it is the only mode in which this PAL configurat
 Owner's standing permission (2026-11-10): the whole Ultimate configuration, machine state, disk contents and media may be changed for this hunt. Only the Ultimate's internal filesystems are closed to destruction without prior notice (they can be copied off first). Physical-disk writes still get announced before each one.
 
 Dry run (C, control disk "ULTIMA III GOLD", ID MV, `load"*",8`): pass, 29,547 bytes (117 blocks), crc32 d91148a7 as the reference; the owner watched and saw a normal load well inside 120 s and the resets as expected. Deviation from amendment 2: the dry run was C, not K, because the control disk was in; K's typing is watched at the first trial of block 2.
+
+## 2026-11-10: session 1, block 1 (control, cold; hardware)
+
+C x 12, 07:18-07:43, drive powered on 07:09 (9-34 min warm), control disk "ULTIMA III GOLD" (ID MV), `load"*",8` by the JiffyDOS KERNAL, no DMA during a trial (poll mode none). **12 of 12 pass**, every one 29,547 bytes, crc32 d91148a7 (`results/session1/block1.tsv`).
+
+Against the pre-registered table: C did not fail 2 or more of 12, so the cold drive, machine and bus read non-Breadbin media cleanly at this N. Power as stated: a true rate of 25% gives 0 of 12 with 3% probability, the 2026-11-07 rate cannot give it; a rate of 10% or less is not excluded. H1 (cold): no failure seen. H4: the machine's own loader on known-good media is clean. Others: no reading yet.
