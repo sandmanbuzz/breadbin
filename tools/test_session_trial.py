@@ -573,6 +573,21 @@ class Session2(Base):
                 self.assertLessEqual(n[0] - a, 0.6)
                 self.assertTrue(all(abs((y - x) - 0.5) < 0.01 for x, y in zip(n[1:], n[2:])), n[:6])
 
+    def test_arm_q_ignores_a_stale_login_read_at_the_start(self):
+        class Stale(Sim):
+            def on_read(self, a, ln):          # the reset is NOT noticed by a read: old screen shows
+                self.reads.append((self.t, a, ln))
+                if ln >= 256:
+                    self.big_reads.append((self.t, a, ln))
+        sim = Stale(self.fake, self.prg, boots=["hang"], labels=self.labels)
+        sim.lines = ["login:"]
+        sim.sync_screen()
+        self.run_session(sim, plan="2 Q 1\n")
+        rows = [r for r in self.rows() if r["outcome"] != "NOTE"]
+        self.assertEqual(rows[0]["outcome"], "stall")
+        self.assertGreaterEqual(float(rows[0]["seconds"]), 169)
+        self.assertEqual(sim.big_reads[0][0], 0.0)           # it did read at t=0
+
     def test_arm_o_reads_one_byte_every_tenth_of_a_second(self):
         sim, rows = self.run_arms("4 DO 1\n", boots=["ok"] * 2)
         self.assertEqual([(r["arm"], r["outcome"]) for r in rows], [("D", "pass"), ("O", "pass")])

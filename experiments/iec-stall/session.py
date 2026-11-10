@@ -59,6 +59,8 @@ import iostat  # noqa: E402 - uptime(); no side effects at import
 #   base      the arm whose steps it runs (D: DMA kernel + root mount; K: KERNAL load, bytes compared)
 #   nbytes    bytes per read: 1000 = the whole screen (classified, so the arm can end early on the
 #             login / READY.), 1 = the byte at $D6 only (nothing classified until the limit)
+#   accept    (all poll arms: ACCEPT_AFTER) a screen read earlier than this many seconds after the start
+#             is never classified: the previous trial's login / READY. may still be on screen
 #   every     seconds between reads;  first  seconds from the start (D bases: the DMA run) or from the
 #             typed load command (K base) to the first read;  limit  seconds;  fail  failures that
 #             stop the arm;  end_block  that many failures end the whole block (P only, amendment 1)
@@ -68,6 +70,7 @@ POLL_ARMS = {
     "J": dict(base="K", nbytes=1000, every=0.5, first=0, limit=120, fail=4, end_block=False),
     "O": dict(base="D", nbytes=1, every=0.1, first=0, limit=170, fail=4, end_block=False),
 }
+ACCEPT_AFTER = 3          # poll arms: no screen classification from a read earlier than this after the start
 ARMS = "CKBD" + "".join(POLL_ARMS)
 LIMITS = {"C": 120, "K": 120, "B": 150, "D": 170}      # seconds, protocol
 LIMITS.update({a: v["limit"] for a, v in POLL_ARMS.items()})
@@ -670,9 +673,11 @@ class Rig:
         self.clock.sleep(t_from + v["first"] - self.clock.now())
         while True:
             if v["nbytes"] > 1:
-                st = classify(self.screen())
-                if st:
-                    return st
+                lines = self.screen()            # always read (the poll is the point) ...
+                if self.clock.now() >= t_from + ACCEPT_AFTER:
+                    st = classify(lines)         # ... but a stale screen is not believed
+                    if st:
+                        return st
             else:
                 self.u.readmem(0xD6, v["nbytes"])
             left = t_end - self.clock.now()
