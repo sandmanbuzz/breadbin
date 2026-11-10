@@ -45,6 +45,10 @@ io_out:  .res 1     ; the lines we assert now
 io_base: .res 1     ; port bits 0-2, kept
 io_b:    .res 1     ; byte on the wire
 io_n:    .res 1     ; bit count
+.if IOSTAT
+iec_io_n = io_n         ; for blk.s's IOSTAT record
+.export iec_io_n
+.endif
 io_to:   .res 1     ; outer timeout count
 io_pend: .res 1     ; a byte is held back so the last one can carry EOI
 io_held: .res 1
