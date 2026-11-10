@@ -1,0 +1,8 @@
+# IO attack, session 2: does polling the machine over REST cause the stalls / retries? Fixed order.
+# Same stopping rules as session 1 (session.py): an arm at 5 failures stops, the poll arms J, Q, O and P at 4;
+# 3 wedges in a row needing hands stop the block; `stop` at any prompt or Ctrl-C ends the session.
+# All blocks use the Breadbin disk: one hand action (insert it) before block 1.
+1  KJ 8     # KERNAL load of the boot file: K clean (no reads) vs J (1000-byte screen read every 0.5 s from the typed command)
+2  DQ 8     # root mount after a DMA kernel: D clean vs Q (1000-byte read every 0.5 s from the start, as the old test backends did)
+3  DP 6     # repeat of session 1 block 2b, now with the stall record (io_last): D vs P (1000-byte read every 2 s from 3 s)
+4  DO 8     # root mount: D clean vs O (1-byte read of $D6 every 0.1 s from the start)
