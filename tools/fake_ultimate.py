@@ -56,6 +56,7 @@ class FakeUltimate:
         self.menu = bytearray(2000)
         self.configs = {}       # ("Category", "Item") -> value; /v1/configs/<category>/<item>
         self.config_defaults = {}   # ("Category", "Item") -> default, shown by the detail GET
+        self.config_values = {}   # ("Category", "Item") -> allowed values, shown by the detail GET as "values"
         self.config_puts = []   # (category, item, value) of every PUT, in order
         self.on_readmem = None  # optional callback(address, length) for every readmem
         self._server = None
@@ -255,6 +256,8 @@ class FakeUltimate:
         detail = {"current": self.configs[key]}
         if key in self.config_defaults:
             detail["default"] = self.config_defaults[key]
+        if key in self.config_values:
+            detail["values"] = list(self.config_values[key])
         self._json(h, **{key[0]: {key[1]: detail}})
 
     def _streams(self, h, method, sub, cmd, q, body):

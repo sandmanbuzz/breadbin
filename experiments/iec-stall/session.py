@@ -29,7 +29,18 @@ early when the screen shows the login / READY., as P does):
      pass) plus a 1000-byte read every 0.5 s from the moment the load command is typed; limit 120 s.
   O  as D plus a 1-byte read of $D6 every 0.1 s from the start; limit 170 s (one screen read at the
      limit). The detail column names the poll (poll=1000b/0.5s, poll=1b/0.1s).
---dma-image: the kernel arms D, P, Q and O load by DMA, when it is not the one on the disk (--image,
+Session 3 arms (docs/design/io-trial-protocol.md):
+  Z  as D plus, every 0.5 s from the start, machine:pause, one 1000-byte screen read, machine:resume
+     (resume in a finally; the restore trap resumes too).
+  S  as J with the STOCK Kernal ROM selected in the Ultimate config for the trial; T = K with the stock
+     KERNAL (control, no polling). The stock value is discovered from the item's allowed values (GET on
+     "C64 and Cartridge Settings/Kernal ROM"); with no obvious stock/original entry the run refuses
+     before changing anything. The original value is put back before the next non-stock arm and by the
+     restore trap (read back).
+  G  as Q but gated: three 1-byte reads of $DD00 0.1 s apart before each screen read, which happens only
+     if all show (v & $F8) == $C0; else the poll is skipped.  H  as J, gated the same way.
+     Gated arms record screen reads done / skipped and the $DD00 value histogram in `detail`.
+--dma-image: the kernel arms D, P, Q, O, Z and G load by DMA, when it is not the one on the disk (--image,
 --d64: what K compares and B boots). Each has its own labels file (IOSTAT counters, `ticks`).
 
 The DMA rule (README): no screen-sized read while a disk transfer may be in progress. Every wait
@@ -69,11 +80,28 @@ POLL_ARMS = {
     "Q": dict(base="D", nbytes=1000, every=0.5, first=0, limit=170, fail=4, end_block=False),
     "J": dict(base="K", nbytes=1000, every=0.5, first=0, limit=120, fail=4, end_block=False),
     "O": dict(base="D", nbytes=1, every=0.1, first=0, limit=170, fail=4, end_block=False),
+    # Session 3 (docs/design/io-trial-protocol.md). Extra keys:
+    #   pause  each read is wrapped in machine:pause / machine:resume (resume in a finally)
+    #   gate   before each screen read, three 1-byte reads of $DD00 0.1 s apart; the screen is read only if
+    #          every one has (v & $F8) == $C0 (DATA and CLK in high, DATA/CLK/ATN out not driven), else the
+    #          poll is skipped. The reads done and skipped, and the $DD00 value histogram, go in `detail`.
+    #   stock  the Ultimate's Kernal ROM is the stock one for the trial (discovered, see ConfigGuard)
+    "Z": dict(base="D", nbytes=1000, every=0.5, first=0, limit=170, fail=4, end_block=False, pause=True),
+    "S": dict(base="K", nbytes=1000, every=0.5, first=0, limit=120, fail=4, end_block=False, stock=True),
+    "G": dict(base="D", nbytes=1000, every=0.5, first=0, limit=170, fail=4, end_block=False, gate=True),
+    "H": dict(base="K", nbytes=1000, every=0.5, first=0, limit=120, fail=4, end_block=False, gate=True),
 }
+# Arms that do not poll but are a base arm with a variation: T = K with the stock KERNAL (control for S).
+VARIANT_ARMS = {"T": dict(base="K", limit=120, stock=True)}
+GATE_READS = 3            # arms G, H: 1-byte $DD00 reads before a screen read ...
+GATE_SPACING = 0.1        # ... this many seconds apart
+GATE_MASK, GATE_IDLE = 0xF8, 0xC0
+KERNAL_ITEM = ("C64 and Cartridge Settings", "Kernal ROM")
 ACCEPT_AFTER = 3          # poll arms: no screen classification from a read earlier than this after the start
-ARMS = "CKBD" + "".join(POLL_ARMS)
+ARMS = "CKBD" + "".join(POLL_ARMS) + "".join(VARIANT_ARMS)
 LIMITS = {"C": 120, "K": 120, "B": 150, "D": 170}      # seconds, protocol
 LIMITS.update({a: v["limit"] for a, v in POLL_ARMS.items()})
+LIMITS.update({a: v["limit"] for a, v in VARIANT_ARMS.items()})
 FIRST_READ = 20           # no DMA read this long after a transfer starts (plainboot)
 POLL = 10                 # then one screen read per this many seconds
 BYTE_FIRST = 2            # --poll-mode byte, KERNAL load: first 1-byte read this long after the command
@@ -97,7 +125,7 @@ CONFIG = [
     ("Drive A Settings", "Drive Bus ID", "9", "9"),
     ("C64 and Cartridge Settings", "DMA Load Mimics ID:", "8", "8"),
 ]
-READBACK_ONLY = [("C64 and Cartridge Settings", "Kernal ROM")]
+READBACK_ONLY = [KERNAL_ITEM]
 
 
 class StopSession(Exception):
@@ -156,13 +184,23 @@ def expand(plan):
 
 def base_arm(arm):
     """The arm whose steps `arm` runs: itself, or for a poll arm its base (D or K)."""
-    return POLL_ARMS[arm]["base"] if arm in POLL_ARMS else arm
+    if arm in POLL_ARMS:
+        return POLL_ARMS[arm]["base"]
+    return VARIANT_ARMS[arm]["base"] if arm in VARIANT_ARMS else arm
+
+
+def arm_stock(arm):
+    """True for the arms that run with the stock KERNAL ROM selected in the Ultimate (S, T)."""
+    return bool((POLL_ARMS.get(arm) or VARIANT_ARMS.get(arm) or {}).get("stock"))
 
 
 def poll_label(arm):
     """'1000b/2s', '1b/0.1s', or None for an arm that does not poll."""
     v = POLL_ARMS.get(arm)
-    return f"{v['nbytes']}b/{v['every']:g}s" if v else None
+    if not v:
+        return None
+    return (f"{v['nbytes']}b/{v['every']:g}s" + ("+pause" if v.get("pause") else "")
+            + (f"+gate{GATE_READS}x1b" if v.get("gate") else ""))
 
 
 def arm_kernel(arm):
@@ -186,7 +224,8 @@ def dry_run(order, disk_id, out=print):
             kind = disk_kind(arm)
             out(f"HAND  {hand_prompt(kind, disk_id)}")
         out(f"block {block}  trial {idx:3d}  arm {arm}  limit {LIMITS[arm]} s"
-            + (f"  poll {poll_label(arm)}" if arm in POLL_ARMS else ""))
+            + (f"  poll {poll_label(arm)}" if arm in POLL_ARMS else "")
+            + ("  stock KERNAL" if arm_stock(arm) else ""))
     out(f"{len(order)} trials; worst case {sum(LIMITS[a] for _, _, a in order) // 60} min if all time out")
 
 
@@ -309,6 +348,36 @@ def quote_cfg(cat, item):
     return "/v1/configs/" + urllib.parse.quote(cat, safe="") + "/" + urllib.parse.quote(item, safe="")
 
 
+def config_allowed(reply, cat, item):
+    """The allowed values a config item's GET reports (a list under values / allowed / options), or None."""
+    node = reply.get(cat, reply)
+    node = node.get(item, node) if isinstance(node, dict) else node
+    if isinstance(node, dict):
+        for k in ("values", "allowed", "options", "allowed_values"):
+            if isinstance(node.get(k), list):
+                return [str(x) for x in node[k]]
+    return None
+
+
+STOCK_WORDS = ("original", "stock")
+
+
+def pick_stock_kernal(allowed):
+    """-> (value, why) for the stock KERNAL among the allowed values, else (None, reason). Never a guess:
+    an entry whose name says original / stock (and no JiffyDOS), else the empty entry when the item lists
+    one (the firmware's 'no replacement' value, seen to work 2026-10-31); two candidates is a refusal."""
+    if not allowed:
+        return None, "the item reports no allowed values"
+    named = [v for v in allowed if any(w in v.lower() for w in STOCK_WORDS) and "jiffy" not in v.lower()]
+    if len(named) == 1:
+        return named[0], "named entry"
+    if len(named) > 1:
+        return None, f"several stock-looking entries {named}"
+    if "" in allowed:
+        return "", "empty entry"
+    return None, f"no original/stock entry among {allowed}"
+
+
 def config_value(reply, cat, item):
     node = reply.get(cat, reply)
     node = node.get(item, node) if isinstance(node, dict) else node
@@ -327,6 +396,9 @@ class ConfigGuard:
         self.original = {}
         self.applied = False
         self.restored = False
+        self.kernal_orig = None           # the Kernal ROM value found at apply(); set only if we change it
+        self.kernal_touched = False
+        self.stock_value = None
 
     def get(self, cat, item):
         try:
@@ -337,6 +409,42 @@ class ConfigGuard:
     def put(self, cat, item, value):
         self.u.call("PUT", quote_cfg(cat, item), {"value": value})
 
+    def stock_kernal(self):
+        """The stock Kernal ROM value, discovered from the item's allowed values at run time. SystemExit
+        with a clear message if it cannot be told (arms S and T then refuse to run). Reads only."""
+        try:
+            allowed = config_allowed(self.u.call("GET", quote_cfg(*KERNAL_ITEM)), *KERNAL_ITEM)
+        except Exception as e:           # noqa: BLE001
+            raise SystemExit(f"arms S and T refuse to run: cannot read the Kernal ROM item ({clean(e)[:80]})")
+        val, why = pick_stock_kernal(allowed)
+        if val is None:
+            raise SystemExit("arms S and T refuse to run: no stock KERNAL value in the Ultimate config "
+                             f"({why}); choose it by hand and rerun with it set")
+        self.stock_value = val
+        self.log.comment(f"stock Kernal ROM value discovered: {val!r} ({why}) from allowed values {allowed}")
+        return val
+
+    def select_kernal(self, stock):
+        """Make the Kernal ROM the stock one (stock=True) or the value found at start; reboot if it
+        changed (a change does not take effect on reset); read back. restore() puts the original back."""
+        if not stock and not self.kernal_touched:
+            return                        # nothing of ours to put back
+        if self.stock_value is None:
+            self.stock_kernal()
+        if self.kernal_orig is None or self.kernal_orig.startswith("<"):
+            raise RuntimeError(f"original Kernal ROM unreadable ({self.kernal_orig!r}): not changing it")
+        want = self.stock_value if stock else self.kernal_orig
+        if self.get(*KERNAL_ITEM) == want:
+            return
+        self.kernal_touched = True
+        self.put(*KERNAL_ITEM, want)
+        self.u.reboot()
+        self.clock.sleep(self.reboot_wait)
+        got = self.get(*KERNAL_ITEM)
+        self.log.comment(f"Kernal ROM set to {want!r} ({'stock' if stock else 'original'}), read back {got!r}")
+        if got != want:
+            raise RuntimeError(f"Kernal ROM read back {got!r}, wanted {want!r}")
+
     def readback(self):
         keys = [(c, i) for c, i, _, _ in self.items] + READBACK_ONLY
         return {f"{c}/{i}": self.get(c, i) for c, i in keys}
@@ -345,6 +453,7 @@ class ConfigGuard:
         self.log.comment("config before: " + json.dumps(self.readback(), sort_keys=True))
         for c, i, v, _ in self.items:
             self.original[(c, i)] = self.get(c, i)
+        self.kernal_orig = self.get(*KERNAL_ITEM)
         self.applied = True               # from here a restore is owed, even if a PUT fails
         for c, i, v, _ in self.items:
             self.put(c, i, v)
@@ -367,6 +476,11 @@ class ConfigGuard:
                 self.put(c, i, val)
             except Exception as e:       # noqa: BLE001
                 print(f"RESTORE FAILED {c}/{i}: {e}", file=sys.stderr, flush=True)
+        if self.kernal_touched:
+            try:
+                self.put(*KERNAL_ITEM, self.kernal_orig)
+            except Exception as e:       # noqa: BLE001
+                print(f"RESTORE FAILED {KERNAL_ITEM[0]}/{KERNAL_ITEM[1]}: {e}", file=sys.stderr, flush=True)
         try:
             self.u.resume()
             self.u.reboot()
@@ -386,8 +500,11 @@ class Rig:
     """Everything that touches the Ultimate for one trial."""
 
     def __init__(self, u, clock, image, labels, control_file, first_read=FIRST_READ, poll=POLL,
-                 settle=SETTLE, limits=None, poll_mode="none", dma_image=None, labels_dma=None):
+                 settle=SETTLE, limits=None, poll_mode="none", dma_image=None, labels_dma=None, kernal=None):
         self.u, self.clock = u, clock
+        self.kernal = kernal         # ConfigGuard (select_kernal) for arms S and T
+        self.dd00 = {}               # gated arms: $DD00 value -> count, this trial
+        self.gate = [0, 0]           # gated arms: screen reads done, skipped, this trial
         self.poll_mode = poll_mode
         self.dma_prg = dma_image if dma_image is not None else image
         self.labels_dma = labels_dma if labels_dma is not None else labels
@@ -544,6 +661,11 @@ class Rig:
         """-> dict(outcome, seconds, detail, dump, timed_out, iostat)."""
         self.sidecar = []
         self.last_lines = []
+        self.dd00, self.gate = {}, [0, 0]
+        if self.kernal is not None:       # also puts the original back after a stock-KERNAL arm
+            self.kernal.select_kernal(arm_stock(arm))
+        elif arm_stock(arm):
+            raise RuntimeError("arm needs the stock KERNAL but no config guard was given")
         self.cur_labels = self.labels_dma if arm_kernel(arm) == "dma" else self.labels
         res = dict(outcome="other", detail="", dump="", timed_out=False, iostat={})
         t0 = self.clock.now()
@@ -565,6 +687,10 @@ class Rig:
 
     def _done(self, res, t0):
         res["seconds"] = round(self.clock.now() - t0, 1)
+        if self.dd00 or self.gate != [0, 0]:        # only the gated arms leave anything here
+            hist = ",".join(f"{k:02x}:{n}" for k, n in sorted(self.dd00.items(), key=lambda kv: (-kv[1], kv[0])))
+            res["detail"] = (res.get("detail", "") + f" screen_reads={self.gate[0]} skipped={self.gate[1]}"
+                             f" dd00={hist or '-'}").strip()
         return res
 
     def _arm_load(self, arm, res, t0):
@@ -668,13 +794,15 @@ class Rig:
         """Poll arms (POLL_ARMS): one read of nbytes every `every` s from `first` s after t_from to the
         limit (the deliberate poll the arm exists to test). 1000 bytes: the screen, classified; a
         terminal state ends the wait early. 1 byte: $D6 only, then one screen read at the limit.
-        Returns the classifier's state or None."""
+        pause arms wrap the screen read in machine:pause / resume; gate arms read $DD00 three times
+        first and skip the poll unless the bus looks idle (see POLL_ARMS). Returns the state or None."""
         v = POLL_ARMS[arm]
         self.clock.sleep(t_from + v["first"] - self.clock.now())
         while True:
+            ts = self.clock.now()
             if v["nbytes"] > 1:
-                lines = self.screen()            # always read (the poll is the point) ...
-                if self.clock.now() >= t_from + ACCEPT_AFTER:
+                lines = self.poll_screen(v)      # always read (the poll is the point) ...
+                if lines is not None and self.clock.now() >= t_from + ACCEPT_AFTER:
                     st = classify(lines)         # ... but a stale screen is not believed
                     if st:
                         return st
@@ -683,7 +811,30 @@ class Rig:
             left = t_end - self.clock.now()
             if left <= 0:
                 return None if v["nbytes"] > 1 else classify(self.screen())
-            self.clock.sleep(min(v["every"], left))
+            gap = v["every"] - (self.clock.now() - ts) if v.get("gate") else v["every"]
+            self.clock.sleep(min(max(gap, 0), left))
+
+    def poll_screen(self, v):
+        """One poll of the screen for arm table row v: the lines read, or None if a gate skipped it."""
+        if v.get("gate"):
+            idle = True
+            for k in range(GATE_READS):          # all three are read: the histogram wants every value
+                b = self.u.readmem(0xDD00, 1)[0]
+                self.dd00[b] = self.dd00.get(b, 0) + 1
+                idle = idle and (b & GATE_MASK) == GATE_IDLE
+                if k < GATE_READS - 1:
+                    self.clock.sleep(GATE_SPACING)
+            if not idle:
+                self.gate[1] += 1
+                return None
+            self.gate[0] += 1
+        if v.get("pause"):
+            self.u.pause()
+            try:
+                return self.screen()
+            finally:
+                self.u.resume()                  # always: a paused machine never gets its IEC bytes
+        return self.screen()
 
     def _boot_result(self, res, st, arm):
         if st == "login":
@@ -893,8 +1044,15 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
         ask = (lambda text: "n" if text.startswith("Is the drive LED") else "")
 
     log = Results(a.out)
+    guard = ConfigGuard(client, clock, log, a.reboot_wait, extra)
+    if any(arm_stock(x) for _, _, x in order):      # S, T: refuse now, before anything is changed
+        try:
+            guard.stock_kernal()
+        except SystemExit:
+            log.close()
+            raise
     rig = Rig(client, clock, prg, labels, a.control_file, poll_mode=a.poll_mode, dma_image=dma_prg,
-              labels_dma=labels_dma)
+              labels_dma=labels_dma, kernal=guard)
     log.comment(f"session {a.session}; plan {os.path.basename(a.plan)}: {len(order)} trials")
     log.comment(f"image {os.path.basename(a.image)} sha256 {sha}; commit {a.commit or '-'}; "
                 f"disk {a.disk_id}; control file {a.control_file}")
@@ -909,7 +1067,6 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
     log.comment(f"poll mode {a.poll_mode} (none: no readmem during a trial until its limit; byte: "
                 f"1-byte reads of $D6 every {BYTE_EVERY} s, boot phases from {rig.first_read} s); "
                 f"limits {rig.limits}")
-    guard = ConfigGuard(client, clock, log, a.reboot_wait, extra)
 
     def cfg_dump(tag):                        # read-only, redacted (cfgdump.py); never stops a run
         try:
