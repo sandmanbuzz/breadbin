@@ -230,3 +230,14 @@ Lost data: the last-stall record of the P trials was not captured (session.py re
 C x 6, 09:40-09:52, drive on 150-161 min: **6 of 6 pass**, 29,547 bytes, crc32 d91148a7 (same as block 1). Configuration identical at start and end of the session (`cfgdump diff`: 0 items changed).
 
 Session 1 in all: 66 trials, 0 failures without DMA (C 18, K 10, B 10, D 18 with 594 block reads and 0 retries); with DMA during the root mount (P, 1000 B / 2 s) 8 of 8 boots needed retries (60 in 264 reads), all absorbed. Verdicts after session 1: **H11 alive and causal for retries**; H1 no effect in the first 2.7 h powered (not killed: no long warm run yet); H2 not reproduced (the "failed" 11-07 disk reads cleanly); H4 settled for today; H8 0 retries without DMA in 594 reads; H3, H6, H7, H13 untested; H9/H10 subsumed for now by H11 as the mechanism of the stall. Next: session 2 (pre-registered in the protocol): does the old backend's 0.5 s screen polling reproduce the 11-07 failures?
+
+## 2026-11-10: H11 in VICE (branch io/h11-vice, never merged; results/h11-vice.txt there)
+
+A CIA2 NMI (ignores the SEI that bus_acptr holds during the bit loop) starts an N-byte REU fetch, halting the CPU for N cycles plus the handler's own 24-350, every ~1M or ~5M cycles, while the kernel boots and `cksum`s the six largest programs twice (418 block reads per boot). Stock ROMs, PAL, true-drive 1541.
+
+- Control (no NMI) and an acknowledge-only NMI (~24 cycles): 0 retries in 3,344 reads each.
+- Threshold: ~75 cycles of halt gives 30 retries per 836 reads, ~150 about 250, from ~225 cycles up it saturates at ~320-330 (about one retry per NMI that lands inside the transfer). The measured 1-2 ms REST halts are 5-10x above the threshold; the rare ~680-cycle halt seen with 1-byte reads is above it too.
+- Signature: every recorded stall has ST $02, `io_lwn` 1-8, `lidx` 0-255, `$DD00` = $87 (CLK held low by the talker, DATA released), freed by UNTALK; next try good. **This is the class S signature**, produced on demand by a CPU halt alone.
+- Beyond the retry: 2 files with silent wrong bytes (right length, wrong checksum) in 16 boots with long halts and the full handler (none with the lean handler or short halts; too few to say which). 9 of 92 boots with halts hung or panicked, 6 of them in `bus_tksa`'s unbounded wait for the talker to pull CLK after TALK, a wait the mitigation does not bound. None in controls.
+
+Reading: H11 now has a mechanism (VICE) and a causal effect on hardware (session 1 block 2b). Two product defects found that matter whatever the hardware does: (1) `bus_tksa` can wait forever; (2) a halt can corrupt data silently, at least in VICE. Caveats: the NMI handler runs code (real DMA does not), PAL timing, stock ROMs, small N per arm.
