@@ -1,0 +1,2 @@
+# session 2, block 2 alone (split from session2.plan; same trials and order)
+2  DQ 8     # root mount after a DMA kernel: D clean vs Q (1000-byte read every 0.5 s from the start, as the old test backends did)

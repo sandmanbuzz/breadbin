@@ -1,0 +1,2 @@
+# session 2, block 4 alone (split from session2.plan; same trials and order)
+4  DO 8     # root mount: D clean vs O (1-byte read of $D6 every 0.1 s from the start)

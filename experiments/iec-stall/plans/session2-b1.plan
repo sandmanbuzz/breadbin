@@ -1,0 +1,2 @@
+# session 2, block 1 alone (split from session2.plan; same trials and order)
+1  KJ 8     # KERNAL load of the boot file: K clean (no reads) vs J (1000-byte screen read every 0.5 s from the typed command)
