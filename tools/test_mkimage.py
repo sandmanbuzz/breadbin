@@ -73,11 +73,11 @@ class TestImage(unittest.TestCase):
     def test_rev_stamp_entry(self):
         img, fs = self._build_rev("8cc3e57")
         # boot file first, then the closed DEL stamp, nothing else
-        self.assertEqual(img.cbm_entries(), [(b"BREADBIN", 0x82), (b"BUILD 8CC3E57", 0x80)])
+        self.assertEqual(img.cbm_entries(), [(b"BREADBIN", 0x82), (b"BUILD 8CC3E57", 0xC0)])
         self.assertEqual(img.cbm_files(), [(b"BREADBIN", 0x82)])   # DEL is not a file
         self.assertEqual(img.cbm_read(b"BREADBIN"), self.boot)
         d = img.block(M.ts_to_block(18, 1))
-        self.assertEqual(bytes(d[34:37]), b"\x80\x00\x00")           # DEL closed, t/s 0/0
+        self.assertEqual(bytes(d[34:37]), b"\xc0\x00\x00")           # DEL closed+locked, t/s 0/0
         self.assertEqual(bytes(d[32 + 5:32 + 21]), b"BUILD 8CC3E57" + b"\xa0" * 3)
         self.assertEqual(bytes(d[32 + 30:32 + 32]), b"\x00\x00")       # 0 blocks
         self.assertEqual(bytes(d[0:2]), b"\x00\xff")                  # single dir sector

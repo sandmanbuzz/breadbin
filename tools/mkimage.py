@@ -134,10 +134,10 @@ class Image:
         d[30] = len(blocks) & 0xff
         d[31] = len(blocks) >> 8
         if rev:
-            # Build stamp: a closed DEL entry with 0 blocks and no chain (t/s 0/0), so it
+            # Build stamp: a closed, locked DEL entry (type $C0, lists as DEL<) with 0 blocks and no chain (t/s 0/0), so it
             # lists as 0 "BUILD <rev>" DEL and DOS VALIDATE has nothing to follow or free.
             e = d[32:64]
-            e[2] = 0x80
+            e[2] = 0xC0
             e[5:21] = (b"BUILD " + rev.upper().encode("ascii"))[:16].ljust(16, b"\xa0")
             d[32:64] = e
         self.put_block(ts_to_block(18, 1), d)
@@ -156,7 +156,7 @@ class Image:
         return out
 
     def cbm_entries(self):
-        """Every used directory slot as (name, type byte), including closed DEL (type 0x80)."""
+        """Every used directory slot as (name, type byte), including the closed, locked DEL stamp (type 0xC0)."""
         out = []
         t, s = 18, 1
         while t:
