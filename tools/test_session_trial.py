@@ -1044,6 +1044,104 @@ class Session3(Base):
             self.u.call("PUT", "/v1/configs/A/B")
 
 
+    # ---- second hater review (blocked 8726c79)
+    def test_reboot_failing_after_the_kernal_put_stops_the_run(self):
+        orig = self.u.reboot
+        state = {"n": 0}
+
+        def reboot():
+            if self.fake.configs.get(self.KERNAL) == "" and state["n"] == 0:
+                state["n"] = 1
+                raise OSError("timed out")
+            return orig()
+        self.u.reboot = reboot
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 8, boots=["ok"] * 2, labels=self.labels)
+        self.run_session(sim, plan="2 TS 2\n")
+        self.assertEqual(self.status, 3)
+        trials = [r for r in self.rows() if r["outcome"] not in ("NOTE", "STOP")]
+        self.assertEqual(len(trials), 1)                              # no stock arm ran on the wrong ROM
+        self.assertIn("selection failed", trials[0]["detail"])
+        self.assertEqual(len(sim.loads), 8)
+        self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
+
+    def test_kernal_put_rejected_by_firmware_stops_the_run(self):
+        orig = self.fake._configs
+
+        def cfg(h, method, sub, cmd, q, body):
+            if method == "PUT" and "Kernal" in sub and q.get("value") == "":
+                return self.fake._json(h, 400, ["bad value"])
+            return orig(h, method, sub, cmd, q, body)
+        self.fake._configs = cfg
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 20, labels=self.labels)
+        self.run_session(sim, plan="2 TS 3\n")
+        self.assertEqual(self.status, 3)
+        rows = self.rows()
+        self.assertEqual(len([r for r in rows if r["outcome"] not in ("NOTE", "STOP")]), 1)
+        self.assertFalse(any(r["outcome"] == "skipped" or "reached" in r["note"] for r in rows))
+
+    def test_ctrl_c_in_the_final_config_dump_keeps_exit_4(self):
+        def hook(orig):
+            def put(g, c, i, v):
+                if (c, i) == self.KERNAL and g.restored:
+                    raise RuntimeError("PUT failed")
+                return orig(g, c, i, v)
+            return put
+        self.hook_put(hook)
+        import cfgdump
+        o = cfgdump.write_dump
+
+        def wd(c, path):
+            if path.endswith("end.json"):
+                raise KeyboardInterrupt
+            return o(c, path)
+        cfgdump.write_dump = wd
+        self.addCleanup(setattr, cfgdump, "write_dump", o)
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 3, labels=self.labels)
+        self.run_session(sim, plan="2 T 1\n")
+        self.assertEqual(self.status, session.EXIT_KERNAL_NOT_RESTORED)
+
+    def test_teardown_ignores_signals_from_its_first_instruction(self):
+        import signal
+        seen = []
+        orig = session.ConfigGuard.restore
+
+        def restore(g):
+            seen.append(signal.getsignal(signal.SIGINT))      # main's finally has already ignored it
+            return orig(g)
+        session.ConfigGuard.restore = restore
+        self.addCleanup(setattr, session.ConfigGuard, "restore", orig)
+        sim = Sim(self.fake, self.prg, loads=["ok"], labels=self.labels)
+        self.run_session(sim, plan="1 C 1\n")
+        self.assertEqual(seen, [signal.SIG_IGN])
+        self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)
+
+    def test_restore_announces_itself(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        sim = Sim(self.fake, self.prg, loads=["ok"], labels=self.labels)
+        with contextlib.redirect_stdout(buf):
+            self.run_session(sim, plan="1 C 1\n")
+        self.assertIn("restoring the Ultimate config; Ctrl-C is ignored until done", buf.getvalue())
+
+    def test_one_flaky_kernal_read_back_after_restore_is_not_a_failed_restore(self):
+        orig = session.ConfigGuard.get
+        state = {"n": 0}
+
+        def get(g, c, i):
+            if g.restored and (c, i) == self.KERNAL and state["n"] == 0:
+                state["n"] = 1
+                return "<unreadable: blip>"
+            return orig(g, c, i)
+        session.ConfigGuard.get = get
+        self.addCleanup(setattr, session.ConfigGuard, "get", orig)
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 3, labels=self.labels)
+        self.run_session(sim, plan="2 T 1\n")
+        self.assertEqual(state["n"], 1)
+        self.assertEqual(self.status, 0)
+        self.assertFalse(any("KERNAL NOT RESTORED" in c for c in self.comments()))
+
+
 class Stopping(Base):
     def test_arm_with_five_failures_is_skipped(self):
         sim = Sim(self.fake, self.prg, loads=["error"] * 5, boots=["ok"] * 8, labels=self.labels)
