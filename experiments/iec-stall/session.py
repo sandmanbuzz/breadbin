@@ -48,7 +48,13 @@ below reads nothing for FIRST_READ seconds after a transfer starts, then one scr
 seconds (plainboot.py: 20 s and 10 s). bench_basic/plainboot cannot be imported (they read
 BREADBIN_ULTIMATE and run at import), so their few lines are repeated here.
 
-Exit status: 0 plan finished, 3 stopped (mechanical symptom, `stop`, Ctrl-C, signal), 2 usage.
+Exit status: 0 plan finished, 3 stopped (mechanical symptom, `stop`, Ctrl-C, signal), 2 usage,
+4 the Kernal ROM could not be put back to its starting value (a `KERNAL NOT RESTORED` line is printed and
+logged; it wins over 0 and 3: set the Kernal ROM by hand and reboot the Ultimate).
+
+The run refuses to start unless the Ultimate's Kernal ROM is JiffyDOS-C64.bin (the machine's normal value),
+or the value given with --allow-kernal VALUE; with a stock arm in the plan it also refuses if the current
+value is already the stock one (nothing would differ between the arms).
 """
 import argparse
 import datetime
@@ -97,6 +103,8 @@ GATE_READS = 3            # arms G, H: 1-byte $DD00 reads before a screen read .
 GATE_SPACING = 0.1        # ... this many seconds apart
 GATE_MASK, GATE_IDLE = 0xF8, 0xC0
 KERNAL_ITEM = ("C64 and Cartridge Settings", "Kernal ROM")
+NORMAL_KERNAL = "JiffyDOS-C64.bin"   # the machine's documented normal Kernal ROM value (docs/hardware-notes.md)
+EXIT_KERNAL_NOT_RESTORED = 4         # exit status: the Kernal ROM was not put back (also KERNAL NOT RESTORED line)
 ACCEPT_AFTER = 3          # poll arms: no screen classification from a read earlier than this after the start
 ARMS = "CKBD" + "".join(POLL_ARMS) + "".join(VARIANT_ARMS)
 LIMITS = {"C": 120, "K": 120, "B": 150, "D": 170}      # seconds, protocol
@@ -401,6 +409,7 @@ class ConfigGuard:
         self.kernal_orig = None           # the Kernal ROM value found at apply(); set only if we change it
         self.kernal_touched = False
         self.stock_value = None
+        self.kernal_not_restored = False
 
     def get(self, cat, item):
         try:
@@ -434,7 +443,7 @@ class ConfigGuard:
         if self.stock_value is None:
             self.stock_kernal()
         if self.kernal_orig is None or self.kernal_orig.startswith("<"):
-            raise RuntimeError(f"original Kernal ROM unreadable ({self.kernal_orig!r}): not changing it")
+            raise StopSession(f"original Kernal ROM unreadable ({self.kernal_orig!r}): not changing it")
         want = self.stock_value if stock else self.kernal_orig
         if self.get(*KERNAL_ITEM) == want:
             return
@@ -445,7 +454,8 @@ class ConfigGuard:
         got = self.get(*KERNAL_ITEM)
         self.log.comment(f"Kernal ROM set to {want!r} ({'stock' if stock else 'original'}), read back {got!r}")
         if got != want:
-            raise RuntimeError(f"Kernal ROM read back {got!r}, wanted {want!r}")
+            raise StopSession(f"Kernal ROM read back {got!r}, wanted {want!r}: the run stops (a failed "
+                              "selection is not an arm outcome)")
 
     def readback(self):
         keys = [(c, i) for c, i, _, _ in self.items] + READBACK_ONLY
@@ -466,9 +476,34 @@ class ConfigGuard:
         print("config read-back:", json.dumps(rb, sort_keys=True), flush=True)
 
     def restore(self):
+        """Puts everything back, the Kernal ROM first. SIGINT, SIGTERM and SIGHUP are ignored while it
+        runs (a second Ctrl-C must not leave the stock Kernal selected), every step catches
+        BaseException on its own, and the reboot does not depend on the resume. Afterwards the Kernal
+        read-back is compared with the value found at start: a difference sets kernal_not_restored."""
         if not self.applied or self.restored:
             return
         self.restored = True
+        old = {}
+        for sg in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            try:
+                old[sg] = signal.signal(sg, signal.SIG_IGN)
+            except (ValueError, OSError):      # not the main thread
+                pass
+        try:
+            self._restore_steps()
+        finally:
+            for sg, h in old.items():
+                try:
+                    signal.signal(sg, h)
+                except (ValueError, OSError):
+                    pass
+
+    def _restore_steps(self):
+        if self.kernal_touched:
+            try:
+                self.put(*KERNAL_ITEM, self.kernal_orig)
+            except BaseException as e:   # noqa: BLE001
+                print(f"RESTORE FAILED {KERNAL_ITEM[0]}/{KERNAL_ITEM[1]}: {e!r}", file=sys.stderr, flush=True)
         for c, i, _, normal in self.items:
             orig = self.original.get((c, i))
             val = orig if orig is not None and not orig.startswith("<") else normal
@@ -476,25 +511,38 @@ class ConfigGuard:
                 continue
             try:
                 self.put(c, i, val)
-            except Exception as e:       # noqa: BLE001
-                print(f"RESTORE FAILED {c}/{i}: {e}", file=sys.stderr, flush=True)
-        if self.kernal_touched:
-            try:
-                self.put(*KERNAL_ITEM, self.kernal_orig)
-            except Exception as e:       # noqa: BLE001
-                print(f"RESTORE FAILED {KERNAL_ITEM[0]}/{KERNAL_ITEM[1]}: {e}", file=sys.stderr, flush=True)
+            except BaseException as e:   # noqa: BLE001
+                print(f"RESTORE FAILED {c}/{i}: {e!r}", file=sys.stderr, flush=True)
         try:
             self.u.resume()
+        except BaseException as e:       # noqa: BLE001
+            print(f"RESTORE resume failed: {e!r}", file=sys.stderr, flush=True)
+        try:                             # a Kernal change needs a reboot even if the resume failed
             self.u.reboot()
             self.clock.sleep(self.reboot_wait)
-        except Exception as e:           # noqa: BLE001
-            print(f"RESTORE reboot failed: {e}", file=sys.stderr, flush=True)
-        rb = self.readback()
+        except BaseException as e:       # noqa: BLE001
+            print(f"RESTORE reboot failed: {e!r}", file=sys.stderr, flush=True)
+        try:
+            rb = self.readback()
+        except BaseException as e:       # noqa: BLE001
+            rb = {}
+            print(f"RESTORE read-back failed: {e!r}", file=sys.stderr, flush=True)
         try:
             self.log.comment("config after restore: " + json.dumps(rb, sort_keys=True))
-        except Exception:                # noqa: BLE001
+        except BaseException:            # noqa: BLE001
             pass
         print("config after restore:", json.dumps(rb, sort_keys=True), flush=True)
+        if self.kernal_orig is not None and not self.kernal_orig.startswith("<"):
+            got = rb.get("/".join(KERNAL_ITEM))
+            if got != self.kernal_orig:
+                self.kernal_not_restored = True
+                msg = (f"KERNAL NOT RESTORED: Kernal ROM is {got!r}, was {self.kernal_orig!r} at start; "
+                       "set it by hand and reboot the Ultimate")
+                print(msg, file=sys.stderr, flush=True)
+                try:
+                    self.log.comment(msg)
+                except BaseException:    # noqa: BLE001
+                    pass
 
 
 # ---------------------------------------------------------------- the machine
@@ -801,7 +849,7 @@ class Rig:
         v = POLL_ARMS[arm]
         self.clock.sleep(t_from + v["first"] - self.clock.now())
         while True:
-            ts = self.clock.now()
+            lines = None
             if v["nbytes"] > 1:
                 lines = self.poll_screen(v)      # always read (the poll is the point) ...
                 if lines is not None and self.clock.now() >= t_from + ACCEPT_AFTER:
@@ -812,9 +860,12 @@ class Rig:
                 self.u.readmem(0xD6, v["nbytes"])
             left = t_end - self.clock.now()
             if left <= 0:
-                return None if v["nbytes"] > 1 else classify(self.screen())
-            gap = v["every"] - (self.clock.now() - ts) if v.get("gate") else v["every"]
-            self.clock.sleep(min(max(gap, 0), left))
+                if v["nbytes"] == 1 or lines is None:
+                    # the limit: one unconditional screen read (a gate that never opened must not hide a
+                    # hang or a panic: outcome categories match Q and J)
+                    return classify(self.screen())
+                return None
+            self.clock.sleep(min(v["every"], left))     # sleep after the read, as Q and J always did
 
     def poll_screen(self, v):
         """One poll of the screen for arm table row v: the lines read, or None if a gate skipped it."""
@@ -831,8 +882,8 @@ class Rig:
                 return None
             self.gate[0] += 1
         if v.get("pause"):
-            self.u.pause()
             try:
+                self.u.pause()
                 return self.screen()
             finally:
                 self.u.resume()                  # always: a paused machine never gets its IEC bytes
@@ -922,8 +973,9 @@ class Session:
             r = self.rig.trial(arm)
         except (KeyboardInterrupt, StopSession) as e:
             interrupted = e
-            r = dict(outcome="other", seconds="", detail="interrupted", dump="", timed_out=False,
-                     iostat={})
+            r = dict(outcome="other", seconds="",
+                     detail=f"interrupted: {e}" if isinstance(e, StopSession) and str(e) else "interrupted",
+                     dump="", timed_out=False, iostat={})
             self.safe_reset()
         except Exception as e:            # noqa: BLE001 - one bad trial must not lose the others
             r = dict(outcome="other", seconds="", detail=f"harness error: {type(e).__name__}: {e}",
@@ -1005,6 +1057,9 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
     ap.add_argument("--poll-mode", choices=("none", "byte"), default="none",
                     help="none: no readmem between a trial's start and its limit, then one screen read; "
                          "byte: 1-byte reads of $D6 at most every 2 s, full screen only on a terminal state")
+    ap.add_argument("--allow-kernal", metavar="VALUE", default=None,
+                    help=f"the Kernal ROM value the Ultimate may have at start (default {NORMAL_KERNAL!r}); "
+                         "anything else is refused")
     ap.add_argument("--reboot-wait", type=float, default=15)
     ap.add_argument("--set", action="append", default=[], metavar="CATEGORY/ITEM=VALUE",
                     help="extra config to set (and read back); restored to its prior value")
@@ -1053,6 +1108,16 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
         except SystemExit:
             log.close()
             raise
+    expected = NORMAL_KERNAL if a.allow_kernal is None else a.allow_kernal
+    cur = guard.get(*KERNAL_ITEM)                   # read-only
+    problem = None
+    if cur != expected:
+        problem = f"the Ultimate's Kernal ROM is {cur!r}, expected {expected!r} (--allow-kernal VALUE to accept another)"
+    elif guard.stock_value is not None and cur == guard.stock_value:
+        problem = f"the Ultimate's Kernal ROM is already the stock one ({cur!r}): arms S and T would not differ"
+    if problem:
+        log.close()
+        raise SystemExit("refusing to start: " + problem)
     rig = Rig(client, clock, prg, labels, a.control_file, poll_mode=a.poll_mode, dma_image=dma_prg,
               labels_dma=labels_dma, kernal=guard)
     log.comment(f"session {a.session}; plan {os.path.basename(a.plan)}: {len(order)} trials")
@@ -1108,6 +1173,8 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
         for sg, h in old.items():
             signal.signal(sg, h)
         log.close()
+    if guard.kernal_not_restored:
+        return EXIT_KERNAL_NOT_RESTORED
     return status
 
 
