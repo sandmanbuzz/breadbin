@@ -41,6 +41,8 @@ def parse_multipart(ctype, body):
 class FakeUltimate:
     def __init__(self, password=None, product="Fake Ultimate 64", key_injection=True):
         self.ram = bytearray(65536)
+        self.ram[0xDD00] = 0xC7     # CIA 2 port A with an idle serial bus (lines released), VIC bank 0
+        self.on_readmem = None      # optional callback(address, length) for every readmem
         self.password = password
         self.product = product
         self.key_injection = key_injection   # False: answers 404 like the C64 Ultimate
@@ -81,7 +83,7 @@ class FakeUltimate:
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.host, self.port = self._server.server_address
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         return self
 
     def stop(self):

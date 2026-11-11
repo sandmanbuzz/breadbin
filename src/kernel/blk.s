@@ -77,7 +77,8 @@ io_lsct:   .res 1
 io_lidx:   .res 1        ; byte index 0-255 ($FF: before the data, i.e. the command or the talk)
 io_ltry:   .res 1        ; try number 1-3,
 io_lst:    .res 1        ; ST,
-io_lwn:    .res 1        ; and bus_acptr's io_n (ready wait: 3..1 loops left; bit loop: 8..1 bits left; EOI window: stale)
+io_lwn:    .res 1        ; and bus_acptr's io_n at the timeout (ready wait expired: 0; bit loop: 8..1 bits still to come; EOI window: stale)
+                         ; when io_lidx is $FF, io_lst and io_lwn are whatever the command, status or talk step left: not a byte timeout
 .endif
 reu_tmp: .res 1
 cache_ok: .res 1         ; attached to a valid REU cache

@@ -56,6 +56,45 @@ class TestImage(unittest.TestCase):
         self.assertEqual(self.img.cbm_files(), [(b"BREADBIN", 0x82)])
         self.assertEqual(self.img.cbm_read(b"BREADBIN"), self.boot)
 
+    def test_no_rev_is_unchanged(self):
+        """Without --rev: no stamp entry and no /etc/build (today's image)."""
+        self.assertEqual(self.img.cbm_entries(), [(b"BREADBIN", 0x82)])
+        with self.assertRaises(FileNotFoundError):
+            self.fs.lookup("/etc/build")
+
+    def _build_rev(self, rev):
+        t = self.tmp.name
+        out = os.path.join(t, "rev.d64")
+        M.build(out, os.path.join(t, "boot.prg"), os.path.join(t, "root"),
+                ["console:1", "null:0"], rev)
+        img = M.load(out)
+        return img, M.FS(img)
+
+    def test_rev_stamp_entry(self):
+        img, fs = self._build_rev("8cc3e57")
+        # boot file first, then the closed DEL stamp, nothing else
+        self.assertEqual(img.cbm_entries(), [(b"BREADBIN", 0x82), (b"BUILD 8CC3E57", 0xC0)])
+        self.assertEqual(img.cbm_files(), [(b"BREADBIN", 0x82)])   # DEL is not a file
+        self.assertEqual(img.cbm_read(b"BREADBIN"), self.boot)
+        d = img.block(M.ts_to_block(18, 1))
+        self.assertEqual(bytes(d[34:37]), b"\xc0\x00\x00")           # DEL closed+locked, t/s 0/0
+        self.assertEqual(bytes(d[32 + 5:32 + 21]), b"BUILD 8CC3E57" + b"\xa0" * 3)
+        self.assertEqual(bytes(d[32 + 30:32 + 32]), b"\x00\x00")       # 0 blocks
+        self.assertEqual(bytes(d[0:2]), b"\x00\xff")                  # single dir sector
+
+    def test_rev_dirty_and_long(self):
+        img, _ = self._build_rev("abcdef0+")
+        self.assertEqual(img.cbm_entries()[1][0], b"BUILD ABCDEF0+")
+        img, fs = self._build_rev("x" * 40)
+        self.assertEqual(img.cbm_entries()[1][0], b"BUILD " + b"X" * 10)  # 16-char name limit
+        ino = fs.lookup("/etc/build")
+        self.assertEqual(fs.read_file(ino), b"breadbin " + b"x" * 40 + b"\n")
+
+    def test_rev_etc_build(self):
+        _, fs = self._build_rev("8cc3e57+")
+        self.assertEqual(fs.read_file(fs.lookup("/etc/build")), b"breadbin 8cc3e57+\n")
+        self.assertEqual(fs.read_file(fs.lookup("/home/readme")), b"hello unix\n" * 100)
+
     def test_cbm_bam_all_allocated(self):
         bam = self.img.block(M.ts_to_block(18, 0))
         self.assertTrue(all(bam[4 * t] == 0 for t in range(1, 36)))
