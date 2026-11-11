@@ -341,3 +341,17 @@ Reading:
 - **The harm is not JiffyDOS-specific.** The stock KERNAL hangs (it loses a bit, then waits for an edge that never comes); JiffyDOS corrupts or errors. Every polled arm against the machine's own load failed 4 of 4. This strengthens the backlogged upstream report: no Breadbin needed, stock ROM.
 - **The `$DD00` gate protects our boot but not the machine's load.** Gated reads opened only once per H trial, about 6 s into the load (the JiffyDOS load leaves bus-idle gaps of at least 0.2 s), and that single read broke it. The idle values seen: `$C7` idle; `$87`/`$07` drive talking (CLK low); `$4F` our ATN with DATA held; `$47` DATA held; `$27`/`$1F`/`$3F` our outputs driven.
 - **Harness consequence:** `fix/harness-idle` now waits for the machine's load with 1-byte reads only, plus a post-load read-back of the loaded file (in review). The 1-byte rate during the machine's load is not yet measured on hardware: that is the next arm.
+
+## 2026-11-10 night: session 4 (hardware, unattended, 20:46-21:12)
+
+Plan `plans/session4.plan` (`1 KL 8`), pre-registered with its decision rule in `docs/design/io-trial-protocol.md` ("Session 4") before any trial; harness afeede5; same kit, disk and drive as sessions 2 and 3 (warm since 07:09, no power cycle). Results in `experiments/iec-stall/results/session4/block1.tsv`. The config read back as at the start (Kernal ROM JiffyDOS-C64.bin) and again after the restore.
+
+| Arm | Treatment | Result |
+|---|---|---|
+| K | the machine's JiffyDOS load of the 15,017-byte file, no reads | 8/8 pass, bytes identical |
+| L | K + a 1-byte readmem of `$D6` every 0.1 s | 4/4 fail, stopped: 3 silent mismatches (5 bytes from +788, 4 from +4598, 3 from +776; the load reported success), then 1 ?LOAD ERROR |
+
+Reading:
+- **Even one byte of DMA every 0.1 s corrupts the machine's JiffyDOS load**, mostly silently. JiffyDOS clocks fixed-timing bit pairs after one handshake per byte, so a halt in the middle of a byte loses bits. Breadbin's own driver handshakes every bit and took 264 such reads cleanly (session 2, arm O). The controls were clean, so the block stands.
+- **Decision rule triggered** (L had at least 1 failure in 8): the harness makes no DMA at all while the machine's load may run. `fix/harness-idle` 4684f83 waits a fixed quiet period after typing the load command, then makes one ready check, then reads back the loaded file. A hater review blocked it (the gate's read was delayed 0.1 s after the idle samples; an overrun polled into the load); the fixes are in progress.
+- **Upstream report:** the repro is now a stock machine's own load and a single-byte REST read, no Breadbin needed (backlogged until after the release).
