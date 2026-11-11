@@ -73,6 +73,13 @@ class Target:
     # the port itself (a DMA read on the Ultimate returns $00 for $0001)
     sees_cpu_port = True
 
+    # clock hooks: the Ultimate backend's host tests substitute a fake clock
+    def _time(self):
+        return time.time()
+
+    def _pause(self, seconds):
+        time.sleep(seconds)
+
     def screen_lines(self):
         codes = self.mem(0x0400, 0x07e7)
         text = screen_to_text(codes)
@@ -83,25 +90,25 @@ class Target:
 
     def wait_shell(self, user="root", timeout=90):
         """Boot to a shell prompt, logging in as `user` if asked."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        deadline = self._time() + timeout
+        while self._time() < deadline:
             s = self.screen()
             if "login:" in s:
                 self.type(user + "\n")
                 return self.wait_for(" $", timeout=timeout)
             if s.rstrip().endswith("/ $"):
                 return s
-            time.sleep(0.5)
+            self._pause(0.5)
         raise TimeoutError("no login or shell prompt:\n" + self.screen())
 
     def wait_for(self, text, timeout=60, after=None):
         """Wait until `text` is on screen; return the screen."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        deadline = self._time() + timeout
+        while self._time() < deadline:
             s = self.screen()
             if text in s if after is None else text in s.split(after)[-1]:
                 return s
-            time.sleep(0.5)
+            self._pause(0.5)
         raise TimeoutError(f"{text!r} not on screen:\n{self.screen()}")
 
     PROMPT = re.compile(r"^\S+ \$$")
@@ -135,11 +142,11 @@ class Target:
         return "\n".join(result)
 
     def _wait(self, pred, timeout, what="condition"):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        deadline = self._time() + timeout
+        while self._time() < deadline:
             if pred(self.screen_lines()):
                 return
-            time.sleep(0.4)
+            self._pause(0.4)
         raise TimeoutError(f"timeout waiting for {what}:\n{self.screen()}")
 
 
