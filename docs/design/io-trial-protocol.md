@@ -110,3 +110,45 @@ Plan `plans/session4.plan`: block `1 KL 8`, L stops at 4 failures. Same kit, dis
 - **Arm L (K plus a 1-byte read of `$D6` every 0.1 s from the typed load):** the rate at which the test harness (`fix/harness-idle`) watches the machine's own load. O showed this rate clean in 264 reads during *our* boot, whose driver handshakes every byte; the JiffyDOS receive clocks bit pairs on fixed timing after one handshake per byte, so a halt inside a byte has no slack. About 80 reads land in each 8 s load, 640 over the arm. Prediction: at least 1 failure (mismatch, load error or hang) in 8. The halt length of a 1-byte DMA on this firmware is unknown; if it is a few cycles the prediction may well fail.
 - **Decision rule, fixed now:** L with 1 or more failures in 8: the harness must make no DMA at all during the machine's load (a fixed wait, then the 1-byte ready check and the read-back). L clean in 8: the 1-byte wait stays, guarded by the read-back, and the rate is recorded as clean in 640 reads during the JiffyDOS load (which bounds, not proves, the per-load risk).
 - **Notes from review, before the run:** L keeps polling to its 120 s limit, as O does, so about 1,200 reads per trial land on the machine; about 80 of them fall in the 8 s load, which is what the prediction is about. A K failure in session 4 makes the block uninterpretable for the decision rule (the control is broken: stop and look at the drive), whatever L shows.
+
+## Session 5: acceptance, pre-registered (2026-11-11, owner's set; before any session-5 trial)
+
+The owner chose the set: first an IO workload on the ROM KERNAL and on our kernel, then a run of 40-50 boots, with zero failures observed. It is run on the frozen release tip (`fix/io-release`) after that tip's full VICE suite and JiffyDOS subset pass, and before landing. The kit, drive and config are the owner's normal ones (JiffyDOS KERNAL, physical 1541 on bus 8). The disk is the current one unless the owner puts in fresh media. Writing the release image onto the physical disk overwrites it; this is announced here.
+
+**No DMA while a workload runs.** Each workload runs to completion on the machine and leaves its counts in RAM and on the screen. The harness waits a fixed time, gates on an idle bus, and then reads once. The boots use the landed harness: no request during the machine's load, gated reads afterwards, and the gate log on.
+
+Arms, in this order:
+
+- **W (ROM KERNAL write-verify).** A BASIC program on the machine's own KERNAL, physical 1541 on drive 8, N = 300 cycles. Each cycle:
+  - scratch the file, then write one block (254 bytes) of a pattern that depends on the cycle number;
+  - close, reopen, read the block back and compare;
+  - check ST and the DOS status after every step.
+
+  It counts mismatches, non-zero ST and DOS errors. The program is put in RAM before RUN, while the bus is idle.
+- **B (our kernel write-verify).** The same workload under Breadbin on the physical 1541, N = 300: write a one-block file, read it back and compare, at the transaction level (shell or BASIC under Breadbin; the exact program is recorded with the results). The IOSTAT counters (`io_nread`, `io_nretry`, `io_nfail`, `io_nwretry`, `io_nwfail`) are read after it ends.
+- **R (boot cycle).** 50 cycles of:
+  - machine reset;
+  - the machine's own `load"*",8,1` of the release image from the physical 1541;
+  - `run`, then login and the shell;
+  - `ls /bin` and `cksum` of a fixed file, compared with the known output.
+
+  The IOSTAT counters are read once each boot has finished.
+
+**Failures.** Each of these counts as a failure:
+- a mismatch or a non-zero DOS status;
+- `?LOAD ERROR`;
+- a hang (no prompt in the time limit);
+- a panic;
+- wrong output;
+- `io_nfail` or `io_nwfail` above 0;
+- a load whose read-back differs.
+
+Every failure counts, including one next to a reported gate race; none is attributed to the harness after the fact. An arm stops at its first failure, the machine state is captured (`decode.py`, the screen, the counters) and nothing more runs until it is understood.
+
+**Pass and the decision rule, fixed now:**
+- **Pass:** 0 failures in W, B and R together. The release then lands, and definition of done (c) is met for this set, with IOSTAT left in place.
+- **Retries:** `io_nretry` or `io_nwretry` above 0 is not a failure, since a retry is the mitigation working. It is reported with the arm. Retries above 0 with no DMA mean that something still drops bytes on this kit, and the cause stays open as a known, mitigated defect.
+- **A W failure** (no Breadbin, no DMA) points at the drive, the media or the cable: path (b). B and R still run, so that the comparison can be made.
+- **A B or R failure with W clean** points at our kernel.
+
+**Prediction:** 0 failures in each arm. Retries: none expected in W, which has no retry counter, and fewer than 5 in B and R together.
