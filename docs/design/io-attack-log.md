@@ -355,3 +355,41 @@ Reading:
 - **Even one byte of DMA every 0.1 s corrupts the machine's JiffyDOS load**, mostly silently. JiffyDOS clocks fixed-timing bit pairs after one handshake per byte, so a halt in the middle of a byte loses bits. Breadbin's own driver handshakes every bit and took 264 such reads cleanly (session 2, arm O). The controls were clean, so the block stands.
 - **Decision rule triggered** (L had at least 1 failure in 8): the harness makes no DMA at all while the machine's load may run. `fix/harness-idle` 4684f83 waits a fixed quiet period after typing the load command, then makes one ready check, then reads back the loaded file. A hater review blocked it (the gate's read was delayed 0.1 s after the idle samples; an overrun polled into the load); the fixes are in progress.
 - **Upstream report:** the repro is now a stock machine's own load and a single-byte REST read, no Breadbin needed (backlogged until after the release).
+
+## 2026-11-11: the Ultimate test backend landed (main f7dc3c6); release branch frozen
+
+`fix/harness-idle` landed after five hater rounds (squashed as 5fb7812). The backend makes no request during the machine's own load, then checks once and reads the loaded file back. After that it reads the screen and writes keys only after three 1-byte `$DD00` samples look idle, and it writes the key buffer without `machine:pause`.
+
+Hardware Boot class (30 tests each, unattended, through the `ultimate` lock, config read back):
+
+| Run | Tree | Result |
+|---|---|---|
+| hv5-1 | 1b273dc | stopped: machine stuck, bus released (`$C7`) after a gated 1000-byte read between two busy verdicts; that the read caused it is inferred, not proven |
+| hv5-2 | 1b273dc | 30/30 |
+| hv7-1, hv7-2 | 4032d95 | 30/30 each |
+| hv8 | cdeee89 | 29/30: `test_28` (basic) printed nothing; no gate log |
+
+Reading:
+- **The gate leaves a race.** A transfer that starts after the gate's last sample is not seen. The gated read follows the idle verdict at once, and splitting it into shorter pieces made things worse (b563d13, reverted). The backend now reports a gated read whose idle verdict came within 1.0 s of a busy sample and was followed within 1.0 s by another busy one as a `gate race`, and a key write in that position as a `key-write candidate`.
+- **Race counts.** Replaying the gate logs under the final rule: hv5-1 4, hv5-2 7, hv6-1 6, hv7-1 6, hv7-2 5. These include key-write candidates, and the replay does not split them out. Every log but hv5-1 passed with races present, so a race is a risk, not a failure.
+- **Not seen, as listed in the code and `docs/testing.md`:** a transfer starting after a long quiet stretch, one that starts and ends between two verdicts, and a DMA that ends a transfer at once. The 1-byte probes also continue through Breadbin's own transfers: they were harmless to its reads (session 2, arm O), but nobody has measured them during its writes.
+- **Open lead (hv8 `test_28`).** It is not attributed to the harness branch and has no gate log. The candidates:
+  - the paced `$DD00` probes during a write by the C64 as talker (main has no write retry or counter);
+  - basic dying silently;
+  - a bad cache read.
+  Next: rerun it on the release kernel, which has write retries and the `io_nw*` counters, with write-checking runs (cat back, exit status on mismatch) and the gate log on.
+
+`fix/io-release` round 3 (G–N, tip ba6f7e4):
+- Boot flush retries, with a fallback to `i0`.
+- All four drives are marked.
+- A realistic IecRestart.
+- Separate write counters.
+- Only a complete 2x status ends the tries.
+- LC_ALL in the crossing check.
+- The JiffyDOS ROMs are shown in the VICE argv.
+
+The VICE write halt arm on 46f5957, one commit before the 2x-only refinement: 24 boots, 0 failures.
+
+One pre-existing hazard is documented, not fixed: a cut command that still parses ("U1:2 0 19 ") is accepted silently.
+
+Main has been merged into the branch (236a044; the test_29 conflict was resolved to keep both sides). The full suite is running exclusively on that tip, and hater round 4 is in progress.
