@@ -20,7 +20,9 @@ The keyboard tests inject real X key events with `xdotool` (`apt install xdotool
 
 ## On a real Ultimate
 
-The `Boot` class, `test_keyboard` and `test_console` pick their backend with `make_target`: the VICE emulator by default, a real Ultimate with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (and `BREADBIN_ULTIMATE_PASSWORD` if set). The backend mounts `build/breadbin.d64` in drive A, resets, loads and runs it. `type()` and `keybuf()` write the key buffer by DMA, as VICE's `keybuf` does; `xkey` and friends use real key events (Ultimate 64 only). Tests that need the emulator (`-reu`, extra drives, reboot persistence) stay on VICE. `make test-host` includes the client's 24 tests against a fake server. See `docs/hardware-notes.md` for what has and has not been verified.
+The `Boot` class, `test_keyboard` and `test_console` pick their backend with `make_target`: the VICE emulator by default, a real Ultimate with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (and `BREADBIN_ULTIMATE_PASSWORD` if set). The backend mounts `build/breadbin.d64` in drive A, resets, loads and runs it. `type()` and `keybuf()` write the key buffer by DMA, but unlike VICE's `keybuf` only into an empty buffer (no `machine:pause`), so keys typed ahead of a program that never reads the keyboard time out after 30 s; `xkey` and friends use real key events (Ultimate 64 only).
+
+Every REST memory access halts the 6510 (a DMA), and a halt inside a serial transfer can corrupt or stall it (`docs/design/io-attack-log.md`). So the backend makes no request at all while the machine's own `load` runs (it waits `BREADBIN_ULTIMATE_LOAD_QUIET` seconds, default 20, then checks once and reads the loaded file back), and afterwards reads the screen and writes keys only when three 1-byte samples of `$DD00` say the bus is idle. That gate cannot see a transfer that starts just after its last sample. A gated screen read whose idle verdict came within 1 s of a busy sample and whose next verdict, within 1 s of it, is busy again is reported on stderr as a `gate race` line; a key write in the same spot as a `gate key-write candidate` (the busy verdict may be the command it typed); a failed request counts too when the caller polls on; and timeout messages carry the recent gate events and those around the last races; but some races are not seen (a transfer starting after a long quiet stretch, one that starts and ends between two verdicts, a DMA that ends a transfer at once), and the 1-byte `$DD00` probes go on through Breadbin's own transfers, so a clean output does not prove the harness disturbed nothing (the list is in `tools/ultimatetest.py`). `BREADBIN_ULTIMATE_GATELOG=1` logs every sample and access. `BREADBIN_ULTIMATE_BUS` names the bus of drive A (default 8; 9 when a physical drive is on 8). Tests that need the emulator (`-reu`, extra drives, reboot persistence) stay on VICE. `make test-host` includes the client's and the backend's tests against a fake server (alone: `cd tools && python3 -m unittest test_ultimate`). See `docs/hardware-notes.md` for what has and has not been verified.
 
 ## The UCI simulator (py65)
 
@@ -120,6 +122,10 @@ xvfb-run -a make test-only T="tests.test_system.REU"
 Run the full suite when a milestone story lands (the M0 stories, a filesystem or block-layer change, anything touching the IRQ path), and record the result in the commit message. Between milestones, smoke plus the targeted tests above are enough.
 
 CI runs the build and host tests on every push. It does not run the VICE tests, because they need ROMs that are not in the repo.
+
+## Comparing builds byte for byte
+
+The disk carries its source revision (a locked `DEL` directory entry `BUILD <rev>` after the boot file, and `/etc/build`; `+` marks uncommitted changes to tracked files), so every commit changes `build/breadbin.d64`. To show that two trees build the same disk (a comment-only change, a build switch that should be a no-op), build both with the same fixed stamp, `make BUILDREV=0`, and compare those images. The kernel `.prg` does not carry the stamp. `tools/ci/run.sh` passes the host's revision into the container, which has no `.git`; set `BUILDREV` to override it.
 
 ## Known issues
 
