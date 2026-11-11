@@ -72,9 +72,10 @@ class Boot(unittest.TestCase):
         self.assertEqual(self.run_("cat /home/note"), "hi there\nagain")
 
     def test_07_directories(self):
-        self.run_("mkdir /home/src")
-        self.run_("cd /home/src")
-        self.assertEqual(self.run_("pwd"), "/home/src")
+        out_mkdir = self.run_("mkdir /home/src")
+        out_cd = self.run_("cd /home/src")
+        self.assertEqual(self.run_("pwd"), "/home/src",
+                         msg=f"mkdir printed {out_mkdir!r}, cd printed {out_cd!r}")
         self.run_("echo x > f")
         self.assertEqual(self.run_("ls"), "f")
         self.run_("cd ..")
@@ -298,18 +299,23 @@ class Boot(unittest.TestCase):
         """IOSTAT (default build): the block-read mitigation counters are in the label file and a
         healthy boot reads blocks without a retry or a failure. io_neoi is printed, not asserted:
         it says whether the drive sends EOI on the 256th byte of a U1 read."""
-        lbl = {}
+        lbl, last = {}, {}
         with open(os.path.join(ROOT, "build", "kernel.lbl")) as f:
             for line in f:
                 m = re.match(r"al ([0-9A-F]+) \.(io_n\w+)$", line.strip())
                 if m:
                     lbl[m.group(2)] = int(m.group(1), 16)
+                m = re.match(r"al ([0-9A-F]+) \.(io_l(?:trk|sct|idx|try|st|wn))$", line.strip())
+                if m:
+                    last[m.group(2)] = int(m.group(1), 16)
         if "io_nread" not in lbl:
             self.skipTest("built with IOSTAT=0")
         self.run_("ls /bin")
         self.run_("cat /etc/passwd")
         n = {k: self.v.mem(a, a + 1)[0] | self.v.mem(a, a + 1)[1] << 8 for k, a in lbl.items()}
         print("\nIOSTAT", n)
+        # the last timeout's record (one byte each; see blk.s): printed, not asserted
+        print("IOSTAT last event", {k: self.v.mem(a, a)[0] for k, a in last.items()})
         self.assertGreater(n["io_nread"], 0)
         self.assertEqual(n["io_nretry"], 0)
         self.assertEqual(n["io_nfail"], 0)
