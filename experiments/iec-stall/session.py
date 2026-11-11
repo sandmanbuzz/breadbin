@@ -96,6 +96,9 @@ POLL_ARMS = {
     "S": dict(base="K", nbytes=1000, every=0.5, first=0, limit=120, fail=4, end_block=False, stock=True),
     "G": dict(base="D", nbytes=1000, every=0.5, first=0, limit=170, fail=4, end_block=False, gate=True),
     "H": dict(base="K", nbytes=1000, every=0.5, first=0, limit=120, fail=4, end_block=False, gate=True),
+    # Session 4: the machine's own JiffyDOS load polled with 1-byte reads every 0.1 s, the rate the test
+    # harness (fix/harness-idle) uses while it waits for that load; O measured it only during our boot.
+    "L": dict(base="K", nbytes=1, every=0.1, first=0, limit=120, fail=4, end_block=False),
 }
 # Arms that do not poll but are a base arm with a variation: T = K with the stock KERNAL (control for S).
 VARIANT_ARMS = {"T": dict(base="K", limit=120, stock=True)}

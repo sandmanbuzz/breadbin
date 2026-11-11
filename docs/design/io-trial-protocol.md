@@ -102,3 +102,10 @@ Completed 2026-11-10 before any session-3 trial (plan `plans/session3.plan`: blo
 - **Arm G (D plus the bus-idle gate: three 1-byte `$DD00` reads 0.1 s apart, the 1000-byte read only if all show `(v & $F8) == $C0`):** the harness fix (`fix/harness-idle`). Prediction: 0 failures in 8, and skipped reads > 0 in every trial (the root mount is seen as busy). Any G failure blocks `fix/harness-idle` as a fix and leaves it at most a mitigation. Skipped = 0 in every trial would mean `$DD00` by DMA does not show the bus (the gate is blind), whatever the failure count.
 - **Arm H (J plus the same gate):** Prediction: at most 1 failure in 8 (a transfer can begin between the last sample and the read). 2 or more refutes the gate for the JiffyDOS load.
 - **`$DD00` histogram** (every 1-byte read, arms G and H): no prediction; it records what the port shows by DMA while Breadbin and the JiffyDOS load run.
+
+## Session 4, pre-registered (2026-11-10, after session 3, before any session-4 trial)
+
+Plan `plans/session4.plan`: block `1 KL 8`, L stops at 4 failures. Same kit, disk, drive and config as session 3.
+
+- **Arm L (K plus a 1-byte read of `$D6` every 0.1 s from the typed load):** the rate at which the test harness (`fix/harness-idle`) watches the machine's own load. O showed this rate clean in 264 reads during *our* boot, whose driver handshakes every byte; the JiffyDOS receive clocks bit pairs on fixed timing after one handshake per byte, so a halt inside a byte has no slack. About 80 reads land in each 8 s load, 640 over the arm. Prediction: at least 1 failure (mismatch, load error or hang) in 8. The halt length of a 1-byte DMA on this firmware is unknown; if it is a few cycles the prediction may well fail.
+- **Decision rule, fixed now:** L with 1 or more failures in 8: the harness must make no DMA at all during the machine's load (a fixed wait, then the 1-byte ready check and the read-back). L clean in 8: the 1-byte wait stays, guarded by the read-back, and the rate is recorded as clean in 640 reads during the JiffyDOS load (which bounds, not proves, the per-load risk).

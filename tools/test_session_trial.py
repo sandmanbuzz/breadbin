@@ -627,6 +627,23 @@ class Session2(Base):
                 self.assertTrue(all(abs((y - x) - 0.5) < 0.01 for x, y in zip(n, n[1:])))
         self.assertEqual(len(starts), 4)
 
+    def test_arm_l_polls_the_load_one_byte_every_tenth_of_a_second(self):
+        sim, rows = self.run_arms("1 KL 1\n", loads=["ok"] * 2)
+        self.assertEqual([(r["arm"], r["outcome"]) for r in rows], [("K", "pass"), ("L", "pass")])
+        self.assertIn("bytes identical", rows[1]["detail"])
+        self.assertIn("poll=1b/0.1s", rows[1]["detail"])
+        k, l = self.windows_of(sim)
+        self.assertEqual([t for t, ad, ln in sim.big_reads if k[0] <= t < k[1]], [])
+        self.assertEqual([t for t, ad, ln in sim.big_reads if l[0] <= t < l[1] - 1], [],
+                         "arm L made a read longer than 1 byte during the load")
+        n = self.reads_in(sim, l[0], l[1] - 1, 0xD6, 1)
+        self.assertGreaterEqual(len(n), 70)              # the 8 s load at 10 per second
+        self.assertTrue(all(abs((y - x) - 0.1) < 0.01 for x, y in zip(n, n[1:])))
+
+    def test_arm_l_failures_are_classified(self):
+        sim, rows = self.run_arms("1 L 3\n", loads=["hang", "error", "corrupt"])
+        self.assertEqual([r["outcome"] for r in rows], ["LOADING hang", "LOAD ERROR", "mismatch"])
+
     def test_arm_j_failure_outcomes_are_distinguished(self):
         sim, rows = self.run_arms("1 J 4\n", loads=["hang", "error", "corrupt", "ok"])
         self.assertEqual([r["outcome"] for r in rows], ["LOADING hang", "LOAD ERROR", "mismatch", "pass"])
