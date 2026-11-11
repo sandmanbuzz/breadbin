@@ -320,3 +320,24 @@ The reviewer disassembled the stock 1541 DOS and confirmed that a half command n
 6. **Lows:** a timeout is reported as ENODEV; no UNTALK on the non-retry status paths; the bound plus turbo is untested; SEI for about 2 s on a timeout (not a regression).
 
 All go to a fix agent on fix/io-release. The release waits for that, the rerun arm, then the milestone runs. Main's exposure without DMA is low (0 retries in about 1,500 hardware block reads), but findings 2 and 3 are silent-corruption paths on main today.
+
+## 2026-11-10 evening: session 3 (hardware, unattended, 16:2x-17:55)
+
+Plan `plans/session3.plan`, pre-registered in `docs/design/io-trial-protocol.md` ("Session 3") before any trial; harness 9914ed7 after three hater rounds; same kit, disk and drive (warm since 07:09, no power cycle) as session 2. Results in `experiments/iec-stall/results/session3/`. The config read back as at the start (Kernal ROM JiffyDOS-C64.bin) after every block.
+
+| Block | Arm | Treatment | Result | Prediction |
+|---|---|---|---|---|
+| 1 | D | our boot, no polling | 8/8 pass | |
+| 1 | Z | D + pause, 1000-byte read, resume every 0.5 s | 4/4 root-mount panic, stopped | met (>= Q's rate) |
+| 2 | T | stock KERNAL load, no polling | 8/8 pass, bytes identical | met |
+| 2 | S | stock KERNAL load + 1000 B every 0.5 s | 4/4 LOADING hang, stopped | met (>= 1); "fewer than J" refuted: as bad as J |
+| 3 | D | as block 1 | 8/8 pass | |
+| 3 | G | D + bus-idle gate before each 1000-byte read | 8/8 pass; 42 polls skipped while the boot used the bus, gate opened at the shell (every trial ended at 32.7 s) | met |
+| 4 | K | JiffyDOS load, no polling | 8/8 pass, bytes identical | |
+| 4 | H | JiffyDOS load + the same gate | 4/4 fail, stopped: 3 ?LOAD ERROR, 1 silent 2-byte mismatch at +5461 | refuted (<= 1 predicted) |
+
+Reading:
+- **Pause is not a landing.** `machine:pause` makes the halt longer, not safer. The owner's question is answered: no.
+- **The harm is not JiffyDOS-specific.** The stock KERNAL hangs (it loses a bit, then waits for an edge that never comes); JiffyDOS corrupts or errors. Every polled arm against the machine's own load failed 4 of 4. This strengthens the backlogged upstream report: no Breadbin needed, stock ROM.
+- **The `$DD00` gate protects our boot but not the machine's load.** Gated reads opened only once per H trial, about 6 s into the load (the JiffyDOS load leaves bus-idle gaps of at least 0.2 s), and that single read broke it. The idle values seen: `$C7` idle; `$87`/`$07` drive talking (CLK low); `$4F` our ATN with DATA held; `$47` DATA held; `$27`/`$1F`/`$3F` our outputs driven.
+- **Harness consequence:** `fix/harness-idle` now waits for the machine's load with 1-byte reads only, plus a post-load read-back of the loaded file (in review). The 1-byte rate during the machine's load is not yet measured on hardware: that is the next arm.
