@@ -136,6 +136,25 @@ CONFIG = [
 READBACK_ONLY = [KERNAL_ITEM]
 
 
+def ignore_signals():
+    """SIGINT, SIGTERM, SIGHUP ignored; -> the old handlers for restore_signals()."""
+    old = {}
+    for sg in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        try:
+            old[sg] = signal.signal(sg, signal.SIG_IGN)
+        except (ValueError, OSError):          # not the main thread
+            pass
+    return old
+
+
+def restore_signals(old):
+    for sg, h in old.items():
+        try:
+            signal.signal(sg, h)
+        except (ValueError, OSError):
+            pass
+
+
 class StopSession(Exception):
     """The session stops now (mechanical symptom, `stop`, Ctrl-C, signal)."""
 
@@ -408,6 +427,7 @@ class ConfigGuard:
         self.restored = False
         self.kernal_orig = None           # the Kernal ROM value found at apply(); set only if we change it
         self.kernal_touched = False
+        self.kernal_active = None         # the Kernal ROM the machine is RUNNING (set only after a reboot that worked)
         self.stock_value = None
         self.kernal_not_restored = False
 
@@ -445,17 +465,23 @@ class ConfigGuard:
         if self.kernal_orig is None or self.kernal_orig.startswith("<"):
             raise StopSession(f"original Kernal ROM unreadable ({self.kernal_orig!r}): not changing it")
         want = self.stock_value if stock else self.kernal_orig
-        if self.get(*KERNAL_ITEM) == want:
-            return
+        if self.kernal_active == want:    # compared with what is running, not with the config: a PUT
+            return                        # whose reboot failed leaves config != running
         self.kernal_touched = True
-        self.put(*KERNAL_ITEM, want)
-        self.u.reboot()
-        self.clock.sleep(self.reboot_wait)
-        got = self.get(*KERNAL_ITEM)
-        self.log.comment(f"Kernal ROM set to {want!r} ({'stock' if stock else 'original'}), read back {got!r}")
-        if got != want:
-            raise StopSession(f"Kernal ROM read back {got!r}, wanted {want!r}: the run stops (a failed "
-                              "selection is not an arm outcome)")
+        try:
+            self.put(*KERNAL_ITEM, want)
+            self.u.reboot()
+            self.clock.sleep(self.reboot_wait)
+            got = self.get(*KERNAL_ITEM)
+            self.log.comment(f"Kernal ROM set to {want!r} ({'stock' if stock else 'original'}), read back {got!r}")
+            if got != want:
+                raise StopSession(f"Kernal ROM read back {got!r}, wanted {want!r}: the run stops (a failed "
+                                  "selection is not an arm outcome)")
+        except StopSession:
+            raise
+        except Exception as e:            # noqa: BLE001 - PUT rejected, reboot failed: never an arm outcome
+            raise StopSession(f"Kernal ROM selection failed ({type(e).__name__}: {clean(e)[:80]}): the run stops")
+        self.kernal_active = want
 
     def readback(self):
         keys = [(c, i) for c, i, _, _ in self.items] + READBACK_ONLY
@@ -471,6 +497,7 @@ class ConfigGuard:
             self.put(c, i, v)
         self.u.reboot()
         self.clock.sleep(self.reboot_wait)
+        self.kernal_active = self.kernal_orig
         rb = self.readback()
         self.log.comment("config set, read back: " + json.dumps(rb, sort_keys=True))
         print("config read-back:", json.dumps(rb, sort_keys=True), flush=True)
@@ -480,23 +507,15 @@ class ConfigGuard:
         runs (a second Ctrl-C must not leave the stock Kernal selected), every step catches
         BaseException on its own, and the reboot does not depend on the resume. Afterwards the Kernal
         read-back is compared with the value found at start: a difference sets kernal_not_restored."""
-        if not self.applied or self.restored:
-            return
-        self.restored = True
-        old = {}
-        for sg in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-            try:
-                old[sg] = signal.signal(sg, signal.SIG_IGN)
-            except (ValueError, OSError):      # not the main thread
-                pass
+        old = ignore_signals()            # first: nothing may land between here and the end
         try:
+            if not self.applied or self.restored:
+                return
+            self.restored = True
+            print("restoring the Ultimate config; Ctrl-C is ignored until done", flush=True)
             self._restore_steps()
         finally:
-            for sg, h in old.items():
-                try:
-                    signal.signal(sg, h)
-                except (ValueError, OSError):
-                    pass
+            restore_signals(old)
 
     def _restore_steps(self):
         if self.kernal_touched:
@@ -533,7 +552,16 @@ class ConfigGuard:
             pass
         print("config after restore:", json.dumps(rb, sort_keys=True), flush=True)
         if self.kernal_orig is not None and not self.kernal_orig.startswith("<"):
-            got = rb.get("/".join(KERNAL_ITEM))
+            key = "/".join(KERNAL_ITEM)
+            got = rb.get(key)
+            for _ in range(3):           # one flaky GET must not read as a failed restore
+                if got == self.kernal_orig:
+                    break
+                try:
+                    self.clock.sleep(1)
+                    got = self.get(*KERNAL_ITEM)
+                except BaseException:    # noqa: BLE001
+                    pass
             if got != self.kernal_orig:
                 self.kernal_not_restored = True
                 msg = (f"KERNAL NOT RESTORED: Kernal ROM is {got!r}, was {self.kernal_orig!r} at start; "
@@ -846,6 +874,8 @@ class Rig:
         terminal state ends the wait early. 1 byte: $D6 only, then one screen read at the limit.
         pause arms wrap the screen read in machine:pause / resume; gate arms read $DD00 three times
         first and skip the poll unless the bus looks idle (see POLL_ARMS). Returns the state or None."""
+        # Note: the three gate reads add ~0.2 s to each G/H cycle (0.7 s start to start against 0.5 s for
+        # Q/J), so G/H read the screen about 30% less often than Q/J.
         v = POLL_ARMS[arm]
         self.clock.sleep(t_from + v["first"] - self.clock.now())
         while True:
@@ -1143,8 +1173,8 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
             d = cfgdump.write_dump(client, path)
             log.comment(f"config dump {tag}: {os.path.basename(path)}; "
                         f"{len(cfgdump.non_defaults(d))} item(s) differ from default")
-        except Exception as e:                # noqa: BLE001
-            print(f"config dump {tag} failed: {e}", file=sys.stderr, flush=True)
+        except BaseException as e:            # noqa: BLE001
+            print(f"config dump {tag} failed: {e!r}", file=sys.stderr, flush=True)
 
     def on_signal(signum, frame):
         raise StopSession(f"signal {signum}")
@@ -1168,11 +1198,15 @@ def main(argv=None, client=None, clock=None, ask=None, out=print):
             pass
         status = 3
     finally:
-        guard.restore()
-        cfg_dump("end")
-        for sg, h in old.items():
-            signal.signal(sg, h)
-        log.close()
+        quiet = ignore_signals()           # first thing: the whole teardown is not interruptible
+        try:
+            guard.restore()
+            cfg_dump("end")
+        finally:
+            restore_signals(quiet)
+            for sg, h in old.items():
+                signal.signal(sg, h)
+            log.close()
     if guard.kernal_not_restored:
         return EXIT_KERNAL_NOT_RESTORED
     return status
