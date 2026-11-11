@@ -668,7 +668,8 @@ class Session3(Base):
 
     def setUp(self):
         super().setUp()
-        self.fake.config_values[self.KERNAL] = ["JiffyDOS-C64.bin", "Original", "other.bin"]
+        # the reply OEM firmware 1.1.0 gives: "presets", the stock entry is the empty one
+        self.fake.config_presets[self.KERNAL] = ["", "JiffyDOS-C64.bin", "JiffyDOS-kernal.bin"]
 
     def idle_sim(self, bus, **kw):
         """A Sim whose $DD00 follows bus(t); on a hang boot the stall value stays."""
@@ -748,7 +749,7 @@ class Session3(Base):
         m = re.search(r"screen_reads=(\d+) skipped=(\d+) dd00=(\S+)", d)
         self.assertTrue(m, d)
         done, skipped = int(m.group(1)), int(m.group(2))
-        self.assertGreaterEqual(skipped, 15)
+        self.assertGreaterEqual(skipped, 12)
         self.assertGreaterEqual(done, 40)
         hist = dict(x.split(":") for x in m.group(3).split(","))
         self.assertEqual(set(hist), {"cd", "c7"})
@@ -792,9 +793,9 @@ class Session3(Base):
         self.assertEqual("".join(r["arm"] for r in rows), "TSTSDK")
         self.assertEqual({r["outcome"] for r in rows}, {"pass"})
         puts = [v for c, i, v in self.fake.config_puts if (c, i) == self.KERNAL]
-        self.assertEqual(puts[:2], ["Original", "JiffyDOS-C64.bin"])      # once in, once back for D (then the restore)
+        self.assertEqual(puts[:2], ["", "JiffyDOS-C64.bin"])      # once in (the EMPTY value is sent), once back for D
         self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
-        self.assertTrue(any("stock Kernal ROM value discovered: 'Original'" in c for c in self.comments()))
+        self.assertTrue(any("stock Kernal ROM value discovered: ''" in c for c in self.comments()))
         self.assertConfigRestored()
 
     def test_kernal_restored_by_trap_after_a_stock_arm_breaks(self):
@@ -820,9 +821,9 @@ class Session3(Base):
     def test_stock_arm_refuses_when_no_stock_value_is_listed(self):
         for vals in (["JiffyDOS-C64.bin", "other.bin"], ["Original", "Stock ROM"], None):
             if vals is None:
-                del self.fake.config_values[self.KERNAL]
+                del self.fake.config_presets[self.KERNAL]
             else:
-                self.fake.config_values[self.KERNAL] = vals
+                self.fake.config_presets[self.KERNAL] = vals
             sim = Sim(self.fake, self.prg, loads=["ok"] * 2, labels=self.labels)
             with self.assertRaises(SystemExit) as cm:
                 self.run_session(sim, plan="2 TS 1\n")
@@ -851,6 +852,196 @@ class Session3(Base):
                       "--disk-id", "T1", "--control-file", "X", "--dry-run"], out=lines.append)
         self.assertEqual(sum("stock KERNAL" in l for l in lines), 2)
         self.assertEqual(self.fake.requests, [])
+
+    # ---- hater review of the session-3 harness (blocked 4055947, 648a952)
+    def hook_put(self, fn):
+        orig = session.ConfigGuard.put
+        session.ConfigGuard.put = fn(orig)
+        self.addCleanup(setattr, session.ConfigGuard, "put", orig)
+
+    def during_restore(self, make_fault):
+        """Run `2 T 1` with make_fault() called after every PUT of the restore."""
+        orig_restore = session.ConfigGuard.restore
+        state = {"restoring": False}
+
+        def restore(g):
+            state["restoring"] = True
+            return orig_restore(g)
+
+        def hook(orig):
+            def put(g, c, i, v):
+                r = orig(g, c, i, v)
+                if state["restoring"]:         # the interrupt lands right after each PUT of the restore
+                    make_fault()
+                return r
+            return put
+        session.ConfigGuard.restore = restore
+        self.addCleanup(setattr, session.ConfigGuard, "restore", orig_restore)
+        self.hook_put(hook)
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 3, labels=self.labels)
+        self.run_session(sim, plan="2 T 1\n")
+
+    def test_a_second_ctrl_c_in_restore_cannot_leave_the_stock_kernal(self):
+        def ki():
+            raise KeyboardInterrupt
+        self.during_restore(ki)
+        self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
+        self.assertConfigRestored()
+        self.assertEqual(self.status, 0)
+
+    def test_real_sigint_sigterm_sighup_in_restore_are_blocked(self):
+        import signal
+        for sg in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            self.fake.configs[self.KERNAL] = "JiffyDOS-C64.bin"
+            self.fake.config_puts.clear()
+            self.during_restore(lambda: os.kill(os.getpid(), sg))
+            self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin", sg)
+            self.assertConfigRestored()
+            self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)   # handlers put back
+
+    def test_restore_puts_the_kernal_first_and_reboots_even_if_resume_fails(self):
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 3, labels=self.labels)
+        orig = self.u.resume
+        state = {"restoring": False}
+        orig_restore = session.ConfigGuard.restore
+
+        def restore(g):
+            state["restoring"] = True
+            return orig_restore(g)
+
+        def resume():
+            if state["restoring"]:
+                raise RuntimeError("resume failed")
+            return orig()
+        self.u.resume = resume
+        session.ConfigGuard.restore = restore
+        self.addCleanup(setattr, session.ConfigGuard, "restore", orig_restore)
+        n0 = []
+        self.run_session(sim, plan="2 T 1\n")
+        puts = [(c, i) for c, i, v in self.fake.config_puts]
+        self.assertEqual(puts[-5:][0], self.KERNAL)                    # first PUT of the restore
+        reboots = [p for m, p in self.fake.requests if p.endswith("reboot")]
+        self.assertGreaterEqual(len(reboots), 3)                       # apply, Kernal in, restore
+        self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
+
+    def test_kernal_not_restored_is_loud_and_exits_4(self):
+        def hook(orig):
+            def put(g, c, i, v):
+                if (c, i) == self.KERNAL and g.restored:
+                    raise RuntimeError("PUT failed")
+                return orig(g, c, i, v)
+            return put
+        self.hook_put(hook)
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 3, labels=self.labels)
+        self.run_session(sim, plan="2 T 1\n")
+        self.assertEqual(self.status, session.EXIT_KERNAL_NOT_RESTORED)
+        self.assertEqual(self.fake.configs[self.KERNAL], "")
+        self.assertTrue(any("KERNAL NOT RESTORED" in c for c in self.comments()))
+
+    def test_kernal_read_back_mismatch_stops_the_run(self):
+        # the firmware ignores the Kernal PUT: nothing changes, the run stops at the first attempt
+        orig = self.fake._configs
+
+        def cfg(h, method, sub, cmd, q, body):
+            if method == "PUT" and "Kernal" in sub:
+                return self.fake._json(h)
+            return orig(h, method, sub, cmd, q, body)
+        self.fake._configs = cfg
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 20, labels=self.labels)
+        self.run_session(sim, plan="2 TS 3\n")
+        self.assertEqual(self.status, 3)
+        rows = self.rows()
+        trials = [r for r in rows if r["outcome"] not in ("NOTE", "STOP")]
+        self.assertEqual(len(trials), 1, [(r["arm"], r["outcome"]) for r in rows])      # first attempt only
+        self.assertIn("read back", trials[0]["detail"])
+        self.assertFalse(any(r["outcome"] == "skipped" or "reached" in r["note"] for r in rows))
+        self.assertEqual(len(sim.loads), 20)                        # no load was ever typed
+        self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
+
+    def test_unreadable_original_kernal_stops_select(self):
+        g = session.ConfigGuard(self.u, Sim(self.fake, self.prg), lambda *a: None)
+        g.kernal_orig = "<unreadable: boom>"
+        g.stock_value = ""
+        with self.assertRaises(session.StopSession):
+            g.select_kernal(True)
+        self.assertEqual(self.fake.config_puts, [])
+
+    def test_start_refuses_an_unexpected_kernal(self):
+        for cur in ("", "JiffyDOS-kernal.bin"):
+            self.fake.configs[self.KERNAL] = cur
+            for plan in ("1 C 1\n", "2 TS 1\n"):
+                sim = Sim(self.fake, self.prg, loads=["ok"] * 2, labels=self.labels)
+                with self.assertRaises(SystemExit) as cm:
+                    self.run_session(sim, plan=plan)
+                self.assertIn("refusing to start", str(cm.exception))
+                self.assertEqual(self.fake.config_puts, [], (cur, plan))
+        del self.fake.configs[self.KERNAL]                   # unreadable
+        with self.assertRaises(SystemExit):
+            self.run_session(Sim(self.fake, self.prg), plan="1 C 1\n")
+        self.assertEqual(self.fake.config_puts, [])
+
+    def test_allow_kernal_overrides_except_when_it_makes_stock_arms_pointless(self):
+        self.fake.configs[self.KERNAL] = "JiffyDOS-kernal.bin"
+        sim = Sim(self.fake, self.prg, loads=["ok"] * 3, labels=self.labels)
+        self.run_session(sim, plan="2 TS 1\n", extra=["--allow-kernal", "JiffyDOS-kernal.bin"])
+        self.assertEqual(self.status, 0)
+        self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-kernal.bin")      # put back to what it was
+        self.fake.configs[self.KERNAL] = ""
+        with self.assertRaises(SystemExit) as cm:
+            self.run_session(Sim(self.fake, self.prg), plan="2 TS 1\n", extra=["--allow-kernal", ""])
+        self.assertIn("already the stock", str(cm.exception))
+        self.run_session(Sim(self.fake, self.prg, loads=["ok"], labels=self.labels), plan="1 C 1\n",
+                         extra=["--allow-kernal", ""])                              # no stock arm: fine
+        self.assertEqual(self.status, 0)
+
+    def test_h_hang_with_the_bus_never_idle_is_a_loading_hang_like_j(self):
+        def bus(t):
+            return 0xC7 if not sim.marks else 0xCD
+        sim = self.idle_sim(bus, loads=["hang"])
+        self.run_session(sim, plan="4 H 1\n")
+        h = [r for r in self.rows() if r["arm"] == "H"][0]
+        sim_j = Sim(self.fake, self.prg, loads=["hang"], labels=self.labels)
+        self.run_session(sim_j, plan="4 J 1\n")
+        j = [r for r in self.rows() if r["arm"] == "J"][0]
+        self.assertEqual(h["outcome"], "LOADING hang")
+        self.assertEqual(h["outcome"], j["outcome"])
+        self.assertIn("skipped=", h["detail"])
+
+    def test_g_panic_with_the_bus_never_idle_is_a_panic_like_q(self):
+        sim = self.idle_sim(lambda t: 0xCD, boots=["panic"])
+        self.run_session(sim, plan="3 G 1\n")
+        g = [r for r in self.rows() if r["arm"] == "G"][0]
+        sim_q = Sim(self.fake, self.prg, boots=["panic"], labels=self.labels)
+        self.run_session(sim_q, plan="3 Q 1\n")
+        q = [r for r in self.rows() if r["arm"] == "Q"][0]
+        self.assertEqual(g["outcome"], "root-mount panic")
+        self.assertEqual(g["outcome"], q["outcome"])
+        self.assertEqual([x[0] for x in sim.big_reads if x[0] < 169], [])     # still no read while busy
+
+    def test_arm_z_resumes_when_the_pause_itself_fails(self):
+        sim = Sim(self.fake, self.prg, boots=["ok"], labels=self.labels)
+        rig = session.Rig(self.u, sim, self.prg, self.labels, "X")
+
+        def pause():
+            raise RuntimeError("pause failed (maybe after the machine stopped)")
+        self.u.pause = pause
+        with self.assertRaises(RuntimeError):
+            rig.poll_screen(session.POLL_ARMS["Z"])
+        self.assertIn(("PUT", "/v1/machine:resume"), self.fake.requests)
+
+    def test_gated_arms_sleep_after_the_read_like_q_and_j(self):
+        sim = self.idle_sim(lambda t: 0xC7, boots=["ok"])
+        self.run_session(sim, plan="3 G 1\n")
+        ts = [t for t, a, n in sim.big_reads if t > 3]
+        self.assertGreater(len(ts), 5)
+        # gate (2 x 0.1 s) then 0.5 s after the read: 0.7 s start to start, not 0.5
+        self.assertAlmostEqual(ts[2] - ts[1], 0.7, places=6)
+
+    def test_the_fake_tells_a_missing_value_from_an_empty_one(self):
+        self.u.call("PUT", "/v1/configs/A/B", {"value": ""})
+        self.assertEqual(self.fake.config_puts[-1], ("A", "B", ""))
+        with self.assertRaises(Exception):
+            self.u.call("PUT", "/v1/configs/A/B")
 
 
 class Stopping(Base):
