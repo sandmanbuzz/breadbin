@@ -119,8 +119,10 @@ class Keyboard(unittest.TestCase):
         self.v.xup("s")
         self.v.xkey("Return")
         # 'a' repeats while alone, then the newer key 's' takes over: a run of
-        # a's followed by a run of s's, and nothing else on the screen can match
-        self.until(lambda l: re.search(r"a+s+", "".join(l)), what="a run of a then s")
+        # a's followed by a run of s's. The last three lines must be the typed line,
+        # echo's output of the same run and a new prompt: a search of the whole screen
+        # would match the typed line ("/ $ echo aaass") even if the command never ran
+        self.until(lambda l: self.echoed(l, r"a+s+"), what="echo printing a run of a then s, and a new prompt")
 
     def test_repeat(self):
         self.v.xtype("echo ")
@@ -128,7 +130,16 @@ class Keyboard(unittest.TestCase):
         time.sleep(1.5)
         self.v.xup("b")
         self.v.xkey("Return")
-        self.until(lambda l: "bbb" in "".join(l), what="repeated b")
+        # REP_DELAY 16 and REP_SPEED 4 jiffies (kbd.s) give about 20 b's in 1.5 s.
+        # At least 8 shows the repeat runs at its rate; at most 30 keeps the typed
+        # line from wrapping, whose second row would look like echo's output
+        self.until(lambda l: self.echoed(l, r"b{8,30}"), what="echo printing repeated b, and a new prompt")
+
+    @staticmethod
+    def echoed(lines, pattern):
+        """The screen ends with "/ $ echo RUN", RUN and a new prompt, RUN matching pattern."""
+        return (len(lines) >= 3 and lines[-1] == "/ $" and re.fullmatch(pattern, lines[-2]) is not None
+                and lines[-3] == "/ $ echo " + lines[-2])
 
     def test_run_stop_key(self):
         self.v.xtype("sleep 100\n")
