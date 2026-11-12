@@ -160,7 +160,9 @@ class B(unittest.TestCase):
         cls.tools = session5.build_tools(TREE, os.path.join(cls.tmp, "tools.d64"))
         cls.disk = os.path.join(cls.tmp, "bb.d64")
         shutil.copyfile(cls.p["d64"], cls.disk)
-        cls.v = Vice(cls.disk, reu=True, extra=["-drive9type", "1541", "-9", cls.tools])
+        # 2 MB as on the Ultimate: the block cache needs 11 banks above the 8 of the /tmp RAM disk, so
+        # with 512 KB there is no cache and wv's cache-off read-back path would go untested
+        cls.v = Vice(cls.disk, reu=2048, extra=["-drive9type", "1541", "-9", cls.tools])
         cls.v.wait_shell()
         out = cls.v.run("mount 9 /mnt")
         assert not out.strip(), out
@@ -187,7 +189,7 @@ class B(unittest.TestCase):
         self.assertEqual(got, self.facts["cksum"])
         ls = self.v.run("ls /bin")
         self.assertEqual(sorted(ls.split()), self.facts["bin"])
-        self.assertEqual(self.v.run("wc /bin/as").strip(), self.facts["wc"])
+        self.assertEqual(self.v.run("wc /bin/as").split(), self.facts["wc"].split())
 
     def test_2_wv_reports_a_failure(self):
         out = self.v.run(f"/mnt/wv 3 /nodir/x /bin/as {self.labels['io_nread']}")
@@ -199,7 +201,7 @@ class B(unittest.TestCase):
         cache0 = self.v.run("cache")
         self.v.type("clear\n")
         time.sleep(1)
-        self.v.type(f"/mnt/wv {B_N} /tmp/s5b /bin/as {self.labels['io_nread']}\n")
+        self.v.type(f"/mnt/wv {B_N} /home/s5b /bin/as {self.labels['io_nread']}\n")
         scr = self.v.wait_for("wv end", timeout=7200)
         t1, io1 = self.ticks(), self.iostat()
         cache1 = self.v.run("cache")
@@ -214,7 +216,8 @@ class B(unittest.TestCase):
         self.assertEqual(io1["io_nwfail"], 0)
         # each cycle's read-back went to the bus: at least one bus read per cycle
         self.assertGreaterEqual((io1["io_nread"] - io0["io_nread"]) & 0xFFFF, B_N)
-        self.assertIn("reu cache: on", cache1)       # wv put it back
+        self.assertIn("reu cache: on", cache0)       # so wv's cache-off read-back path ran
+        self.assertIn("reu cache: on", cache1)       # and wv put it back
 
 
 if __name__ == "__main__":

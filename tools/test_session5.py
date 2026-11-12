@@ -197,7 +197,9 @@ class Sim:
         if cmd == "/mnt/cksum /bin/as":
             how = self.sums.pop(0) if self.sums else "ok"
             return [self.facts["cksum"] if how == "ok" else "1 7686 /bin/as"]
-        m = re.match(r"/mnt/wv (\d+) /tmp/s5b /bin/as (\d+)$", cmd)
+        if cmd == "wc /bin/as":
+            return [self.facts["wc"]]                 # right-aligned, as wc prints it
+        m = re.match(r"/mnt/wv (\d+) /home/s5b /bin/as (\d+)$", cmd)
         if m:
             n = int(m.group(1))
             assert int(m.group(2)) == self.labels["io_nread"]
@@ -381,6 +383,11 @@ class Runner(unittest.TestCase):
         self.assertEqual(rows[0]["ls_bin"], f"ok {len(self.facts['bin'])}")
         self.assertEqual(len([c for _, c in self.sim.log if c.startswith("load")]), 3)
         self.assert_restored()
+
+    def test_r_pass_with_wc(self):
+        st = self.go(["r", "-n", "2", "--sum", "wc"])
+        self.assertEqual(st, 0, self.out)
+        self.assertEqual([r["outcome"] for r in self.tsv("r")], ["pass"] * 2)
 
     def test_r_stops_at_the_first_failure(self):
         st = self.go(["r", "-n", "5"], sums=["ok", "bad"])

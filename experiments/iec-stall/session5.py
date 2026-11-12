@@ -24,7 +24,7 @@ Arms (counts: -n; defaults 300, 300, 50):
      nothing is written) if the disk has no free CBM blocks: the Breadbin release disk has none (c64fs marks
      every block used in the CBM BAM). W needs a CBM disk with free blocks in drive 8 (see the prompt).
   B  our kernel write-verify: boot as R does, `mount 9 /mnt` (the tools disk in drive A, bus 9), run
-     `/mnt/wv N /tmp/s5b /bin/as <io_nread>` (session5/wv.s says what one cycle does), NO request for the wait,
+     `/mnt/wv N /home/s5b /bin/as <io_nread>` (session5/wv.s says what one cycle does), NO request for the wait,
      then one gated screen read; the IOSTAT counters before and after.
   R  boot cycle: per cycle a new tools/ultimatetest.UltimateTarget (reset; the machine's own `load"*",8,1`
      of the release image from the physical 1541, no request during it; the loaded bytes read back and
@@ -68,6 +68,8 @@ EXIT_PASS, EXIT_FAIL, EXIT_STOP, EXIT_REFUSED, EXIT_INVALID = 0, 1, 3, 5, 6
 # Steps (W_FIELDS "step"): 1 open 15 "i0"; 2 open the "#" buffer; 3 U1 of 18/0 (the BAM); 4 scratch;
 # 5 open for writing; 6 write 254 bytes; 7 close; 8 open for reading; 9 read + compare (ST must be 0 before
 # the last byte); 10 ST at the last byte must be 64 (EOI); 11 close; 12 the final scratch.
+# ST ($90, 144) is cleared before each step that is not an OPEN (OPEN clears it; CLOSE and PRINT# do not, and
+# the KERNAL ORs bits into it, so the EOI of the last INPUT#15 would otherwise still read as 64: seen under VICE).
 # After every step: ST (saved before the DOS status is read, which changes ST) must be 0 and the DOS status
 # (INPUT#15) 00, or 01 with exactly 1 file scratched (0 allowed on cycle 1). Pattern: byte i of cycle k is
 # (k*7 + i*13) AND 255, the same as wv.s. Lines 600-690 count the failure and stop. No "@0:" anywhere.
@@ -80,21 +82,21 @@ W_PROGRAM = """\
 45 if e then 620
 50 p=2:open 2,8,2,"#":q=st:gosub 800:if q then 600
 55 if e then 620
-60 p=3:print#15,"u1:2,0,18,0":q=st:gosub 800:if q then 600
+60 p=3:poke 144,0:print#15,"u1:2,0,18,0":q=st:gosub 800:if q then 600
 65 if e then 620
 70 c=0:for i=0 to 143:get#2,a$:a=asc(a$+chr$(0)):if i>3 and (i and 3)=0 and i<>72 then c=c+a
 75 next:close 2:poke r+18,c and 255:poke r+19,int(c/256)
 80 if c<1 then poke r+14,4:print "s5w refused: 0 blocks free":goto 950
 100 for k=1 to n:poke r+15,k and 255:poke r+16,int(k/256)
-110 p=4:print#15,"s0:s5w":q=st:gosub 800:if q then 600
+110 p=4:poke 144,0:print#15,"s0:s5w":q=st:gosub 800:if q then 600
 115 if e<>1 then 620
 120 if u<>1 and not (k=1 and u=0) then poke r+26,u:goto 620
 200 p=5:open 3,8,3,"s5w,s,w":q=st:gosub 800:if q then 600
 205 if e then 620
-210 p=6:q=0:for i=0 to 253:print#3,chr$((k*7+i*13) and 255);:q=q or st:next
+210 p=6:q=0:poke 144,0:for i=0 to 253:print#3,chr$((k*7+i*13) and 255);:q=q or st:next
 215 gosub 800:if q then 600
 217 if e then 620
-220 p=7:close 3:q=st:gosub 800:if q then 600
+220 p=7:poke 144,0:close 3:q=st:gosub 800:if q then 600
 225 if e then 620
 300 p=8:open 3,8,3,"s5w,s,r":q=st:gosub 800:if q then 600
 305 if e then 620
@@ -103,11 +105,11 @@ W_PROGRAM = """\
 320 if i<253 and q then 600
 325 next:p=10:if q<>64 then 600
 330 gosub 800:if e then 620
-335 p=11:close 3:q=st:gosub 800:if q then 600
+335 p=11:poke 144,0:close 3:q=st:gosub 800:if q then 600
 340 if e then 620
 345 poke r+4,k and 255:poke r+5,int(k/256):if k-int(k/25)*25=0 then print "s5w";k
 350 next k
-400 p=12:print#15,"s0:s5w":q=st:gosub 800:if q then 600
+400 p=12:poke 144,0:print#15,"s0:s5w":q=st:gosub 800:if q then 600
 405 if e<>1 then 620
 410 poke r+14,2:goto 950
 600 poke r+12,q:x=r+8:goto 680
@@ -605,7 +607,7 @@ class Arms:
         wait = self.a.wait if self.a.wait is not None else B_WAIT_BASE + n * B_CYCLE_EST * B_WAIT_FACTOR
         tsv = Tsv(os.path.join(self.dir, "b.tsv"), B_COLS)
         nread = labels["io_nread"]
-        cmd = f"/mnt/wv {n} /tmp/s5b /bin/as {nread}"
+        cmd = f"/mnt/wv {n} /home/s5b /bin/as {nread}"
         tsv.comment(f"arm B: N={n}; command {cmd!r}; wait {wait:.0f} s with no request; "
                     f"program experiments/iec-stall/session5/wv.s, built against the release tree")
         start, t0 = now_iso(), self.clock.monotonic()
@@ -734,7 +736,7 @@ class Arms:
                 stage = "sum"
                 got = t.run(sum_cmd, timeout=90).strip()
                 row["sum_got"] = got
-                if got != want_sum:
+                if got.split() != want_sum.split():          # wc right-aligns its counts
                     why.append(f"{sum_cmd}: {got!r}")
                 stage = "iostat"
                 io = read_iostat(t, labels)
@@ -792,7 +794,7 @@ def parse_plan(text):
 DISK_PROMPT = {
     "W": "Arm W writes and scratches a file S5W on the disk in drive 8 and needs free CBM blocks (the release "
          "disk has none: W refuses on it). Put the W disk in drive 8, then press Enter: ",
-    "B": "Arms B and R need the release image on the disk in drive 8 (B writes /tmp/s5b on it). Put the release "
+    "B": "Arms B and R need the release image on the disk in drive 8 (B writes /home/s5b on it). Put the release "
          "disk in drive 8, then press Enter: ",
 }
 
