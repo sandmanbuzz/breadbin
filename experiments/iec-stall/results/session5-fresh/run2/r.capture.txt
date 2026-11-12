@@ -1,0 +1,62 @@
+capture R 2026-11-12T16:56:33Z: cycle 28: /mnt/cksum /bin/as: 'sh: /mnt/cksum: i/o error'; io_nfail=1 io_nwfail=0
+capture reads: after an idle verdict, paced 0.1 s apart
+bytes: st=40 ba=08 dd00=c7
+decode.py:
+experiments/iec-stall/results/session5-fresh/run2/r-kernel.prg {'io_out': '00', 'io_base': '07', 'io_b': '00', 'io_n': '00', 'io_to': '04', 'io_pend': '00', 'io_held': '30', 'io_eoi': '00', 'io_inf': '01', 'io_sx': '00', 'io_sy': '0a', 'ie_dev': '09', 'ie_sa': '0f', 'ie_len': '01', 'ie_len2': '60'}
+    stack: user_ret+0 < __KRAM_FILEOFFS__+19384 < sys_return+0 < @blk+7 < check_signal+0 < @idle+3 < __KRAM_FILEOFFS__+25588 < @t+8 < @try+3
+
+iostat: {"io_nread": 6, "io_nretry": 0, "io_nfail": 1, "io_neoi": 0, "io_nwretry": 0, "io_nwfail": 0, "io_ltrk": 3, "io_lsct": 20, "io_lidx": 255, "io_ltry": 3, "io_lst": 64, "io_lwn": 0, "io_last": "ltrk=03;lsct=14;lidx=ff;ltry=03;lst=40;lwn=00"}
+ticks_jiffies=940
+screen:
+/ $ cache
+reu cache: on
+  hits 99
+  bus reads 0
+  bus errors 0
+/ $
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+gate_races=0 key_candidates=0
+recent gate events (oldest first):
+  paced read $DD00 len 1 t=218107.154-218107.163
+  paced read $DD00 len 1 t=218107.263-218107.271
+  paced read $DD00 len 1 t=218107.371-218107.379
+  idle raw=$C7,$C7,$C7 t=218107.163,218107.271,218107.380
+  read $0400 len 1000 t=218107.380-218107.392
+  paced read $DD00 len 1 t=218107.492-218107.500
+  paced read $DD00 len 1 t=218107.600-218107.609
+  paced read $DD00 len 1 t=218107.709-218107.717
+  idle raw=$C7,$C7,$C7 t=218107.500,218107.609,218107.717
+  read $E663 len 17 t=218107.717-218107.728
+  paced read $DD00 len 1 t=218107.828-218107.836
+  paced read $DD00 len 1 t=218107.936-218107.944
+  paced read $DD00 len 1 t=218108.044-218108.053
+  idle raw=$C7,$C7,$C7 t=218107.836,218107.944,218108.053
+  read $0400 len 1000 t=218108.053-218108.065
+  paced read $DD00 len 1 t=218108.166-218108.174
+  paced read $DD00 len 1 t=218108.274-218108.282
+  paced read $DD00 len 1 t=218108.382-218108.391
+  idle raw=$C7,$C7,$C7 t=218108.174,218108.282,218108.391
+  paced read $DD00 len 1 t=218109.166-218109.178
+  paced read $DD00 len 1 t=218109.278-218109.286
+  paced read $DD00 len 1 t=218109.386-218109.394
+  idle raw=$C7,$C7,$C7 t=218109.178,218109.286,218109.394
+  read $0400 len 1000 t=218109.394-218109.407
+
