@@ -9,8 +9,10 @@
 ;   step 5  evict: read 8 x 256 bytes of EVICT (cache on), so none of the 6 RAM block
 ;           buffers still holds PATH's data block
 ;   step 6  REU cache off for the read-back (writes keep the cache in step, so with it on
-;           the read would be served from the REU, not the disk); note io_nread (the 16-bit
-;           kernel counter at address NREAD, decimal); open PATH O_RDONLY
+;           the read would be served from the REU, not the disk); open PATH O_RDONLY; then
+;           note io_nread (the 16-bit kernel counter at address NREAD, decimal), so only the
+;           data reads of step 7 can move it
+; PATH must be on the boot drive: with an REU, /tmp is a RAM disk and never reaches the bus.
 ;   step 7  read until EOF
 ;   step 8  close; the cache back on if it was on
 ;   step 9  length must be 254            step 10  bytes must match
@@ -191,12 +193,6 @@ close1: lda #4
         bcs fail_e
         ldx #1
 @noc:   stx was_on          ; 1 if the cache was on (we turned it off)
-        ldy #0
-        lda (nr),y
-        sta nr0
-        iny
-        lda (nr),y
-        sta nr0+1
         lda #6
         sta step
         jsr setpth
@@ -206,6 +202,12 @@ close1: lda #4
         jmp fail_c
 :
         sta fd
+        ldy #0              ; io_nread after the open: the path lookup's reads do not count
+        lda (nr),y
+        sta nr0
+        iny
+        lda (nr),y
+        sta nr0+1
         ; ---- 7 read to EOF (at most 300 bytes asked for)
         lda #7
         sta step
