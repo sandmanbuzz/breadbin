@@ -148,11 +148,13 @@ W_LEN = 29
 W_MAGIC = b"S5W"
 W_STATES = {0: "not started", 1: "running", 2: "done", 3: "stopped at a failure", 4: "refused (no free blocks)"}
 # Per-cycle time on the stock KERNAL under VICE (tests/session5_vice.py, W_CYCLE_VICE there); the wait is
-# W_WAIT_FACTOR times it per cycle plus W_WAIT_BASE. JiffyDOS on hardware is faster, the stock KERNAL slower.
-W_CYCLE_EST = 4.0
+# W_WAIT_FACTOR times it per cycle plus W_WAIT_BASE. VICE run on 73bb73e: W 17.213 s per cycle (stock KERNAL,
+# 1541 true drive emulation, 300 cycles in 5164 s), B 12.911 s per cycle (REU cache on, 300 in 3873 s with
+# the typing). So the default waits are about 4.3 h (W) and 3.2 h (B) with no request; --wait shortens them.
+W_CYCLE_EST = 17.2
 W_WAIT_FACTOR = 3.0
 W_WAIT_BASE = 60.0
-B_CYCLE_EST = 3.0
+B_CYCLE_EST = 12.9
 B_WAIT_FACTOR = 3.0
 B_WAIT_BASE = 60.0
 
