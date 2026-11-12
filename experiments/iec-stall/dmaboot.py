@@ -53,5 +53,9 @@ v = u.readmem(base, 15)
 io = {n: f"{x:x}" for n, x in __import__("iostat").iostat_dump(u, lbl).items()}
 open(img + ".stall", "a").write(str({n: f"{b:02x}" for n, b in zip(names, v)}) + (" iostat:" + str(io) if io else "")
                                  + " stack:" + u.readmem(0x1C0, 64).hex() + "\n")
+import iostat  # noqa: E402
+up = iostat.uptime(u, lbl)      # after the limit: two 3-byte reads
+with open(img + ".stall", "a") as f:
+    f.write("# " + up + "\n")
 print(f"STUCK after 170s; last line {lines()[-1]!r}; $90={u.readmem(0x90, 1).hex()} "
-      f"$BA={u.readmem(0xBA, 1).hex()} $DD00={dd:02x}")
+      f"$BA={u.readmem(0xBA, 1).hex()} $DD00={dd:02x} {up}")

@@ -1,0 +1,2 @@
+# session 3, block 1 alone (split from session3.plan; same trials and order)
+1  DZ 8     # root mount: D clean vs Z (machine:pause, 1000-byte screen read, machine:resume every 0.5 s from the start)

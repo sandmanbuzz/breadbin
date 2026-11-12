@@ -56,6 +56,12 @@ class FakeUltimate:
         self.runs = []          # dicts: how ("upload" or "file"), size, loaded
         self.streams = {}
         self.menu = bytearray(2000)
+        self.configs = {}       # ("Category", "Item") -> value; /v1/configs/<category>/<item>
+        self.config_defaults = {}   # ("Category", "Item") -> default, shown by the detail GET
+        self.config_values = {}   # ("Category", "Item") -> allowed values, shown by the detail GET as "values"
+        self.config_presets = {}  # ("Category", "Item") -> allowed values, shown as "presets" (OEM 1.1.0 shape)
+        self.config_puts = []   # (category, item, value) of every PUT, in order
+        self.on_readmem = None  # optional callback(address, length) for every readmem
         self._server = None
 
     # ---- lifecycle
@@ -110,7 +116,7 @@ class FakeUltimate:
         n = int(h.headers.get("Content-Length") or 0)
         body = h.rfile.read(n) if n else b""
         u = urllib.parse.urlsplit(h.path)
-        q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query, keep_blank_values=True).items()}
         self.requests.append((method, u.path))
         if self.password is not None and h.headers.get("X-Password") != self.password:
             return self._reply(h, 403, b"{}")
@@ -229,6 +235,37 @@ class FakeUltimate:
         if cmd in ("remove", "reset", "on", "off", "set_mode"):
             return self._json(h)
         self._json(h, 404, [f"unknown drive command {cmd}"])
+
+    def _configs(self, h, method, sub, cmd, q, body):
+        parts = urllib.parse.unquote(sub or "").split("/", 1)
+        if cmd:
+            return self._json(h, 404, ["no such config command"])
+        if parts == [""] and method == "GET":        # GET /v1/configs: the categories
+            return self._json(h, categories=sorted({c for c, _ in self.configs}))
+        if len(parts) == 1 and method == "GET":      # GET /v1/configs/<category>: items, current values
+            items = {i: v for (c, i), v in sorted(self.configs.items()) if c == parts[0]}
+            if not items:
+                return self._json(h, 400, ["no such config category"])
+            return self._json(h, **{parts[0]: items})
+        if len(parts) != 2:
+            return self._json(h, 404, ["config route is /v1/configs/<category>/<item>"])
+        key = (parts[0], parts[1])
+        if method == "PUT":
+            if "value" not in q:       # a missing value is not an empty one (`?value=` sets the empty entry)
+                return self._json(h, 400, ["PUT without a value"])
+            self.configs[key] = q["value"]
+            self.config_puts.append(key + (self.configs[key],))
+            return self._json(h)
+        if key not in self.configs:
+            return self._json(h, 400, ["no such config item"])
+        detail = {"current": self.configs[key]}
+        if key in self.config_defaults:
+            detail["default"] = self.config_defaults[key]
+        if key in self.config_values:
+            detail["values"] = list(self.config_values[key])
+        if key in self.config_presets:
+            detail["presets"] = list(self.config_presets[key])
+        self._json(h, **{key[0]: {key[1]: detail}})
 
     def _streams(self, h, method, sub, cmd, q, body):
         if cmd == "start":
