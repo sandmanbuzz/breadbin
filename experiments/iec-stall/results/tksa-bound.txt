@@ -1,0 +1,15 @@
+bus_tksa bound: VICE halt-injection counts (HALTLEAN=1, P=1M, CACHE=0, ROUNDS=2, 1 boot per phase)
+
+arm                                    boots  hung in bus_tksa  other hangs  silent wrong checksums
+before (io/h11-vice, N=300/1200)       44     1                 3 (idle)     0
+after  (final code, N=300/1200)        44     0                 1            5 (N=1200)
+control V0 (old wait, new layout, 1200) 36    0                 2 (1 runaway) 1
+
+Forced timeout (experiment build, not committed; one call in 32 paused ~200 cycles):
+tk_nto 18, io_nretry 18, 240 reads, all checksums right.
+At one call in 8: 3 tries failed on one block, clean give-up, "cannot start /bin/init" panic, no hang.
+
+Silent corruption is not caused by the bound (V0 shows it with the old logic); same wrong values as h11-vice.txt.
+Not run: JiffyDOS ROMs, hardware, N=600.
+Tests: test-host 488 (shard ctrl-c test times out under load, passes alone), test-smoke 4 OK,
+Boot/Drives/Persistence/REU/Cache 46 OK.

@@ -643,9 +643,7 @@ cbm_write:
         dec cb_n+1
 @dl:    dec cb_n
         jmp @l
-@d:     jsr iec_out_end
-        clc
-        rts
+@d:     jmp iec_out_end     ; carry set (A = EIO) if a byte did not arrive
 @e:     lda #EIO
         sec
         rts
