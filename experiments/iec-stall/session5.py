@@ -4,12 +4,16 @@
 Run every arm under the lock, with the address only in the environment:
 
     export BREADBIN_ULTIMATE=<host>      # never written to any file by this script
-    tools/with-lock -r ultimate -- python3 experiments/iec-stall/session5.py w --tree TREE
-    tools/with-lock -r ultimate -- python3 experiments/iec-stall/session5.py b --tree TREE
-    tools/with-lock -r ultimate -- python3 experiments/iec-stall/session5.py r --tree TREE
-    tools/with-lock -r ultimate -- python3 experiments/iec-stall/session5.py plan experiments/iec-stall/plans/session5.plan --tree TREE
+    tools/with-lock -r ultimate -- python3 experiments/iec-stall/session5.py w --tree TREE --rev REV
+    tools/with-lock -r ultimate -- python3 experiments/iec-stall/session5.py b --tree TREE --rev REV
+    tools/with-lock -r ultimate -- python3 experiments/iec-stall/session5.py r --tree TREE --rev REV
+    tools/with-lock -r ultimate -- python3 experiments/iec-stall/session5.py plan experiments/iec-stall/plans/session5.plan --tree TREE --rev REV
     python3 experiments/iec-stall/session5.py tools --tree TREE     # build the tools disk only; no network
     python3 experiments/iec-stall/session5.py plan PLAN --tree TREE --dry-run
+
+REV must equal TREE/build/rev.txt and must not end in "+" (a dirty build): the run refuses otherwise.
+--no-prompt is refused for a plan that has W together with B or R (the disk in drive 8 changes between them);
+EOF at a prompt stops the run.
 
 TREE is the frozen release worktree (fix/io-release), built: TREE/build/breadbin.prg, breadbin.d64 (the image
 on the physical 1541), kernel.lbl, lib/breadbin.lib, and its include/, src/prog.cfg and tools/cx.py, which
@@ -19,7 +23,7 @@ Arms (counts: -n; defaults 300, 300, 50):
   W  ROM-KERNAL write-verify: the BASIC program W_PROGRAM (below) is tokenized here, written to $0801 by DMA
      while the bus is idle at READY, and RUN on the machine's own KERNAL against the physical 1541 on drive 8.
      It keeps its counts at $C000 (W_FIELDS) and prints them. The harness then makes NO request for the wait
-     (estimate from VICE times 2, plus a margin; --wait), gates on an idle bus and reads $C000 once.
+     (estimate times 3, plus a margin; --wait), gates on an idle bus and reads $C000 once.
      The program first reads the BAM (U1 into a "#" buffer) and refuses to start (state 4, not a failure;
      nothing is written) if the disk has no free CBM blocks: the Breadbin release disk has none (c64fs marks
      every block used in the CBM BAM). W needs a CBM disk with free blocks in drive 8 (see the prompt).
@@ -30,6 +34,10 @@ Arms (counts: -n; defaults 300, 300, 50):
      of the release image from the physical 1541, no request during it; the loaded bytes read back and
      compared; run), gate log on; login; `mount 9 /mnt`; `ls /bin` (the image's names, and the same text as
      cycle 1); `/mnt/cksum /bin/as` against the value computed here from the image; IOSTAT read back.
+A wait that ends with the workload unfinished is a HANG: the arm then polls every 30 s (paced, gated reads)
+until the workload ends or stops moving, and records that in the after_limit column; the outcome stays HANG.
+Outcomes per row: PASS, FAIL, HANG, SETUP (W: the program never reached READY/ran; stop), STOP (a network
+error to the Ultimate or a signal; the row is written, then the run stops), REFUSED (W), INVALID (B).
 Every arm: stop at the first failure (protocol "Failures"); capture $90/$BA/$DD00, the IEC variables and
 the stack (decode.py), the screen and the counters to results/session5/<arm>.capture.txt; one TSV per arm
 (results/session5/<arm>.tsv, appended, fsynced per row); the gate log to <arm>.gate.log. The Ultimate
@@ -37,7 +45,7 @@ config is the sessions 1-4 one (session.CONFIG: SoftIEC off, drive A on bus 9, D
 read back at the start, restored in a finally with signals ignored and read back (session.ConfigGuard). The
 run refuses unless the Kernal ROM is JiffyDOS-C64.bin.
 
-Exit status: 0 pass, 1 failure (an arm failed), 3 stopped (signal, Ctrl-C, setup problem), 5 W refused
+Exit status: 0 pass, 1 failure (an arm failed), 3 stopped (signal, Ctrl-C, setup problem, network error), 5 W refused
 (no free blocks; nothing ran), 6 B invalid (its read-backs did not reach the bus), 2 usage,
 4 the Kernal ROM was not restored (wins).
 """
@@ -59,6 +67,8 @@ TOOLS = os.path.join(HERE, "..", "..", "tools")
 sys.path.insert(0, HERE)
 sys.path.insert(0, TOOLS)
 import session  # noqa: E402  ConfigGuard, CONFIG, signal helpers (no side effects at import)
+from ultimate import UltimateError  # noqa: E402
+from ultimatetest import IDLE_GAP  # noqa: E402
 
 RESULTS = os.path.join(HERE, "results", "session5")
 DEFAULT_N = {"W": 300, "B": 300, "R": 50}
@@ -71,7 +81,8 @@ EXIT_PASS, EXIT_FAIL, EXIT_STOP, EXIT_REFUSED, EXIT_INVALID = 0, 1, 3, 5, 6
 # ST ($90, 144) is cleared before each step that is not an OPEN (OPEN clears it; CLOSE and PRINT# do not, and
 # the KERNAL ORs bits into it, so the EOI of the last INPUT#15 would otherwise still read as 64: seen under VICE).
 # After every step: ST (saved before the DOS status is read, which changes ST) must be 0 and the DOS status
-# (INPUT#15) 00, or 01 with exactly 1 file scratched (0 allowed on cycle 1). Pattern: byte i of cycle k is
+# (INPUT#15) 00, or 01 with exactly 1 file scratched (0 allowed on cycle 1; the final scratch must remove 1);
+# the status read itself must leave ST clear but for EOI (line 800: else an ST error, via 610). Pattern: byte i of cycle k is
 # (k*7 + i*13) AND 255, the same as wv.s. Lines 600-690 count the failure and stop. No "@0:" anywhere.
 W_RESULT = 0xC000
 W_PROGRAM = """\
@@ -100,7 +111,7 @@ W_PROGRAM = """\
 225 if e then 620
 300 p=8:open 3,8,3,"s5w,s,r":q=st:gosub 800:if q then 600
 305 if e then 620
-310 p=9:for i=0 to 253:get#3,a$:q=st:a=asc(a$+chr$(0)):w=(k*7+i*13) and 255
+310 p=9:poke 144,0:for i=0 to 253:get#3,a$:q=st:a=asc(a$+chr$(0)):w=(k*7+i*13) and 255
 315 if a<>w then 640
 320 if i<253 and q then 600
 325 next:p=10:if q<>64 then 600
@@ -111,13 +122,16 @@ W_PROGRAM = """\
 350 next k
 400 p=12:poke 144,0:print#15,"s0:s5w":q=st:gosub 800:if q then 600
 405 if e<>1 then 620
+407 if u<>1 then poke r+26,u:goto 620
 410 poke r+14,2:goto 950
 600 poke r+12,q:x=r+8:goto 680
+610 q=s:goto 600
 620 poke r+13,e:x=r+10:goto 680
 640 poke r+26,i:poke r+27,a:poke r+28,w:x=r+6
 680 y=peek(x)+256*peek(x+1)+1:poke x,y and 255:poke x+1,int(y/256):poke r+17,p:poke r+14,3
 690 goto 950
-800 input#15,e,m$,u,v:poke r+13,e:return
+800 poke 144,0:input#15,e,m$,u,v:s=st and 191:poke r+13,e:if s then 610
+805 return
 900 t1=int(t/65536):t=t-t1*65536:t2=int(t/256):t3=t-t2*256:return
 950 close 3:close 2:close 15:t=ti:gosub 900:poke r+23,t1:poke r+24,t2:poke r+25,t3
 960 print "s5w end n";n;"done";peek(r+4)+256*peek(r+5);"mis";peek(r+6);"st";peek(r+8);"dos";peek(r+10)
@@ -136,10 +150,10 @@ W_STATES = {0: "not started", 1: "running", 2: "done", 3: "stopped at a failure"
 # Per-cycle time on the stock KERNAL under VICE (tests/session5_vice.py, W_CYCLE_VICE there); the wait is
 # W_WAIT_FACTOR times it per cycle plus W_WAIT_BASE. JiffyDOS on hardware is faster, the stock KERNAL slower.
 W_CYCLE_EST = 4.0
-W_WAIT_FACTOR = 2.0
+W_WAIT_FACTOR = 3.0
 W_WAIT_BASE = 60.0
 B_CYCLE_EST = 3.0
-B_WAIT_FACTOR = 2.0
+B_WAIT_FACTOR = 3.0
 B_WAIT_BASE = 60.0
 
 # ---------------------------------------------------------------- C64 BASIC V2 tokenizer
@@ -232,8 +246,8 @@ def tokenize(text, start=0x0801):
 
 
 def w_program(n):
-    if not 1 <= n <= 32767:
-        raise ValueError("W: N must be 1 to 32767 (BASIC AND works on 16-bit signed values)")
+    if not 1 <= n <= 4000:
+        raise ValueError("W: N must be 1 to 4000 (k*7+i*13 must stay inside AND's 16-bit signed range)")
     return W_PROGRAM.format(n=n)
 
 
@@ -392,19 +406,40 @@ class Tee:
 
 W_COLS = ["arm", "start_iso", "n", "outcome", "seconds", "wait_s", "state", "done", "mismatches", "st_errors",
           "dos_errors", "last_st", "last_dos", "fail_cycle", "fail_step", "index", "got", "want", "blocks_free",
-          "ti_jiffies", "s_per_cycle", "screen_tail", "gate_races", "note"]
+          "ti_jiffies", "s_per_cycle", "screen_tail", "gate_races", "after_limit", "note"]
 IO_COLS = ["io_nread", "io_nretry", "io_nfail", "io_neoi", "io_nwretry", "io_nwfail"]
 IO_REC = ["io_ltrk", "io_lsct", "io_lidx", "io_ltry", "io_lst", "io_lwn"]
 B_COLS = (["arm", "start_iso", "n", "outcome", "seconds", "wait_s", "wv_n", "wv_ok", "wv_mis", "wv_err",
            "wv_nobus", "wv_fail", "ticks", "s_per_cycle"] + IO_COLS + [c + "_delta" for c in IO_COLS[:3]]
-          + ["io_last", "gate_races", "key_candidates", "d64_sha", "note"])
-R_COLS = (["arm", "cycle", "start_iso", "outcome", "seconds", "load", "ls_bin", "sum_got", "sum_want"] + IO_COLS
+          + ["io_last", "gate_races", "key_candidates", "d64_sha", "after_limit", "note"])
+R_COLS = (["arm", "cycle", "start_iso", "outcome", "seconds", "load", "ls_bin", "sum_got", "sum_want", "cache"] + IO_COLS
           + ["io_last", "gate_races", "key_candidates", "d64_sha", "note"])
 W_IO_SIZES = {"io_nwfail": 1}
 
 
 def now_iso():
-    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    """UTC: a local offset in committed results would say where the bench is."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def join_rows(lines):
+    """Screen rows back into printed lines: a full 40-column row continues on the next one."""
+    out, cur = [], ""
+    for ln in lines:
+        cur += ln
+        if len(ln) < 40:
+            out.append(cur)
+            cur = ""
+    if cur:
+        out.append(cur)
+    return "\n".join(out)
+
+
+NET_ERRORS = (UltimateError, OSError)   # the link to the Ultimate, not the machine: a STOP, not a failure
+
+
+class NetStop(session.StopSession):
+    """A STOP because the link failed (its TSV row is written first)."""
 
 
 class Clock:
@@ -472,17 +507,31 @@ def capture(t, arm, labels, outdir, why, extra=None, kernel=True):
         except Exception as e:  # noqa: BLE001
             lines.append(f"{what}: unreadable ({type(e).__name__}: {session.clean(e)[:120]})")
             return None
+    gate = "never idle in 30 s: reads ungated"
+    try:
+        deadline = t._time() + 30
+        while not t.bus_idle():
+            if t._time() > deadline:
+                raise TimeoutError
+        gate = "after an idle verdict"
+    except Exception:  # noqa: BLE001
+        pass
+    lines.append(f"capture reads: {gate}, paced {IDLE_GAP} s apart")
+
+    def readmem(a, n):
+        t._clock.sleep(IDLE_GAP)
+        return t.u.readmem(a, n)
     d = {}
     for n, a in (("st", 0x90), ("ba", 0xBA), ("dd00", 0xDD00)):
-        v = tryit(n, lambda a=a: t.u.readmem(a, 1)[0])
+        v = tryit(n, lambda a=a: readmem(a, 1)[0])
         d[n] = "??" if v is None else f"{v:02x}"
     lines.append("bytes: " + " ".join(f"{k}={v}" for k, v in d.items()))
     if kernel and labels:
         base = labels.get("io_out")
         names = "io_out io_base io_b io_n io_to io_pend io_held io_eoi io_inf io_sx io_sy ie_dev ie_sa ie_len ie_len2".split()
         if base is not None and labels.get("io_n") == base + 3 and labels.get("ie_dev") == base + 11:
-            v = tryit("iovars", lambda: t.u.readmem(base, 15))
-            stk = tryit("stack", lambda: t.u.readmem(0x1C0, 64))
+            v = tryit("iovars", lambda: readmem(base, 15))
+            stk = tryit("stack", lambda: readmem(0x1C0, 64))
             if v is not None and stk is not None:
                 img = os.path.join(outdir, f"{arm.lower()}-kernel.prg")
                 with open(img + ".stall", "a") as f:
@@ -493,10 +542,11 @@ def capture(t, arm, labels, outdir, why, extra=None, kernel=True):
                 lines.append("decode.py:\n" + r.stdout + r.stderr)
         else:
             lines.append("iovars: label layout changed, not read")
+        t._clock.sleep(IDLE_GAP)
         io = tryit("iostat", lambda: read_iostat(t, labels, gated=False))
         if io:
             lines.append("iostat: " + json.dumps(io))
-        ticks = tryit("ticks", lambda: int.from_bytes(t.u.readmem(labels.get("ticks", 0x4A), 3), "little"))
+        ticks = tryit("ticks", lambda: int.from_bytes(readmem(labels.get("ticks", 0x4A), 3), "little"))
         if ticks is not None:
             lines.append(f"ticks_jiffies={ticks}")
     scr = None
@@ -504,7 +554,7 @@ def capture(t, arm, labels, outdir, why, extra=None, kernel=True):
         scr = t.screen_lines(gate_timeout=30)
     except Exception as e:  # noqa: BLE001
         lines.append(f"screen: gate never idle in 30 s ({type(e).__name__}); read ungated")
-        scr = tryit("screen", lambda: session.screen_lines(t.u.readmem(0x0400, 1000)))
+        scr = tryit("screen", lambda: session.screen_lines(readmem(0x0400, 1000)))
     if scr is not None:
         lines.append("screen:\n" + "\n".join(scr))
     lines.append(f"gate_races={t.gate_races} key_candidates={t.gate_key_candidates}")
@@ -532,6 +582,48 @@ class Arms:
         self.dir = a.results
         os.makedirs(self.dir, exist_ok=True)
 
+    # ---------------- shared
+    def drain(self, t, probe, limit, every=30.0):
+        """After a limit verdict (the arm has already failed): was the workload still moving? Gated probes
+        every `every` s until the progress value is unchanged twice running, the workload says it finished,
+        or `limit` s pass; so the config restore's reboot does not land in a write that is still going, and
+        the record says whether the limit was too short. -> a note for the TSV."""
+        t0, last, same, seen = self.clock.monotonic(), None, 0, []
+        while self.clock.monotonic() - t0 < limit:
+            self.clock.sleep(every)
+            at = self.clock.monotonic() - t0
+            try:
+                value, finished = probe()
+            except TimeoutError:
+                seen.append(f"+{at:.0f}s busy")
+                continue
+            seen.append(f"+{at:.0f}s {value}")
+            if finished:
+                return "finished after the limit: " + "; ".join(seen)
+            same = same + 1 if value == last else 0
+            last = value
+            if same >= 2:
+                return "not moving: " + "; ".join(seen)
+        return f"still moving {limit:.0f} s after the limit: " + "; ".join(seen)
+
+    def w_probe(self, t):
+        d = parse_w(gated_read(t, W_RESULT, W_LEN, timeout=20))
+        return f"done={d['done']} state={d['state']}", d["state"] not in (0, 1)
+
+    def b_probe(self, t, labels):
+        """io_nread moves with every bus read (wv prints progress only every 50 cycles)."""
+        io = read_iostat(t, labels)
+        text = join_rows(t.screen_lines(gate_timeout=20))
+        prog = re.findall(r"wv (?:c=\d+|end [^\n]*|fail [^\n]*)", text)
+        return f"io_nread={io.get('io_nread')} {prog[-1] if prog else 'no progress line'}", "wv end" in text
+
+    def net_stop(self, tsv, row, t0, stage, e):
+        row.update(outcome="STOP", seconds=f"{self.clock.monotonic() - t0:.0f}",
+                   note=f"{stage}: link to the Ultimate failed: {type(e).__name__}: {session.clean(e)[:160]}")
+        tsv.row(**row)
+        tsv.close()
+        raise NetStop(row["note"])
+
     # ---------------- W
     def w(self, n):
         prog, end = tokenize(w_program(n))
@@ -543,6 +635,7 @@ class Arms:
         t = self.target(None)
         t._bus_idle_values = (0xC0, 0x90)          # the machine's KERNAL owns the bus throughout W
         row = dict(arm="W", start_iso=start, n=n, wait_s=f"{wait:.0f}")
+        stage = "setup"
         try:
             t.u.resume()
             t.u.reset()
@@ -557,16 +650,30 @@ class Arms:
             if back != prog:
                 raise session.StopSession("the program read back differs from what was written: W not started")
             t.type("run\n")
+            stage = "workload"
             t0 = self.clock.monotonic()
             self.out(f"W: running {n} cycles; no request to the machine for {wait:.0f} s", flush=True)
             self.clock.sleep(wait)
+            stage = "result"
             raw = gated_read(t, W_RESULT, W_LEN)
         except TimeoutError as e:
-            row.update(outcome="HANG", seconds=f"{self.clock.monotonic() - t0:.0f}", note=str(e).splitlines()[0])
-            capture(t, "W", None, self.dir, "timeout", kernel=False)
+            note = f"{stage}: {str(e).splitlines()[0]}"
+            if stage == "setup":                   # nothing ran: not a result of the arm
+                row.update(outcome="SETUP", seconds=f"{self.clock.monotonic() - t0:.0f}", note=note)
+                capture(t, "W", None, self.dir, note, kernel=False)
+                tsv.row(**row)
+                tsv.close()
+                self.out(f"W: SETUP problem, W did not start: {note}", flush=True)
+                return EXIT_STOP
+            # the bus was busy for the whole gate timeout at the limit: still running (or stuck mid-transfer)
+            row.update(outcome="HANG", seconds=f"{self.clock.monotonic() - t0:.0f}", note=note,
+                       after_limit=self.drain(t, lambda: self.w_probe(t), wait))
+            capture(t, "W", None, self.dir, note, kernel=False)
             tsv.row(**row)
             tsv.close()
             return EXIT_FAIL
+        except NET_ERRORS as e:
+            self.net_stop(tsv, row, t0, stage, e)
         secs = self.clock.monotonic() - t0
         d = parse_w(raw)
         outcome, failed = judge_w(d, n)
@@ -574,6 +681,12 @@ class Arms:
             scr = t.screen_lines(gate_timeout=60)
         except TimeoutError:
             scr = ["<screen: bus never idle>"]
+        text = join_rows(scr)
+        if outcome == "HANG" and re.search(r"\?.*error", text):
+            outcome = "FAIL"                       # BASIC stopped on an error (state stays 1): not a hang
+            d["state_text"] = "BASIC error: " + next(l for l in text.splitlines() if re.search(r"\?.*error", l))
+        elif outcome == "HANG":
+            row["after_limit"] = self.drain(t, lambda: self.w_probe(t), wait)
         jiff = (d["ti_end"] - d["ti_start"]) % 5184000 if d["state"] in (2, 3, 4) else ""
         row.update(outcome=outcome, seconds=f"{secs:.0f}", state=d["state"], done=d["done"],
                    mismatches=d["mismatches"], st_errors=d["st_errors"], dos_errors=d["dos_errors"],
@@ -644,6 +757,9 @@ class Arms:
         except session.StopSession:
             raise                                # a signal: the session stops, not this arm's failure
         except Exception as e:  # noqa: BLE001 - LoadError, TimeoutError, anything: a failure of this arm
+            if isinstance(e, NET_ERRORS) and not isinstance(e, TimeoutError):
+                t.close()
+                self.net_stop(tsv, row, t0, stage, e)
             kind = type(e).__name__
             outcome = {"LoadError": "LOAD_ERROR", "TimeoutError": "HANG"}.get(kind, "ERROR")
             row.update(outcome=outcome, seconds=f"{self.clock.monotonic() - t0:.0f}",
@@ -656,7 +772,7 @@ class Arms:
             self.out(f"B: {outcome} at {stage}: {row['note']}", flush=True)
             return EXIT_FAIL
         secs = self.clock.monotonic() - t0
-        text = "\n".join(scr)
+        text = join_rows(scr)
         m = re.search(r"wv end n=(\d+) ok=(\d+) mis=(\d+) err=(\d+) nobus=(\d+)", text)
         fl = re.search(r"wv fail [^\n]*", text)
         row.update(seconds=f"{secs:.0f}", ticks=(tk1 - tk0) & 0xFFFFFF, gate_races=t.gate_races,
@@ -683,6 +799,8 @@ class Arms:
         if why:
             outcome = "HANG" if not m and "panic" not in text else "FAIL"
             row.update(outcome=outcome, note="; ".join(why))
+            if outcome == "HANG":
+                row["after_limit"] = self.drain(t, lambda: self.b_probe(t, labels), wait)
             capture(t, "B", labels, self.dir, row["note"], {"screen_at_limit": " | ".join(scr)})
             status = EXIT_FAIL
         elif row.get("wv_nobus"):
@@ -738,6 +856,8 @@ class Arms:
                 row["sum_got"] = got
                 if got.split() != want_sum.split():          # wc right-aligns its counts
                     why.append(f"{sum_cmd}: {got!r}")
+                stage = "cache"                  # a record only (hits vs bus reads: where ls and the sum came from)
+                row["cache"] = " ".join(t.run("cache", timeout=60).split())
                 stage = "iostat"
                 io = read_iostat(t, labels)
                 for c in IO_COLS:
@@ -751,6 +871,9 @@ class Arms:
             except session.StopSession:
                 raise
             except Exception as e:  # noqa: BLE001
+                if isinstance(e, NET_ERRORS) and not isinstance(e, TimeoutError):
+                    t.close()
+                    self.net_stop(tsv, row, t0, stage, e)
                 kind = type(e).__name__
                 outcome = {"LoadError": "LOAD_ERROR", "TimeoutError": "HANG"}.get(kind, "ERROR")
                 if stage == "boot":
@@ -812,6 +935,8 @@ def main(argv=None, client=None, clock=None, ask=None, out=print, target_factory
     ap.add_argument("--reboot-wait", type=float, default=15)
     ap.add_argument("--no-prompt", action="store_true", help="no disk-swap prompts (plan)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--rev", help="the frozen release revision: TREE/build/rev.txt must say exactly this "
+                                  "(and not end in '+', a dirty build); required to run")
     a = ap.parse_args(argv)
     clock = clock or Clock()
     if a.cmd == "plan":
@@ -821,6 +946,16 @@ def main(argv=None, client=None, clock=None, ask=None, out=print, target_factory
     else:
         order = [("-", a.cmd.upper(), a.n or DEFAULT_N[a.cmd.upper()])] if a.cmd != "tools" else []
     p = tree_paths(a.tree)
+    revf = os.path.join(a.tree, "build", "rev.txt")
+    rev = open(revf).read().strip() if os.path.exists(revf) else None
+    if a.cmd != "tools" and not a.dry_run:
+        if rev is None or rev.endswith("+") or a.rev is None or rev != a.rev:
+            raise SystemExit(f"refusing: TREE/build/rev.txt is {rev!r}, --rev {a.rev!r}: the tree must be a clean "
+                             "build of the frozen release (rev.txt without '+', given again as --rev)")
+        arms_in = {arm for _, arm, _ in order}
+        if a.no_prompt and "W" in arms_in and arms_in & {"B", "R"}:
+            raise SystemExit("refusing --no-prompt: this plan needs a disk swap between W (scratch disk) and B/R "
+                             "(release disk)")
     if a.dry_run:
         for blk, arm, n in order:
             out(f"block {blk}: arm {arm} x {n}")
@@ -854,13 +989,19 @@ def main(argv=None, client=None, clock=None, ask=None, out=print, target_factory
             return UltimateTarget(image, client=client)
     if ask is None:
         ask = (lambda text: "") if a.no_prompt else input
+
+    def prompt(text):
+        try:
+            return ask(text)
+        except EOFError:
+            raise session.StopSession("no terminal for the disk-swap prompt (EOF): run the arms one by one") from None
     log = Tsv(os.path.join(a.results, "session5.log.tsv"), ["note"])
     guard = session.ConfigGuard(client, clock, log, a.reboot_wait)
     cur = guard.get(*session.KERNAL_ITEM)
     if cur != session.NORMAL_KERNAL:
         log.close()
         raise SystemExit(f"refusing to start: the Kernal ROM is {cur!r}, expected {session.NORMAL_KERNAL!r}")
-    log.comment(f"session 5 {now_iso()}: {a.cmd} {order}; tree build {open(os.path.join(a.tree, 'build', 'rev.txt')).read().strip() if os.path.exists(os.path.join(a.tree, 'build', 'rev.txt')) else '?'}")
+    log.comment(f"session 5 {now_iso()}: {a.cmd} {order}; tree build {rev}")
     arms = Arms(a, client, clock, out, target_factory)
 
     def on_signal(signum, frame):
@@ -877,7 +1018,7 @@ def main(argv=None, client=None, clock=None, ask=None, out=print, target_factory
         guard.apply()
         for blk, arm, n in order:
             if a.cmd == "plan" and arm in DISK_PROMPT and prev != ("W" if arm == "W" else "BR"):
-                ask(DISK_PROMPT[arm])
+                prompt(DISK_PROMPT[arm])
             prev = "W" if arm == "W" else "BR"
             err = sys.stderr
             tee = Tee(err, os.path.join(a.results, f"{arm.lower()}.gate.log"))
