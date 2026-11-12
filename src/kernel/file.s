@@ -243,6 +243,11 @@ sys_open:
         lda #ENOENT
 @err:   sec
         rts
+@pe:    tax                 ; the error, not the new inode number pushed above
+        pla
+        txa
+        sec
+        rts
 @create:
         jsr nameiparent
         bcs @err
@@ -266,12 +271,12 @@ sys_open:
         lda of_dev
         ldx of_ino
         jsr iget
+        bcs @pe
         pla
-        bcs @err
         pha
         jsr dir_add
+        bcs @pe
         pla
-        bcs @err
         sta nm_ino
         lda of_dev
         sta nm_dev

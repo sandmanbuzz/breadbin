@@ -29,7 +29,8 @@ def main():
             continue
         m = re.match(r"^\s+(\w+)\s+Offs=\w+\s+Size=([0-9A-F]+)", line)
         if m and cur:
-            mods[cur][m.group(1)] = int(m.group(2), 16)
+            seg = "CODE" if m.group(1) == "IECBUS" else m.group(1)     # iec.s's code, in a segment of its own
+            mods[cur][seg] = mods[cur].get(seg, 0) + int(m.group(2), 16)
     cols = ("CODE", "RODATA", "DATA", "CODEHI", "INIT", "BSS")
     print(f"{'module':10s}" + "".join(f"{c:>8s}" for c in cols) + f"{'total':>8s}")
     tot = dict.fromkeys(cols, 0)
