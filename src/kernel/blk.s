@@ -5,6 +5,7 @@
 ; dev 2-4: drives 9-11 (mounted with mount()), same sector commands
 ; Cache is write-through: bwrite writes the buffer to its device at once.
 .include "k.inc"
+.import io_dirty
 .ifndef IOSTAT
 IOSTAT = 0              ; make IOSTAT=1: count block reads, retries, failures (default in the Makefile)
 .endif
@@ -69,16 +70,18 @@ rd_try:  .res 1
 .if IOSTAT
 ; IOSTAT: how often the block-read mitigation fires (read after login or at a stall; never during a transfer)
 io_nread:  .res 2        ; iec_read calls
-io_nretry: .res 2        ; retries taken (each redo)
-io_nfail:  .res 2        ; iec_read gave up after all tries
+io_nretry: .res 2        ; iec_read retries taken (each redo)
+io_nfail:  .res 2        ; iec_read gave up
 io_neoi:   .res 2        ; blocks whose 256th byte arrived without EOI (ST bit 6)
 io_ltrk:   .res 1        ; last timeout: track, sector,
 io_lsct:   .res 1
 io_lidx:   .res 1        ; byte index 0-255 ($FF: before the data, i.e. the command or the talk)
-io_ltry:   .res 1        ; try number 1-3,
+io_ltry:   .res 1        ; try number 1-3 (3 also when the drive reported a 2x error: cmd_status ends the tries),
 io_lst:    .res 1        ; ST,
 io_lwn:    .res 1        ; and bus_acptr's io_n at the timeout (ready wait expired: 0; bit loop: 8..1 bits still to come; EOI window: stale)
                          ; when io_lidx is $FF, io_lst and io_lwn are whatever the command, status or talk step left: not a byte timeout
+io_nwretry: .res 2       ; iec_write retries taken (block writes are not in the read counters above)
+io_nwfail: .res 1        ; iec_write gave up (one byte: counts modulo 256)
 .endif
 reu_tmp: .res 1
 cache_ok: .res 1         ; attached to a valid REU cache
@@ -129,9 +132,22 @@ blk_init:
         sta dev_drive+3
         lda #11
         sta dev_drive+4
+        ; a C64-only restart (a reset, or a program started without an OPEN) can
+        ; leave a half command in any drive: io_dirty starts clear, so mark them
+        ; all, and the first send to each flushes it first (io_flush, via out_sa).
+        lda #1
+        ldx #3
+@dm:    sta io_dirty,x
+        dex
+        bpl @dm
         ldx #0
         jsr iec_open
-        lda #1
+        bcc @dok
+        cmp #ENODEV             ; EIO: a drive answered but the open failed; it is still the
+        clc                     ; root (the mount fails loudly), never a reason to adopt the REU
+        bne @dok
+        sec
+@dok:   lda #1
         sta dev_present
         lda #$ff
         sta dev_drive+5         ; DEV_UCI is no drive, and 0 would read as the REU
@@ -208,9 +224,17 @@ s_big:  .byte "reu root image too big for the reu", 10, 0
 
 .segment "CODE"
 ; iec_open: X = dev. Open the drive's command channel (15) and a data channel
-; (2) with a drive buffer. Carry set (A = ENODEV) if the drive is not there.
+; (2) with a drive buffer. Carry set: A = ENODEV if the drive did not answer LISTEN
+; (it is not there), A = EIO if it answered but three tries failed: a name byte
+; lost (iec_ch_open marks the drive, so the next try flushes it first), or the
+; flush of a marked drive itself (io_flush; then nothing is sent to it, since an
+; "i0" after a half command could run as "S:*i0"). Only ENODEV may read as "no
+; drive" (blk_init: the REU root).
 iec_open:
         stx tmp2
+        lda #3
+        sta rd_try
+@try:   ldx tmp2
         lda #<s_init
         sta p4
         lda #>s_init
@@ -219,7 +243,7 @@ iec_open:
         lda dev_drive,x
         ldx #15
         jsr iec_ch_open
-        bcs @nodev
+        bcs @f
         lda #<s_hash
         sta p4
         lda #>s_hash
@@ -229,13 +253,18 @@ iec_open:
         lda dev_drive,x
         ldx #2
         jsr iec_ch_open
-        bcs @nodev
-        clc
+        bcs @f
         rts
-@nodev: ldx tmp2
+@f:     pha
+        ldx tmp2
         jsr iec_close
-        lda #ENODEV
-        sec
+        pla
+        cmp #ENODEV
+        beq @e              ; no answer: not there
+        dec rd_try
+        bne @try
+        lda #EIO
+@e:     sec
         rts
 
 ; iec_close: X = dev
@@ -388,6 +417,8 @@ bwrite:
 @reu:   jsr reu_write
 @r:     ldx b_idx
         bcc @ok
+        lda #0              ; not written: the buffer no longer stands for the disk
+        sta b_valid,x
         lda #EIO
 @ok:    rts
 bdirty = bwrite
@@ -553,13 +584,17 @@ cmd_send:
         iny
         cpy cmdlen
         bne @l
-        jsr iec_out_end
-        clc
-        rts
-@e:     sec
-        rts
+        jmp iec_out_end     ; carry set if a byte did not arrive (the drive then holds half a command,
+                            ; flushed before the next one): the status read would answer for the one before
+@e:     rts
 
-; read the drive's error channel: carry set unless "00"
+; read the drive's error channel: carry set unless "00" or "01". When the drive itself
+; answered with a 2x error (both code bytes arrived: 20-29 read errors, 26 WRITE PROTECT
+; ON), rd_try is set to 1, so a try loop (iec_read, iec_write) gives up at once instead of
+;; knocking the head again. Anything else is tried again: a status read that failed on the
+; bus, and other codes, such as a 3x (a CPU halt between DATA released and CLK pulled
+; reads as EOI; under VICE the 1541 still runs the whole command at UNLISTEN, so this is
+; a guard, not a case seen).
 cmd_status:
         lda cur_drv
         ldx #15
@@ -569,20 +604,30 @@ cmd_status:
         sta tmp0
         jsr iec_in_byte
         sta tmp1
+        lda ST              ; a code byte timed out: kept for after the UNTALK
+        pha
 @skip:  jsr iec_in_byte
         cmp #$0d
         beq @d
         lda ST
         beq @skip
 @d:     jsr iec_in_end
+        pla
+        and #$02
+        bne @bad            ; the bus failed, not the drive: a try loop tries again
         lda tmp0
         cmp #'0'
-        bne @bad
+        bne @dos
         lda tmp1
         cmp #'2'            ; 00 or 01 are fine
-        bcs @bad
+        bcs @dos
         clc
         rts
+@dos:   lda tmp0
+        cmp #'2'            ; a 2x: the drive's own media or write-protect error
+        bne @bad
+        lda #1              ; the try loop's last try
+        sta rd_try
 @bad:   sec
         rts
 
@@ -590,11 +635,8 @@ cmd_status:
 ; mid-byte (seen on the physical 1541) makes bus_acptr time out; UNTALK under
 ; ATN frees the drive, so ask again, up to three times.
 .if IOSTAT
-; IOSTAT: iec_read and iec_read1 live in CODEHI (below); this hole keeps every later CODE address
-; (the timed loops in iec.s) exactly where the IOSTAT=0 build has them
-iec_read:
-        jmp iec_read_i
-        .res 77-3
+; IOSTAT: iec_read and iec_read1 live in CODEHI (below)
+iec_read := iec_read_i  ; := a label, so it is in kernel.lbl (the py65 tests break on it)
 .else
 iec_read:
         lda #3
@@ -637,7 +679,36 @@ iec_read1:
 
 .endif
 s_bp:   .byte "B-P:2 0"
+; iec_write: write (bp) to the block in trk/sct. B-P (its status read: a B-P cut short
+; would shift the data) and the data phase are tried up to three times, as a read is:
+; nothing is on the disk yet, and a byte lost on the way fails the try loudly
+; (iec_out_end) and is flushed from the drive before the next (io_flush). Not when the
+; U2 itself lost a byte on the bus: a cut U2 might run
+; as a prefix such as "U2:2 0 1", a write to another block, and a retry that then
+; succeeds would hide it. Under VICE a cut U2 ran no job (docs/design/iec-failed-send.md),
+; but that is one drive model: a lost U2 byte is EIO at once. A U2 that arrived whole
+; (only its UNLISTEN not taken), or whose status read then failed on the bus (the
+; physical 1541 can go quiet mid-byte), is tried again: the whole write, the same block.
 iec_write:
+        lda #3
+        sta rd_try
+@try:   jsr iec_write1
+        bcc @r
+        dec rd_try
+        beq @f              ; carry still set: give up
+.if IOSTAT
+        inc io_nwretry
+        bne @try
+        inc io_nwretry+1
+.endif
+        jmp @try
+@f:
+.if IOSTAT
+        inc io_nwfail
+.endif
+@r:     rts
+
+iec_write1:
         jsr blk_to_ts
         ldx #6
 @c:     lda s_bp,x
@@ -648,6 +719,8 @@ iec_write:
         sta cmdlen
         jsr cmd_send
         bcs @e
+        jsr cmd_status
+        bcs @e
         lda cur_drv
         ldx #2
         jsr iec_out_begin
@@ -657,12 +730,21 @@ iec_write:
         jsr iec_out_byte
         iny
         bne @l
-        jsr iec_out_end
+        jsr iec_out_end     ; a block that did not all arrive is not written
+        bcs @e
         lda #'2'
         jsr cmd_us
         jsr cmd_send
-        bcs @e
-        jmp cmd_status
+        bcc @st
+        lda ST
+        and #$03
+        beq @e              ; every byte arrived (its UNLISTEN, or the LISTEN, not taken):
+                            ; the U2 is whole or not sent, so try again, the same block
+        lda #1              ; a byte of the U2 lost: it may run cut, no retry
+        sta rd_try
+        bne @e
+@st:    jmp cmd_status      ; a status read that fails on the bus is tried again: the U2
+                            ; arrived whole, so the retry writes the same block again
 @e:     sec
         rts
 
@@ -1082,7 +1164,10 @@ cache_epoch:
         jsr bwrite              ; the superblock; ep_done is set, so no recursion
         bcs @r
         jmp cache_hdr_put
-@r:     rts
+@r:     lda #0                  ; not done: the next write tries again (until then nothing
+        sta ep_done             ; is written, so the disk still matches the cache)
+        sec
+        rts
 
 ; su_check: carry set, A = EPERM unless the caller is root (A and X are preserved otherwise)
 su_check:
@@ -1168,7 +1253,6 @@ cache_clear_c:
 
 .if IOSTAT
 .segment "CODEHI"
-.assert s_bp - iec_read = 77, error, "iec_read: the hole must match the IOSTAT=0 code size"
 .macro inc16 v
         inc v
         bne :+

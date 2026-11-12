@@ -296,9 +296,11 @@ class Boot(unittest.TestCase):
         self.assertEqual(self.run_("/home/bigbuf"), "bss ok")
 
     def test_29_io_counters(self):
-        """IOSTAT (default build): the block-read mitigation counters are in the label file and a
-        healthy boot reads blocks without a retry or a failure. io_neoi is printed, not asserted:
-        it says whether the drive sends EOI on the 256th byte of a U1 read."""
+        """IOSTAT (default build): the counters are in the label file and a healthy boot reads blocks
+        without a retry or a failure. io_nread, io_nretry and io_nfail count block reads only
+        (iec_read); block writes (iec_write) have their own io_nwretry and io_nwfail (one byte).
+        io_neoi is printed, not asserted: it says whether the drive sends EOI on the 256th byte of
+        a U1 read."""
         lbl, last = {}, {}
         with open(os.path.join(ROOT, "build", "kernel.lbl")) as f:
             for line in f:
@@ -312,13 +314,20 @@ class Boot(unittest.TestCase):
             self.skipTest("built with IOSTAT=0")
         self.run_("ls /bin")
         self.run_("cat /etc/passwd")
-        n = {k: self.v.mem(a, a + 1)[0] | self.v.mem(a, a + 1)[1] << 8 for k, a in lbl.items()}
+        self.run_("cp /etc/passwd /home/c29")     # a block write or two
+        self.run_("rm /home/c29")
+        n = {}
+        for k, a in lbl.items():
+            b = self.v.mem(a, a + 1)
+            n[k] = b[0] if k == "io_nwfail" else b[0] | b[1] << 8
         print("\nIOSTAT", n)
         # the last timeout's record (one byte each; see blk.s): printed, not asserted
         print("IOSTAT last event", {k: self.v.mem(a, a)[0] for k, a in last.items()})
         self.assertGreater(n["io_nread"], 0)
         self.assertEqual(n["io_nretry"], 0)
         self.assertEqual(n["io_nfail"], 0)
+        self.assertEqual(n.get("io_nwretry"), 0)
+        self.assertEqual(n.get("io_nwfail"), 0)
 
 
 class Persistence(unittest.TestCase):
