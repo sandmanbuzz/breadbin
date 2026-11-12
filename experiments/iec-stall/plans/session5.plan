@@ -1,0 +1,7 @@
+# Session 5 acceptance (docs/design/io-trial-protocol.md, "Session 5"); run by experiments/iec-stall/session5.py.
+# W: ROM-KERNAL write-verify on the machine's JiffyDOS KERNAL (needs a CBM disk with free blocks in drive 8:
+#    the release disk has none, W refuses on it). B: our kernel's write-verify. R: boot cycles.
+# The runner prompts for the disk swap between W and B. Any non-pass stops the plan.
+1 W 300
+2 B 300
+3 R 50

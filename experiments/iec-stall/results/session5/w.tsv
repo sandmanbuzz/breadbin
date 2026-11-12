@@ -1,0 +1,3 @@
+arm	start_iso	n	outcome	seconds	wait_s	state	done	mismatches	st_errors	dos_errors	last_st	last_dos	fail_cycle	fail_step	index	got	want	blocks_free	ti_jiffies	s_per_cycle	screen_tail	gate_races	after_limit	note
+# arm W: N=300, program 1888 bytes at $0801-$0F60, results at $C000; wait 15540 s with no request; program sha256 dab2b8ac5bfca022
+W	2026-11-12T02:06:09Z	300	pass	15540	15540	2	300	0	0	0	0	1			0	0	0	664	306159	17.01	       jiffydos v6.01 (c)1989 cmd |  c-64 basic v2   38911 basic bytes free | ready. | run | s5w 25 | s5w 50 | s5w 75 | s5w 100 | s5w 125 | s5w 150 | s5w 175 | s5w 200 | s5w 225 | s5w 250 | s5w 275 | s5w 300 | s5w end n 300 done 300 mis 0 st 0 dos 0 | s5w state 2 free 664 | ready.	0		done

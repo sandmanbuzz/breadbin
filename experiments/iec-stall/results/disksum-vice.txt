@@ -1,0 +1,25 @@
+disksum.s under VICE (stock KERNAL, true-drive 1541, build/breadbin.d64 attached on 8, BASIC up, code at $C000, sys49152)
+harness: tests/disksum_vice.py (tools/ci/run.sh test-only T="tests.disksum_vice")
+
+AS WRITTEN (experiments/iec-stall/disksum/disksum.s at 0ffad34): STALLS at sector 0, count 0/683, ERRCH 00 00 (no status byte).
+  run 1 plain      stalled, TRK/SECT = 1/0, no status
+  run 2 after load"$",8   stalled, same
+  run 3 plain (with register dump)   stalled, same; screen shows the text "u1:2 0 1 0" echoed on the screen under
+                   "sys49152"; zero page $99 (DFLTN) = 00 keyboard, $9A (DFLTO) = 03 screen, $98 = 2 open files.
+  (the 3-run plain and 3-run preload sets were not completed on the unfixed reader: runs 1-3 above, one stall each, all
+  identical; the unfixed version never got past the first CHKOUT.)
+
+CAUSE: CHKOUT ($FFC9) and CHKIN ($FFC6) take the logical file number in X; disksum.s loaded it in A
+  (lda #15 / jsr CHKOUT, lda #15 / jsr CHKIN, lda #2 / jsr CHKIN). X holds junk, the call fails ("file not open"),
+  output stays on the screen, input stays on the keyboard, and the first CHRIN waits for a keystroke forever.
+
+FIXED (ldx #15 / ldx #2 before the three calls):
+  plain run 1   done  683/683  matches 683  differ 0   41 s
+  plain run 2   done  683/683  matches 683  differ 0   41 s
+  plain run 3   done  683/683  matches 683  differ 0   41 s
+  after load"$",8 run 1   done  683/683  matches 683  differ 0   41 s
+  after load"$",8 run 2   done  683/683  matches 683  differ 0   46 s
+  after load"$",8 run 3   done  683/683  matches 683  differ 0   41 s
+  (warp mode, so wall time is not drive time)
+
+NOT RUN: JiffyDOS ROMs, any 1541 with a different DOS, hardware, a disk with error sectors.

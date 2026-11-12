@@ -1,0 +1,30 @@
+# session 1; plan session4.plan: 16 trials
+# image b8cc.prg sha256 3110b2f19b04089e; commit 8cc3e57 disk; iostat f5d64de; harness afeede5; disk bb-last-agent; control file *
+# dma image iostat-cache0.prg sha256 e73dfc3e6027cbec (arms D, P); disk image b8cc.prg sha256 3110b2f19b04089e (arms K, B)
+# labels disk kernel (K, B): found, 882; iostat labels present: none (counters recorded as absent); ticks label: $004a
+# labels dma kernel (D, P): found, 894; iostat labels present: ['io_nread', 'io_nretry', 'io_nfail', 'io_neoi']; ticks label: $004a
+# drive powered on 817 min before session start
+# poll mode none (none: no readmem during a trial until its limit; byte: 1-byte reads of $D6 every 2 s, boot phases from 20 s); limits {'C': 120, 'K': 120, 'B': 150, 'D': 170, 'P': 170, 'Q': 170, 'J': 120, 'O': 170, 'Z': 170, 'S': 120, 'G': 170, 'H': 120, 'L': 120, 'T': 120}
+# config dump start: res-s4b1.tsv.cfg-start.json; 12 item(s) differ from default
+# config before: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config set, read back: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+session	block	trial	arm	start_iso	min_session	min_drive_on	image_sha	commit	disk_id	outcome	seconds	io_nread	io_nretry	io_nfail	io_neoi	io_last	detail	dump	note
+1	1	1	K	2026-11-10T20:46:52-08:00	0.0	817.0	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	pass	120.1						15017 bytes identical poll=none		
+1	1	2	L	2026-11-10T20:48:58-08:00	2.1	819.1	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	mismatch	120.1						5 bytes differ, first at +788 of 15017 poll=1b/0.1s		
+1	1	3	K	2026-11-10T20:51:04-08:00	4.2	821.2	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	pass	120.1						15017 bytes identical poll=none		
+1	1	4	L	2026-11-10T20:53:10-08:00	6.3	823.3	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	mismatch	120.1						4 bytes differ, first at +4598 of 15017 poll=1b/0.1s		
+1	1	5	K	2026-11-10T20:55:16-08:00	8.4	825.4	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	pass	120.1						15017 bytes identical poll=none		
+1	1	6	L	2026-11-10T20:57:22-08:00	10.5	827.5	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	mismatch	120.1						3 bytes differ, first at +776 of 15017 poll=1b/0.1s		
+1	1	7	K	2026-11-10T20:59:28-08:00	12.6	829.6	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	pass	120.1						15017 bytes identical poll=none		
+1	1	8	L	2026-11-10T21:01:34-08:00	14.7	831.7	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	LOAD ERROR	120.0						?load  error poll=1b/0.1s		
+1	1	8	L	2026-11-10T21:03:41-08:00	16.8					NOTE									arm L reached 4 failures: stopped from now on
+1	1	9	K	2026-11-10T21:03:41-08:00	16.8	833.8	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	pass	120.1						15017 bytes identical poll=none		
+1	1	10	L	2026-11-10T21:05:47-08:00	18.9					skipped									skipped: arm L reached 4 failures
+1	1	11	K	2026-11-10T21:05:47-08:00	18.9	835.9	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	pass	120.1						15017 bytes identical poll=none		
+1	1	12	L	2026-11-10T21:07:53-08:00	21.0					skipped									skipped: arm L reached 4 failures
+1	1	13	K	2026-11-10T21:07:53-08:00	21.0	838.0	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	pass	120.1						15017 bytes identical poll=none		
+1	1	14	L	2026-11-10T21:09:59-08:00	23.1					skipped									skipped: arm L reached 4 failures
+1	1	15	K	2026-11-10T21:09:59-08:00	23.1	840.1	3110b2f19b04089e	8cc3e57 disk; iostat f5d64de; harness afeede5	bb-last-agent	pass	120.1						15017 bytes identical poll=none		
+1	1	16	L	2026-11-10T21:12:05-08:00	25.2					skipped									skipped: arm L reached 4 failures
+# config after restore: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# config dump end: res-s4b1.tsv.cfg-end.json; 12 item(s) differ from default

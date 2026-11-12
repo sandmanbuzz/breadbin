@@ -1,0 +1,715 @@
+{
+ "Audio Mixer": {
+  "Pan Drive 1": {
+   "current": "Left 2",
+   "default": "Left 2"
+  },
+  "Pan Drive 2": {
+   "current": "Right 2",
+   "default": "Right 2"
+  },
+  "Pan Sampler L": {
+   "current": "Left 3",
+   "default": "Left 3"
+  },
+  "Pan Sampler R": {
+   "current": "Right 3",
+   "default": "Right 3"
+  },
+  "Pan Socket 1": {
+   "current": "Left 3",
+   "default": "Left 3"
+  },
+  "Pan Socket 2": {
+   "current": "Right 3",
+   "default": "Right 3"
+  },
+  "Pan Tape Read": {
+   "current": "Center",
+   "default": "Center"
+  },
+  "Pan Tape Write": {
+   "current": "Center",
+   "default": "Center"
+  },
+  "Pan UltiSID 1": {
+   "current": "Center",
+   "default": "Center"
+  },
+  "Pan UltiSID 2": {
+   "current": "Center",
+   "default": "Center"
+  },
+  "Vol Drive 1": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol Drive 2": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol Sampler L": {
+   "current": " 0 dB",
+   "default": " 0 dB"
+  },
+  "Vol Sampler R": {
+   "current": " 0 dB",
+   "default": " 0 dB"
+  },
+  "Vol Socket 1": {
+   "current": " 0 dB",
+   "default": " 0 dB"
+  },
+  "Vol Socket 2": {
+   "current": " 0 dB",
+   "default": " 0 dB"
+  },
+  "Vol Tape Read": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol Tape Write": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol UltiSid 1": {
+   "current": " 0 dB",
+   "default": " 0 dB"
+  },
+  "Vol UltiSid 2": {
+   "current": " 0 dB",
+   "default": " 0 dB"
+  }
+ },
+ "C64 and Cartridge Settings": {
+  "Basic ROM": {
+   "current": "",
+   "default": ""
+  },
+  "Bus Operation Mode": {
+   "current": "Quiet",
+   "default": "Quiet"
+  },
+  "Bus Sharing - I/O1": {
+   "current": "Both",
+   "default": "Both"
+  },
+  "Bus Sharing - I/O2": {
+   "current": "Both",
+   "default": "Both"
+  },
+  "Bus Sharing - Interrupts": {
+   "current": "Both",
+   "default": "Both"
+  },
+  "Bus Sharing - ROMs": {
+   "current": "Both",
+   "default": "Both"
+  },
+  "Cartridge": {
+   "current": "",
+   "default": ""
+  },
+  "Cartridge Preference": {
+   "current": "Auto",
+   "default": "Auto"
+  },
+  "Char ROM": {
+   "current": "",
+   "default": ""
+  },
+  "Command Interface": {
+   "current": "Enabled",
+   "default": "Disabled"
+  },
+  "DMA Load Mimics ID:": {
+   "current": 8,
+   "default": 8
+  },
+  "Fast Reset": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "Kernal ROM": {
+   "current": "JiffyDOS-C64.bin",
+   "default": ""
+  },
+  "Map Ultimate Audio $DF20-DFFF": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "RAM Expansion Unit": {
+   "current": "Enabled",
+   "default": "Disabled"
+  },
+  "REU Preload": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "REU Preload Image": {
+   "current": "/Usb0/preload.reu",
+   "default": "/Usb0/preload.reu"
+  },
+  "REU Preload Offset": {
+   "current": "0 KB",
+   "default": "0 KB"
+  },
+  "REU Size": {
+   "current": "16 MB",
+   "default": "2 MB"
+  }
+ },
+ "Data Streams": {
+  "Debug Stream Mode": {
+   "current": "6510 Only",
+   "default": "6510 Only"
+  }
+ },
+ "Drive A Settings": {
+  "D64 Geos Copy Protection": {
+   "current": "none",
+   "default": "none"
+  },
+  "Disk swap delay": {
+   "current": 1,
+   "default": 1
+  },
+  "Drive": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "Drive Bus ID": {
+   "current": 9,
+   "default": 8
+  },
+  "Drive Type": {
+   "current": "1541",
+   "default": "1541"
+  },
+  "Extra RAM": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "Freezes in menu": {
+   "current": "Yes",
+   "default": "Yes"
+  },
+  "GCR Save Align Tracks": {
+   "current": "Yes",
+   "default": "Yes"
+  },
+  "Leave Menu on Mount": {
+   "current": "Yes",
+   "default": "Yes"
+  },
+  "ROM for 1541 mode": {
+   "current": "JiffyDOS_1541-II.bin",
+   "default": "1541.rom"
+  },
+  "ROM for 1571 mode": {
+   "current": "1571.rom",
+   "default": "1571.rom"
+  },
+  "ROM for 1581 mode": {
+   "current": "1581.rom",
+   "default": "1581.rom"
+  },
+  "Resets when C64 resets": {
+   "current": "Yes",
+   "default": "Yes"
+  }
+ },
+ "Drive B Settings": {
+  "D64 Geos Copy Protection": {
+   "current": "none",
+   "default": "none"
+  },
+  "Disk swap delay": {
+   "current": 1,
+   "default": 1
+  },
+  "Drive": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "Drive Bus ID": {
+   "current": 9,
+   "default": 9
+  },
+  "Drive Type": {
+   "current": "1541",
+   "default": "1541"
+  },
+  "Extra RAM": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "Freezes in menu": {
+   "current": "Yes",
+   "default": "Yes"
+  },
+  "GCR Save Align Tracks": {
+   "current": "Yes",
+   "default": "Yes"
+  },
+  "Leave Menu on Mount": {
+   "current": "Yes",
+   "default": "Yes"
+  },
+  "ROM for 1541 mode": {
+   "current": "1541.rom",
+   "default": "1541.rom"
+  },
+  "ROM for 1571 mode": {
+   "current": "1571.rom",
+   "default": "1571.rom"
+  },
+  "ROM for 1581 mode": {
+   "current": "1581.rom",
+   "default": "1581.rom"
+  },
+  "Resets when C64 resets": {
+   "current": "Yes",
+   "default": "Yes"
+  }
+ },
+ "Keyboard Lighting": {
+  "Color tint": {
+   "current": "Pure",
+   "default": "Pure"
+  },
+  "Fixed Color": {
+   "current": "Royal Blue",
+   "default": "Royal Blue"
+  },
+  "LedStrip Auto SID Mode": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "LedStrip Mode": {
+   "current": "Default",
+   "default": "Default"
+  },
+  "LedStrip Pattern": {
+   "current": "Single Color",
+   "default": "Single Color"
+  },
+  "LedStrip SID Select": {
+   "current": "UltiSID1-A",
+   "default": "UltiSID1-A"
+  },
+  "Strip Intensity": {
+   "current": 6,
+   "default": 6
+  }
+ },
+ "LED Strip Settings": {
+  "Color tint": {
+   "current": "Pure",
+   "default": "Pure"
+  },
+  "Fixed Color": {
+   "current": "Royal Blue",
+   "default": "Royal Blue"
+  },
+  "LedStrip Auto SID Mode": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "LedStrip Mode": {
+   "current": "Default",
+   "default": "Default"
+  },
+  "LedStrip Pattern": {
+   "current": "SingleColor",
+   "default": "SingleColor"
+  },
+  "LedStrip SID Select": {
+   "current": "UltiSID1-A",
+   "default": "UltiSID1-A"
+  },
+  "Strip Intensity": {
+   "current": 25,
+   "default": 25
+  }
+ },
+ "Modem Settings": {
+  "ACIA (6551) Mapping": {
+   "current": "DE00/NMI",
+   "default": "DE00/NMI"
+  },
+  "Automatic Rx Pushback": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "CTS Behavior": {
+   "current": "Active (Low)",
+   "default": "Active (Low)"
+  },
+  "DCD Behavior": {
+   "current": "Active (Low)",
+   "default": "Active (Low)"
+  },
+  "DSR Behavior": {
+   "current": "Active when connected",
+   "default": "Active when connected"
+  },
+  "Do RING sequence (incoming)": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "Drop connection on DTR low": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "Hardware Mode": {
+   "current": "SwiftLink",
+   "default": "SwiftLink"
+  },
+  "Listening Port": {
+   "current": "3000",
+   "default": "3000"
+  },
+  "Loop Delay": {
+   "current": 2,
+   "default": 2
+  },
+  "Modem Busy Text": {
+   "current": "/flash/busy.txt",
+   "default": "/flash/busy.txt"
+  },
+  "Modem Connect Text": {
+   "current": "/flash/welcome.txt",
+   "default": "/flash/welcome.txt"
+  },
+  "Modem Interface": {
+   "current": "ACIA / SwiftLink",
+   "default": "ACIA / SwiftLink"
+  },
+  "Modem Offline Text": {
+   "current": "/flash/offline.txt",
+   "default": "/flash/offline.txt"
+  },
+  "RTS Handshake (Rx)": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "Set Socket Opt TCP_NODELAY": {
+   "current": "Disabled",
+   "default": "Disabled"
+  }
+ },
+ "Printer Settings": {
+  "Bus ID": {
+   "current": 4,
+   "default": 4
+  },
+  "Commodore charset": {
+   "current": "USA/UK",
+   "default": "USA/UK"
+  },
+  "Emulation": {
+   "current": "Commodore MPS",
+   "default": "Commodore MPS"
+  },
+  "Epson charset": {
+   "current": "Basic",
+   "default": "Basic"
+  },
+  "IBM table 2": {
+   "current": "International 1",
+   "default": "International 1"
+  },
+  "IEC printer": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "Ink density": {
+   "current": "Medium",
+   "default": "Medium"
+  },
+  "Output file": {
+   "current": "/Usb0/printer",
+   "default": "/Usb0/printer"
+  },
+  "Output type": {
+   "current": "PNG B&W",
+   "default": "PNG B&W"
+  },
+  "Page height (default is 60)": {
+   "current": 60,
+   "default": 60
+  },
+  "Page top margin (default is 5)": {
+   "current": 5,
+   "default": 5
+  }
+ },
+ "SID Addressing": {
+  "Auto Address Mirroring": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "Ext DualSID Range Split": {
+   "current": "Off",
+   "default": "Off"
+  },
+  "Paddle Override": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "SID Socket 1 Address": {
+   "current": "$D400",
+   "default": "$D400"
+  },
+  "SID Socket 2 Address": {
+   "current": "$D400",
+   "default": "$D400"
+  },
+  "UltiSID 1 Address": {
+   "current": "$D400",
+   "default": "$D400"
+  },
+  "UltiSID 2 Address": {
+   "current": "$D400",
+   "default": "$D400"
+  },
+  "UltiSID Range Split": {
+   "current": "Off",
+   "default": "Off"
+  }
+ },
+ "SID Sockets Configuration": {
+  "SID Detected Socket 1": {
+   "current": "6581",
+   "default": "None"
+  },
+  "SID Detected Socket 2": {
+   "current": "None",
+   "default": "None"
+  },
+  "SID Socket 1": {
+   "current": "Enabled",
+   "default": "Disabled"
+  },
+  "SID Socket 1 1K Ohm Resistor": {
+   "current": "On",
+   "default": "Off"
+  },
+  "SID Socket 1 Capacitors": {
+   "current": "470 pF",
+   "default": "470 pF"
+  },
+  "SID Socket 2": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "SID Socket 2 1K Ohm Resistor": {
+   "current": "Off",
+   "default": "Off"
+  },
+  "SID Socket 2 Capacitors": {
+   "current": "470 pF",
+   "default": "470 pF"
+  }
+ },
+ "SoftIEC Drive Settings": {
+  "Default Path": {
+   "current": "/USB0/",
+   "default": "/USB0/"
+  },
+  "IEC Drive": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "Soft Drive Bus ID": {
+   "current": 11,
+   "default": 11
+  }
+ },
+ "Speaker Mixer": {
+  "Speaker Enable": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "Vol Drive 1": {
+   "current": "-15 dB",
+   "default": "-15 dB"
+  },
+  "Vol Drive 2": {
+   "current": "-15 dB",
+   "default": "-15 dB"
+  },
+  "Vol Sampler L": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol Sampler R": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol Socket 1": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol Socket 2": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol Tape Read": {
+   "current": "-36 dB",
+   "default": "-36 dB"
+  },
+  "Vol Tape Write": {
+   "current": "-36 dB",
+   "default": "-36 dB"
+  },
+  "Vol UltiSid 1": {
+   "current": "OFF",
+   "default": "OFF"
+  },
+  "Vol UltiSid 2": {
+   "current": "OFF",
+   "default": "OFF"
+  }
+ },
+ "Tape Settings": {
+  "Tape Playback Rate": {
+   "current": "0.98 MHz (PAL)",
+   "default": "0.98 MHz (PAL)"
+  }
+ },
+ "U64 Specific Settings": {
+  "Adjust Color Clock": {
+   "current": 0,
+   "default": 0
+  },
+  "Allow Autoconfig uses UltiSid": {
+   "current": "Yes",
+   "default": "Yes"
+  },
+  "Analog Video Mode": {
+   "current": "CVBS + SVideo",
+   "default": "CVBS + SVideo"
+  },
+  "Badline Timing": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "Burst Mode Patch": {
+   "current": "Off",
+   "default": "Off"
+  },
+  "C64U Model": {
+   "current": "Starlight Edition",
+   "default": "Starlight Edition"
+  },
+  "CPU Speed": {
+   "current": " 1",
+   "default": " 1"
+  },
+  "Digital Video Mode": {
+   "current": "Auto",
+   "default": "Auto"
+  },
+  "HDMI Scan Resolution": {
+   "current": "SD (480p/576p)",
+   "default": "SD (480p/576p)"
+  },
+  "HDMI Scan lines": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "HDMI Tx Swing": {
+   "current": 8,
+   "default": 8
+  },
+  "Joystick Swapper": {
+   "current": "Normal",
+   "default": "Normal"
+  },
+  "LED Select Bot": {
+   "current": "Drive A Act",
+   "default": "Drive A Act"
+  },
+  "LED Select Top": {
+   "current": "Any Activity",
+   "default": "On"
+  },
+  "Palette Definition": {
+   "current": "",
+   "default": ""
+  },
+  "SID Player Autoconfig": {
+   "current": "Enabled",
+   "default": "Enabled"
+  },
+  "Serial Bus Mode": {
+   "current": "All Connected",
+   "default": "All Connected"
+  },
+  "SpeedDOS Parallel Cable": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "SuperCPU Detect (D0BC)": {
+   "current": "Disabled",
+   "default": "Disabled"
+  },
+  "System Mode": {
+   "current": "NTSC-50",
+   "default": "PAL"
+  },
+  "Turbo Control": {
+   "current": "C64U Turbo Registers",
+   "default": "Off"
+  },
+  "UserPort Power Enable": {
+   "current": "Enabled",
+   "default": "Enabled"
+  }
+ },
+ "UltiSID Configuration": {
+  "UltiSID 1 Combined Waveforms": {
+   "current": "6581",
+   "default": "6581"
+  },
+  "UltiSID 1 Digis Level": {
+   "current": "Medium",
+   "default": "Medium"
+  },
+  "UltiSID 1 Filter Curve": {
+   "current": "8580 Lo",
+   "default": "8580 Lo"
+  },
+  "UltiSID 1 Filter Resonance": {
+   "current": "Low",
+   "default": "Low"
+  },
+  "UltiSID 2 Combined Waveforms": {
+   "current": "6581",
+   "default": "6581"
+  },
+  "UltiSID 2 Digis Level": {
+   "current": "Medium",
+   "default": "Medium"
+  },
+  "UltiSID 2 Filter Curve": {
+   "current": "8580 Lo",
+   "default": "8580 Lo"
+  },
+  "UltiSID 2 Filter Resonance": {
+   "current": "Low",
+   "default": "Low"
+  }
+ },
+ "_redacted": [
+  "Data Streams/Stream Audio to",
+  "Data Streams/Stream Debug to",
+  "Data Streams/Stream VIC to",
+  "Ethernet Settings",
+  "Network Settings",
+  "User Interface Settings",
+  "WiFi settings"
+ ]
+}

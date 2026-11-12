@@ -1,0 +1,2 @@
+# session 2, block 3 alone (split from session2.plan; same trials and order)
+3  DP 6     # repeat of session 1 block 2b, now with the stall record (io_last): D vs P (1000-byte read every 2 s from 3 s)

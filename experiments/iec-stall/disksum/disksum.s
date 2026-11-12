@@ -85,7 +85,7 @@ start:
 
 sector:
         ; "U1:2 0 tt ss" on channel 15
-        lda #15
+        ldx #15             ; CHKOUT/CHKIN take the logical file number in X, not A
         jsr CHKOUT
         ldx #0
 @cmd:   stx TMPX
@@ -104,7 +104,7 @@ sector:
         jsr CLRCHN
 
         ; the two status characters, then the rest of the line up to CR (or end of data)
-        lda #15
+        ldx #15
         jsr CHKIN
         jsr CHRIN
         sta ERRCH
@@ -127,7 +127,7 @@ sector:
 @e2:
 
         ; the 256 bytes of the sector, channel 2
-        lda #2
+        ldx #2
         jsr CHKIN
         ldx #0
 @rd:    stx TMPX
