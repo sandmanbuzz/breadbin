@@ -1,0 +1,208 @@
+gate paced read $DD00 len 1 t=218295.884-218295.892
+gate paced read $DD00 len 1 t=218295.992-218296.000
+gate paced read $DD00 len 1 t=218296.100-218296.109
+gate idle raw=$97,$97,$97 t=218295.892,218296.000,218296.109
+gate read $0400 len 1000 t=218296.109-218296.122
+gate paced read $DD00 len 1 t=218296.622-218296.630
+gate paced read $DD00 len 1 t=218296.730-218296.739
+gate paced read $DD00 len 1 t=218296.839-218296.847
+gate idle raw=$97,$97,$97 t=218296.630,218296.739,218296.847
+gate read $0400 len 1000 t=218296.847-218296.860
+gate paced read $DD00 len 1 t=218296.960-218296.968
+gate paced read $DD00 len 1 t=218297.069-218297.076
+gate paced read $DD00 len 1 t=218297.176-218297.184
+gate idle raw=$97,$97,$97 t=218296.968,218297.076,218297.184
+gate read $00C6 len 1 t=218297.184-218297.196
+gate keys len 8 t=218297.196-218297.219
+gate paced read $DD00 len 1 t=218297.319-218297.328
+gate paced read $DD00 len 1 t=218297.428-218297.436
+gate paced read $DD00 len 1 t=218297.536-218297.544
+gate idle raw=$97,$97,$97 t=218297.328,218297.436,218297.544
+gate read $00C6 len 1 t=218297.544-218297.555
+gate keys len 4 t=218297.555-218297.578
+gate paced read $00D6 len 1 t=218317.578-218317.587
+gate paced read $0590 len 1 t=218317.687-218317.694
+gate paced read $0591 len 1 t=218317.794-218317.803
+gate paced read $0592 len 1 t=218317.903-218317.911
+gate paced read $0593 len 1 t=218318.011-218318.019
+gate paced read $0594 len 1 t=218318.119-218318.128
+gate paced read $0595 len 1 t=218318.228-218318.236
+gate paced read $00D6 len 1 t=218318.337-218318.344
+gate paced read $0568 len 1 t=218318.444-218318.453
+gate paced read $DD00 len 1 t=218318.553-218318.561
+gate paced read $DD00 len 1 t=218318.661-218318.669
+gate paced read $DD00 len 1 t=218318.769-218318.778
+gate idle raw=$C7,$C7,$C7 t=218318.561,218318.669,218318.778
+gate read $00AE len 2 t=218318.778-218318.789
+verify_loaded: end pointer $AE/$AF = $440C, expected $440C (15371 bytes at $0801)
+gate paced read $DD00 len 1 t=218318.889-218318.897
+gate paced read $DD00 len 1 t=218318.997-218319.006
+gate paced read $DD00 len 1 t=218319.106-218319.114
+gate idle raw=$C7,$C7,$C7 t=218318.897,218319.006,218319.114
+gate read $0801 len 4096 t=218319.114-218319.135
+gate paced read $DD00 len 1 t=218319.235-218319.243
+gate paced read $DD00 len 1 t=218319.343-218319.352
+gate paced read $DD00 len 1 t=218319.452-218319.460
+gate idle raw=$C7,$C7,$C7 t=218319.243,218319.352,218319.460
+gate read $1801 len 4096 t=218319.460-218319.482
+gate paced read $DD00 len 1 t=218319.582-218319.590
+gate paced read $DD00 len 1 t=218319.690-218319.698
+gate paced read $DD00 len 1 t=218319.798-218319.806
+gate idle raw=$C7,$C7,$C7 t=218319.590,218319.698,218319.806
+gate read $2801 len 4096 t=218319.806-218319.827
+gate paced read $DD00 len 1 t=218319.927-218319.936
+gate paced read $DD00 len 1 t=218320.036-218320.044
+gate paced read $DD00 len 1 t=218320.144-218320.152
+gate idle raw=$C7,$C7,$C7 t=218319.936,218320.044,218320.152
+gate read $3801 len 3083 t=218320.153-218320.172
+gate paced read $DD00 len 1 t=218320.272-218320.280
+gate paced read $DD00 len 1 t=218320.381-218320.389
+gate paced read $DD00 len 1 t=218320.489-218320.497
+gate idle raw=$C7,$C7,$C7 t=218320.281,218320.389,218320.497
+gate read $00C6 len 1 t=218320.497-218320.508
+gate keys len 4 t=218320.509-218320.531
+gate paced read $DD00 len 1 t=218320.631-218320.639
+gate paced read $DD00 len 1 t=218320.739-218320.747
+gate paced read $DD00 len 1 t=218320.848-218320.856
+gate idle raw=$C7,$C7,$C7 t=218320.639,218320.748,218320.856
+gate read $0400 len 1000 t=218320.856-218320.869
+gate paced read $DD00 len 1 t=218321.369-218321.378
+gate busy raw=$4F t=218321.378
+gate paced read $DD00 len 1 t=218321.878-218321.886
+gate busy raw=$4F t=218321.886
+gate paced read $DD00 len 1 t=218322.386-218322.394
+gate busy raw=$67 t=218322.394
+gate paced read $DD00 len 1 t=218322.894-218322.902
+gate paced read $DD00 len 1 t=218323.002-218323.011
+gate busy raw=$C7,$07 t=218322.902,218323.011
+gate paced read $DD00 len 1 t=218323.511-218323.519
+gate paced read $DD00 len 1 t=218323.619-218323.627
+gate paced read $DD00 len 1 t=218323.727-218323.736
+gate idle raw=$C7,$C7,$C7 t=218323.519,218323.627,218323.736
+gate read $0400 len 1000 t=218323.736-218323.749
+gate paced read $DD00 len 1 t=218324.249-218324.258
+gate paced read $DD00 len 1 t=218324.358-218324.366
+gate paced read $DD00 len 1 t=218324.466-218324.474
+gate idle raw=$C7,$C7,$C7 t=218324.258,218324.366,218324.474
+gate read $0400 len 1000 t=218324.474-218324.487
+gate paced read $DD00 len 1 t=218324.587-218324.596
+gate paced read $DD00 len 1 t=218324.696-218324.704
+gate paced read $DD00 len 1 t=218324.804-218324.812
+gate idle raw=$C7,$C7,$C7 t=218324.596,218324.704,218324.812
+gate read $00C6 len 1 t=218324.812-218324.823
+gate keys len 5 t=218324.823-218324.846
+gate paced read $DD00 len 1 t=218324.946-218324.955
+gate paced read $DD00 len 1 t=218325.055-218325.063
+gate paced read $DD00 len 1 t=218325.163-218325.171
+gate idle raw=$C7,$C7,$C7 t=218324.955,218325.063,218325.171
+gate read $0400 len 1000 t=218325.171-218325.184
+gate paced read $DD00 len 1 t=218325.684-218325.693
+gate paced read $DD00 len 1 t=218325.793-218325.801
+gate paced read $DD00 len 1 t=218325.901-218325.909
+gate idle raw=$C7,$C7,$C7 t=218325.693,218325.801,218325.909
+gate read $0400 len 1000 t=218325.909-218325.922
+gate paced read $DD00 len 1 t=218326.022-218326.030
+gate paced read $DD00 len 1 t=218326.130-218326.138
+gate paced read $DD00 len 1 t=218326.239-218326.247
+gate idle raw=$C7,$C7,$C7 t=218326.030,218326.138,218326.247
+gate read $00C6 len 1 t=218326.247-218326.258
+gate keys len 6 t=218326.258-218326.281
+gate paced read $DD00 len 1 t=218326.381-218326.389
+gate paced read $DD00 len 1 t=218326.489-218326.497
+gate paced read $DD00 len 1 t=218326.597-218326.605
+gate idle raw=$C7,$C7,$C7 t=218326.389,218326.497,218326.605
+gate read $0400 len 1000 t=218326.605-218326.619
+gate paced read $DD00 len 1 t=218326.719-218326.727
+gate paced read $DD00 len 1 t=218326.827-218326.835
+gate paced read $DD00 len 1 t=218326.935-218326.944
+gate idle raw=$C7,$C7,$C7 t=218326.727,218326.835,218326.944
+gate read $00C6 len 1 t=218326.944-218326.955
+gate keys len 8 t=218326.955-218326.978
+gate paced read $DD00 len 1 t=218327.078-218327.086
+gate paced read $DD00 len 1 t=218327.186-218327.195
+gate paced read $DD00 len 1 t=218327.295-218327.303
+gate idle raw=$C7,$C7,$C7 t=218327.086,218327.195,218327.303
+gate read $00C6 len 1 t=218327.303-218327.314
+gate keys len 5 t=218327.314-218327.337
+gate paced read $DD00 len 1 t=218327.437-218327.446
+gate paced read $DD00 len 1 t=218327.546-218327.554
+gate busy raw=$C7,$17 t=218327.446,218327.554
+gate paced read $DD00 len 1 t=218327.954-218327.962
+gate busy raw=$4F t=218327.962
+gate paced read $DD00 len 1 t=218328.362-218328.370
+gate busy raw=$4F t=218328.370
+gate paced read $DD00 len 1 t=218328.770-218328.779
+gate busy raw=$27 t=218328.779
+gate paced read $DD00 len 1 t=218329.179-218329.187
+gate busy raw=$67 t=218329.187
+gate paced read $DD00 len 1 t=218329.587-218329.596
+gate paced read $DD00 len 1 t=218329.696-218329.704
+gate paced read $DD00 len 1 t=218329.804-218329.812
+gate idle raw=$C7,$C7,$C7 t=218329.596,218329.704,218329.812
+gate read $0400 len 1000 t=218329.812-218329.825
+gate paced read $DD00 len 1 t=218329.925-218329.933
+gate paced read $DD00 len 1 t=218330.033-218330.041
+gate paced read $DD00 len 1 t=218330.141-218330.149
+gate idle raw=$C7,$C7,$C7 t=218329.933,218330.041,218330.149
+gate read $E663 len 17 t=218330.150-218330.161
+gate paced read $DD00 len 1 t=218330.261-218330.269
+gate paced read $DD00 len 1 t=218330.369-218330.377
+gate paced read $DD00 len 1 t=218330.477-218330.486
+gate idle raw=$C7,$C7,$C7 t=218330.269,218330.377,218330.486
+gate read $004A len 3 t=218330.486-218330.497
+gate paced read $DD00 len 1 t=218330.597-218330.606
+gate paced read $DD00 len 1 t=218330.706-218330.713
+gate paced read $DD00 len 1 t=218330.814-218330.822
+gate idle raw=$C7,$C7,$C7 t=218330.606,218330.714,218330.822
+gate read $00C6 len 1 t=218330.822-218330.833
+gate keys len 6 t=218330.833-218330.856
+gate paced read $DD00 len 1 t=218330.956-218330.965
+gate paced read $DD00 len 1 t=218331.065-218331.073
+gate paced read $DD00 len 1 t=218331.173-218331.181
+gate idle raw=$C7,$C7,$C7 t=218330.965,218331.073,218331.181
+gate read $0400 len 1000 t=218331.181-218331.194
+gate paced read $DD00 len 1 t=218331.294-218331.302
+gate paced read $DD00 len 1 t=218331.402-218331.410
+gate paced read $DD00 len 1 t=218331.510-218331.518
+gate idle raw=$C7,$C7,$C7 t=218331.302,218331.410,218331.518
+gate read $00C6 len 1 t=218331.518-218331.530
+gate keys len 8 t=218331.530-218331.553
+gate paced read $DD00 len 1 t=218331.653-218331.661
+gate paced read $DD00 len 1 t=218331.761-218331.769
+gate paced read $DD00 len 1 t=218331.869-218331.878
+gate idle raw=$C7,$C7,$C7 t=218331.661,218331.769,218331.878
+gate read $00C6 len 1 t=218331.878-218331.889
+gate keys len 8 t=218331.889-218331.910
+gate paced read $DD00 len 1 t=218332.010-218332.018
+gate paced read $DD00 len 1 t=218332.118-218332.126
+gate paced read $DD00 len 1 t=218332.226-218332.235
+gate idle raw=$C7,$C7,$C7 t=218332.018,218332.126,218332.235
+gate read $00C6 len 1 t=218332.235-218332.246
+gate keys len 8 t=218332.246-218332.269
+gate paced read $DD00 len 1 t=218332.369-218332.377
+gate paced read $DD00 len 1 t=218332.477-218332.485
+gate paced read $DD00 len 1 t=218332.586-218332.593
+gate idle raw=$C7,$C7,$C7 t=218332.377,218332.485,218332.593
+gate read $00C6 len 1 t=218332.593-218332.605
+gate keys len 8 t=218332.605-218332.628
+gate paced read $DD00 len 1 t=218332.728-218332.736
+gate paced read $DD00 len 1 t=218332.836-218332.845
+gate paced read $DD00 len 1 t=218332.945-218332.953
+gate idle raw=$C7,$C7,$C7 t=218332.736,218332.845,218332.953
+gate read $00C6 len 1 t=218332.953-218332.964
+gate keys len 4 t=218332.964-218332.988
+gate paced read $DD00 len 1 t=230002.988-230002.996
+gate paced read $DD00 len 1 t=230003.096-230003.105
+gate paced read $DD00 len 1 t=230003.205-230003.213
+gate idle raw=$C7,$C7,$C7 t=230002.996,230003.105,230003.213
+gate read $0400 len 1000 t=230003.213-230003.226
+gate paced read $DD00 len 1 t=230003.326-230003.334
+gate paced read $DD00 len 1 t=230003.434-230003.442
+gate paced read $DD00 len 1 t=230003.542-230003.551
+gate idle raw=$C7,$C7,$C7 t=230003.334,230003.442,230003.551
+gate read $E663 len 17 t=230003.551-230003.562
+gate paced read $DD00 len 1 t=230003.662-230003.670
+gate paced read $DD00 len 1 t=230003.770-230003.778
+gate paced read $DD00 len 1 t=230003.878-230003.886
+gate idle raw=$C7,$C7,$C7 t=230003.670,230003.778,230003.886
+gate read $004A len 3 t=230003.886-230003.898

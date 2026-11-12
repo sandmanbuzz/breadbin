@@ -1,0 +1,4 @@
+# After B, outside the harness, 2026-11-12T20:15Z (UTC): SoftIEC IEC Drive set to Disabled by a REST PUT under the ultimate lock, then read back.
+put rc=0
+Kernal ROM {'current': 'JiffyDOS-C64.bin', 'presets': ['', 'JiffyDOS-C64.bin', 'JiffyDOS-kernal.bin'], 'default': ''}
+IEC Drive {'current': 'Disabled', 'values': ['Disabled', 'Enabled'], 'default': 'Disabled'}
