@@ -59,8 +59,28 @@ class Keyboard(unittest.TestCase):
         # a test that fails must not leave a job running for the next one
         self.v.keybuf(b"\x03")
         time.sleep(1)
+        self.clear_line()
+
+    def clear_line(self):
+        # nor a half-typed line: the login shell ignores SIGINT, so CTRL-C does not
+        # clear it, and the next setUp's "clear" would be appended ("echo clear").
+        # 128 DELs (the shell's line holds up to 127 characters, LINEMAX in sh.s) and
+        # RETURN, which on an empty line only prints a prompt; DEL on an empty line does
+        # nothing. The buffer takes 10 keys at a time. Skipped when the screen ends on
+        # an empty prompt (the shell echoes what it has read, so nothing is pending)
+        lines = [l for l in self.v.screen_lines() if l]
+        if lines and lines[-1] == "/ $":
+            return
+        for _ in range(16):
+            self.v.keybuf(b"\x14" * 8)
+            time.sleep(0.3)
+        self.v.keybuf(b"\r")
+        time.sleep(0.5)
 
     def setUp(self):
+        # also here: unittest skips tearDown when setUp fails, so a line left there
+        # would reach every later setUp
+        self.clear_line()
         self.v.type("clear\n")
         self.until(lambda l: l == ["/ $"], what="a cleared screen")
 
@@ -125,23 +145,41 @@ class Keyboard(unittest.TestCase):
         self.v.xup("Control_L")
         time.sleep(0.3)
 
+    def submit(self, pred, what):
+        """RETURN, then wait for pred; RETURN once more if it has not come within
+        8 s. A RETURN pressed during the TAB completion (which reads the directory
+        and stats the match) went missing in two full suites under load: likely a key
+        pressed and released while the bus code had interrupts off, or VICE falling
+        behind real time while it emulates the drive (not told apart). The
+        completion shows nothing on screen for when it is done. A RETURN that was
+        only late gives an empty prompt, which the predicates allow."""
+        self.v.xkey("Return")
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            if pred([l for l in self.v.screen_lines() if l]):
+                return
+            time.sleep(0.4)
+        self.v.xkey("Return")
+        self.until(pred, what=what)
+
     def test_tab_no_match_does_not_fire(self):
         # real TAB on a word nothing completes to: the line is left as typed, the
         # command runs once, and nothing is inserted or replaced after the word
         self.v.xtype("echo zzqqx")
         self.ctrl_i()
-        time.sleep(0.5)
-        self.v.xkey("Return")
-        lines = self.until(lambda l: "zzqqx" in l, what="the echoed word")
-        self.assertFalse(any(l.startswith("echo zzqqx") and l != "echo zzqqx" for l in lines), lines)
+        self.submit(lambda l: "zzqqx" in l and l[-1] == "/ $", what="the echoed word and a new prompt")
+        lines = [l for l in self.v.screen_lines() if l]
+        self.assertFalse(any(l.startswith("/ $ echo zzqqx") and l != "/ $ echo zzqqx" for l in lines), lines)
         self.assertEqual(sum(1 for l in lines if l == "zzqqx"), 1, lines)
 
     def test_tab_completes_a_real_key(self):
         # positive control for the test above: a real TAB reaches the shell and completes
         self.v.xtype("ech")
         self.ctrl_i()
-        self.v.xkey("Return")
-        self.until(lambda l: any(x.rstrip() == "/ $ echo" for x in l), what="ech completed to echo")
+        self.until(lambda l: "/ $ echo" in l, what="ech completed to echo")
+        # the completion is drawn before its stat of /bin/echo picks ' ' or '/',
+        # so RETURN can still meet the disk I/O: submit presses it again if needed
+        self.submit(lambda l: "/ $ echo" in l and l[-1] == "/ $", what="echo run and a new prompt")
 
     def test_history_recalls_lines(self):
         # cursor up recalls the line before, cursor down goes forward again, and
