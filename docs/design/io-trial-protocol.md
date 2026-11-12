@@ -165,3 +165,20 @@ The scripts are `experiments/iec-stall/session5.py` (host tests `tools/test_sess
 - **R runs with the REU cache as built** (on): the expected user path. Each cycle's KERNAL `load"*",8,1` of BREADBIN still crosses the bus, and that is where the `?LOAD ERROR` was seen. B's read-back covers the bus with the cache off. Each R row records the `cache` output.
 - **cksum and wv come from a tools disk on drive A, bus 9** (Breadbin has no cksum). Drive A is the Ultimate's emulated drive, not the physical one, so those reads do not test the physical bus path to the 1541. The config is the sessions 1-4 one (SoftIEC off, drive A on bus 9, DMA load mimics 8), set, read back and restored.
 - **The waits come from VICE timing** (W 17.2 s per cycle on the stock KERNAL, B 12.9 s). The JiffyDOS hardware should be faster, and the waits are 3 times the estimate. A wait that proves too short is a HANG (a failure), not a reason to rerun quietly.
+
+### Session 5 results (2026-11-11/12)
+
+**Pass: 0 failures in W, B and R together.** The release landed on main (9d1b949).
+
+| Arm | Ran on | N | Outcome | Counts |
+|---|---|---|---|---|
+| W | ROM KERNAL (JiffyDOS), scratch disk "S5W SCRATCH" | 300 | pass, 15540 s | 300 done, 0 mismatches, 0 ST, 0 DOS errors, 17.0 s per cycle, blocks free 664 before and after; gate races 0 |
+| B | Breadbin, release image 86650ca on the physical 1541 | 300 | pass, 11671 s | 300 ok, 0 mismatches, 0 errors, nobus 0 (every read-back with the cache off moved io_nread); io_nread 1578, io_nretry 0, io_nfail 0, io_nwretry 0, io_nwfail 0; 32.8 s per cycle; gate races 0 |
+| R | Breadbin, same disk, cache as built (on) | 50 | 50 pass, 54.5 s mean | load verified (end $440C), /bin 47 names, cksum of /bin/as right every cycle; io_nretry 0, io_nfail 0, io_nwretry 0, io_nwfail 0; gate races 1 |
+
+- **Deviation: the tree.** The amendment names c67ec83; W ran on that build (W uses only the ROM KERNAL and its own BASIC program), B and R on 86650ca, the release tip after main was merged in (the keyboard test fix). c67ec83..86650ca changes only `docs/roadmap.md`, `docs/size-ledger.tsv`, `tests/test_iec_fault.py` and `tests/test_keyboard.py`: kernel and image tools unchanged; the image differs in its build stamp only. The release image (sha256 c6f30b2a...) was written to the physical disk by nibcopy before B, directory and BAM (0 free) checked.
+- **R and the cache.** Cycle 1 filled the cache (100 hits, 36 bus reads); cycles 2-50 read nothing from the bus after the boot (136 hits, 0 bus reads), so R's coverage of Breadbin's own bus reads is cycle 1 only. Each cycle's KERNAL load of BREADBIN (15371 bytes from the physical 1541, JiffyDOS) crossed the bus all 50 times. B is the arm for Breadbin's bus reads.
+- **The gate race.** R cycle 1: a 1000-byte screen read at $0400 landed between two busy verdicts (busy again 0.41 s after it, sample $4F). The cycle passed. Recorded; by the rule above it changes nothing, and it is not a failure.
+- **Config.** Each arm set the session config and read it back, and restored it at the end; after R, SoftIEC was set back to Disabled (its state before session 5) and read back: Kernal ROM JiffyDOS-C64.bin, IEC Drive Disabled.
+- **Not done:** fresh media (the disk was rewritten from the image, not a new disk); a second R block with the cache off.
+- Files: `experiments/iec-stall/results/session5/` (w/b/r.tsv, session5.log.tsv, gate logs; r.gate.log gzipped). tools.d64 is not kept (`session5.py tools --tree TREE` rebuilds it).
