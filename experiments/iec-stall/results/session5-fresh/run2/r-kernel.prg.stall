@@ -1,0 +1,1 @@
+{'io_out': '00', 'io_base': '07', 'io_b': '00', 'io_n': '00', 'io_to': '04', 'io_pend': '00', 'io_held': '30', 'io_eoi': '00', 'io_inf': '01', 'io_sx': '00', 'io_sy': '0a', 'ie_dev': '09', 'ie_sa': '0f', 'ie_len': '01', 'ie_len2': '60'} stack:000ebc8185bd0cbdba63ae0090c000000040b7bc7dea7dea7d35a3cd35cd7ea435a3c8000201207faa3535a335a3c800ff00a002c8305dc86fca78c4870846c8

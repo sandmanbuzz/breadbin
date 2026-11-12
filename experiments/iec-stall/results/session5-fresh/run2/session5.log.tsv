@@ -1,0 +1,13 @@
+note
+# session 5 2026-11-12T16:31:20Z: r [('-', 'R', 50)]; tree build 86650ca
+# config before: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Enabled"}
+# config set, read back: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# arm R x 50 start 2026-11-12T16:31:35Z
+# arm R end 2026-11-12T16:56:35Z: exit 1
+# config after restore: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Enabled"}
+# session 5 2026-11-12T16:59:22Z: b [('-', 'B', 300)]; tree build 86650ca
+# config before: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Enabled"}
+# config set, read back: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Disabled"}
+# arm B x 300 start 2026-11-12T16:59:38Z
+# arm B end 2026-11-12T20:14:49Z: exit 0
+# config after restore: {"C64 and Cartridge Settings/DMA Load Mimics ID:": "8", "C64 and Cartridge Settings/Kernal ROM": "JiffyDOS-C64.bin", "Drive A Settings/Drive": "Enabled", "Drive A Settings/Drive Bus ID": "9", "SoftIEC Drive Settings/IEC Drive": "Enabled"}
