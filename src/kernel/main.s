@@ -1,10 +1,13 @@
 ; Breadbin kernel: boot stub, init, panic
 .include "k.inc"
 
-.import __CODE_LOAD__, __CODE_RUN__, __CODE_SIZE__, __RODATA_SIZE__, __DATA_SIZE__
+.import __IECBUS_LOAD__, __IECBUS_RUN__, __IECBUS_SIZE__, __CODE_SIZE__, __RODATA_SIZE__, __DATA_SIZE__
 .import __JUMPTAB_LOAD__, __JUMPTAB_RUN__, __BSS_RUN__, __BSS_SIZE__
 .import die_redirect, p_sig
 .import __CODEHI_LOAD__, __CODEHI_RUN__, __CODEHI_SIZE__
+.import __CODE_LOAD__, __CODE_RUN__
+.assert __CODE_LOAD__ = __IECBUS_LOAD__ + __IECBUS_SIZE__, error, "the stub copies IECBUS and CODE as one run"
+.assert __CODE_RUN__ = __IECBUS_RUN__ + __IECBUS_SIZE__, error, "the stub copies IECBUS and CODE as one run"
 .assert __CODEHI_RUN__ + __CODEHI_SIZE__ <= $fffa, error, "CODEHI runs into the hardware vectors"
 
 .segment "ZEROPAGE"
@@ -41,16 +44,16 @@ basic_end:
 stub:
         sei
         cld
-        ; copy CODE+RODATA+DATA to its run address
-        lda #<__CODE_LOAD__
+        ; copy IECBUS+CODE+RODATA+DATA (one run, in that order: kernel.cfg) to its run address
+        lda #<__IECBUS_LOAD__
         sta $fb
-        lda #>__CODE_LOAD__
+        lda #>__IECBUS_LOAD__
         sta $fc
-        lda #<__CODE_RUN__
+        lda #<__IECBUS_RUN__
         sta $fd
-        lda #>__CODE_RUN__
+        lda #>__IECBUS_RUN__
         sta $fe
-        ldx #>(__CODE_SIZE__ + __RODATA_SIZE__ + __DATA_SIZE__ + 255)
+        ldx #>(__IECBUS_SIZE__ + __CODE_SIZE__ + __RODATA_SIZE__ + __DATA_SIZE__ + 255)
         jsr stub_copy
         lda #<__JUMPTAB_LOAD__
         sta $fb

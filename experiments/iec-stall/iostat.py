@@ -1,10 +1,12 @@
-"""IOSTAT counters of a running kernel (make IOSTAT=1, the default): how often the block-read mitigation fired.
+"""IOSTAT counters of a running kernel (make IOSTAT=1, the default): how often the block-read mitigation fired
+(io_nread/io_nretry/io_nfail/io_neoi and the last-timeout record: block reads only), and the block-write retries
+and failures (io_nwretry, 16 bits; io_nwfail, 8 bits; absent on older kernels).
     BREADBIN_ULTIMATE=host python3 iostat.py IMAGE.prg     # needs IMAGE.lbl next to it; a few small DMA reads, run it after login
 imported by dmaboot.py / plainboot.py for the stall dump (decode.py prints it)."""
 import re
 import sys
 
-IOSTAT_NAMES = ("io_nread io_nretry io_nfail io_neoi", "io_ltrk io_lsct io_lidx io_ltry io_lst io_lwn")
+IOSTAT_NAMES = ("io_nread io_nretry io_nfail io_neoi io_nwretry", "io_ltrk io_lsct io_lidx io_ltry io_lst io_lwn io_nwfail")
 
 
 def labels(img):
@@ -13,15 +15,18 @@ def labels(img):
 
 
 def iostat_dump(u, lbl):
-    """The counters (16-bit, little endian) and the last-timeout record, or {} for a kernel built IOSTAT=0."""
+    """The counters (16-bit, little endian; io_nwfail 8-bit) and the last-timeout record, or {} for a kernel built
+    IOSTAT=0. A name missing from the label file (an older kernel) is left out."""
     if "io_nread" not in lbl:
         return {}
     d = {}
     for n in IOSTAT_NAMES[0].split():
-        b = u.readmem(lbl[n], 2)
-        d[n] = b[0] | b[1] << 8
+        if n in lbl:
+            b = u.readmem(lbl[n], 2)
+            d[n] = b[0] | b[1] << 8
     for n in IOSTAT_NAMES[1].split():
-        d[n] = u.readmem(lbl[n], 1)[0]
+        if n in lbl:
+            d[n] = u.readmem(lbl[n], 1)[0]
     return d
 
 
