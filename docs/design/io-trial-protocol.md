@@ -152,3 +152,16 @@ Every failure counts, including one next to a reported gate race; none is attrib
 - **A B or R failure with W clean** points at our kernel.
 
 **Prediction:** 0 failures in each arm. Retries: none expected in W, which has no retry counter, and fewer than 5 in B and R together.
+
+### Session 5 amendment (2026-11-11, after the scripts were built, before any session-5 trial)
+
+The scripts are `experiments/iec-stall/session5.py` (host tests `tools/test_session5.py`, VICE tests `tests/session5_vice.py`). Fixed before the first trial:
+
+- **The tree.** The release tree is `fix/io-release` at `c67ec83` (kernel as `572e54a`; `c67ec83` only moves `tests/test_iec_fault.py` between shards), built clean (`build/rev.txt` without `+`; the script refuses otherwise).
+- **Disks, hands-free.** W needs a CBM disk with free blocks, since the release disk has none and W refuses on it. Each arm's disk is written onto the physical disk with the accepted imaging path (`nibsetup.sh up`, `nibcopy.py`, `nibsetup.sh down`): a blank CBM image for W, then the release image for B and R. Each write overwrites the physical disk and is announced in the log. The arms run one at a time (`session5.py w|b|r`), not as one plan, so no disk-swap prompt is needed.
+- **A W failure does not stop B and R** (the rule above): the arm stops, the state is captured, and B and R still run once it is understood.
+- **A HANG is a failure.** No end within the arm's wait (the VICE estimate times 3) counts as a hang whatever the drain shows later. SETUP (W never ran) and STOP (a network error or a signal) are not results: the arm is run again, and both are reported.
+- **INVALID B** (a read-back that never reached the bus) is not a pass: the arm is fixed and run again.
+- **R runs with the REU cache as built** (on): the expected user path. Each cycle's KERNAL `load"*",8,1` of BREADBIN still crosses the bus, and that is where the `?LOAD ERROR` was seen. B's read-back covers the bus with the cache off. Each R row records the `cache` output.
+- **cksum and wv come from a tools disk on drive A, bus 9** (Breadbin has no cksum). Drive A is the Ultimate's emulated drive, not the physical one, so those reads do not test the physical bus path to the 1541. The config is the sessions 1-4 one (SoftIEC off, drive A on bus 9, DMA load mimics 8), set, read back and restored.
+- **The waits come from VICE timing** (W 17.2 s per cycle on the stock KERNAL, B 12.9 s). The JiffyDOS hardware should be faster, and the waits are 3 times the estimate. A wait that proves too short is a HANG (a failure), not a reason to rerun quietly.
