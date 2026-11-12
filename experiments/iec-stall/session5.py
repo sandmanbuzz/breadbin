@@ -594,9 +594,11 @@ class Arms:
         return EXIT_FAIL if failed else EXIT_PASS
 
     # ---------------- boot helper (B and R)
-    def boot(self, tools_d64):
-        """A new UltimateTarget on the tools disk: the boot load comes from the physical drive (bus 8)."""
-        return self.target(tools_d64)
+    def target_for_boot(self):
+        """A new UltimateTarget, not booted yet: the caller boots it inside its try, so a failed load still
+        leaves a target to capture with (the boot load comes from the physical drive, bus 8; the tools disk
+        is what is mounted in drive A, bus 9)."""
+        return self.target(None)
 
     # ---------------- B
     def b(self, n, tools_d64, labels, facts):
@@ -608,10 +610,10 @@ class Arms:
                     f"program experiments/iec-stall/session5/wv.s, built against the release tree")
         start, t0 = now_iso(), self.clock.monotonic()
         row = dict(arm="B", start_iso=start, n=n, wait_s=f"{wait:.0f}", d64_sha=facts["d64_sha"])
-        t = None
+        t = self.target_for_boot()
         stage = "boot"
         try:
-            t = self.boot(tools_d64)
+            t.boot(tools_d64)
             stage = "login"
             t.wait_shell(timeout=120)
             stage = "mount"
@@ -637,15 +639,16 @@ class Arms:
             stage = "iostat after"
             io1 = read_iostat(t, labels)
             tk1 = int.from_bytes(gated_read(t, labels.get("ticks", 0x4A), 3), "little")
+        except session.StopSession:
+            raise                                # a signal: the session stops, not this arm's failure
         except Exception as e:  # noqa: BLE001 - LoadError, TimeoutError, anything: a failure of this arm
             kind = type(e).__name__
             outcome = {"LoadError": "LOAD_ERROR", "TimeoutError": "HANG"}.get(kind, "ERROR")
             row.update(outcome=outcome, seconds=f"{self.clock.monotonic() - t0:.0f}",
                        note=f"{stage}: {kind}: {str(e).splitlines()[0] if str(e) else ''}")
-            if t is not None:
-                capture(t, "B", labels, self.dir, row["note"], kernel=stage != "boot")
-                row.update(gate_races=t.gate_races, key_candidates=t.gate_key_candidates)
-                t.close()
+            capture(t, "B", labels, self.dir, row["note"], kernel=stage != "boot")
+            row.update(gate_races=t.gate_races, key_candidates=t.gate_key_candidates)
+            t.close()
             tsv.row(**row)
             tsv.close()
             self.out(f"B: {outcome} at {stage}: {row['note']}", flush=True)
@@ -704,9 +707,9 @@ class Arms:
         for k in range(1, n + 1):
             start, t0 = now_iso(), self.clock.monotonic()
             row = dict(arm="R", cycle=k, start_iso=start, d64_sha=facts["d64_sha"], sum_want=want_sum)
-            t, stage, why = None, "boot", []
+            t, stage, why = self.target_for_boot(), "boot", []
             try:
-                t = self.boot(tools_d64)
+                t.boot(tools_d64)
                 row["load"] = "verified"
                 stage = "login"
                 t.wait_shell(timeout=120)
@@ -743,6 +746,8 @@ class Arms:
                 scr = "\n".join(t.screen_lines(gate_timeout=60))
                 if "panic" in scr:
                     why.append("panic on screen")
+            except session.StopSession:
+                raise
             except Exception as e:  # noqa: BLE001
                 kind = type(e).__name__
                 outcome = {"LoadError": "LOAD_ERROR", "TimeoutError": "HANG"}.get(kind, "ERROR")
@@ -751,17 +756,14 @@ class Arms:
                 why.insert(0, f"{stage}: {kind}: {str(e).splitlines()[0] if str(e) else ''}")
                 row["outcome"] = outcome
             row["seconds"] = f"{self.clock.monotonic() - t0:.0f}"
-            if t is not None:
-                row.update(gate_races=t.gate_races, key_candidates=t.gate_key_candidates)
+            row.update(gate_races=t.gate_races, key_candidates=t.gate_key_candidates)
             if why:
                 row.setdefault("outcome", "FAIL")
                 row["note"] = "; ".join(why)
-                if t is not None:
-                    capture(t, "R", labels, self.dir, f"cycle {k}: {row['note']}", kernel=stage != "boot")
+                capture(t, "R", labels, self.dir, f"cycle {k}: {row['note']}", kernel=stage != "boot")
                 tsv.row(**row)
                 tsv.close()
-                if t is not None:
-                    t.close()
+                t.close()
                 self.out(f"R cycle {k}: {row['outcome']}: {row['note']}", flush=True)
                 return EXIT_FAIL
             row["outcome"] = "pass"
