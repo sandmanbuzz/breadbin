@@ -6,7 +6,10 @@ The release tree is taken from .s5tree/ in the repo (untracked; a copy of the bu
 build/{breadbin.prg,breadbin.d64,kernel.lbl,rev.txt,lib/breadbin.lib}, include/, src/prog.cfg,
 tools/{cx.py,mkimage.py}); the tests skip without it. Run in the container:
 
-    tools/ci/run.sh test-only T="tests.test_session5"
+    tools/ci/run.sh test-only T="tests.session5_vice"
+
+Not named test_*.py on purpose: these are long experiment workloads (W and B run 300 cycles each), not
+regression tests, so the suite (discover) and the shard list (tools/ci/shards.py) do not pick them up.
 
 Times are measured on the emulated clock (TI for W, the kernel's ticks for B), so warp does not change them.
 """

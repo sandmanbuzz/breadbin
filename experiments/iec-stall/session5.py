@@ -131,7 +131,7 @@ W_FIELDS = [(0, 3, "magic"), (3, 1, "version"), (4, 2, "done"), (6, 2, "mismatch
 W_LEN = 29
 W_MAGIC = b"S5W"
 W_STATES = {0: "not started", 1: "running", 2: "done", 3: "stopped at a failure", 4: "refused (no free blocks)"}
-# Per-cycle time on the stock KERNAL under VICE (tests/test_session5.py, W_CYCLE_VICE there); the wait is
+# Per-cycle time on the stock KERNAL under VICE (tests/session5_vice.py, W_CYCLE_VICE there); the wait is
 # W_WAIT_FACTOR times it per cycle plus W_WAIT_BASE. JiffyDOS on hardware is faster, the stock KERNAL slower.
 W_CYCLE_EST = 4.0
 W_WAIT_FACTOR = 2.0
