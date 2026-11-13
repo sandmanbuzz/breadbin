@@ -66,7 +66,7 @@ verdict() {
     return $fail
 }
 
-slots=${BREADBIN_VICE_SLOTS:-6}
+slots=${BREADBIN_VICE_SLOTS:-8}
 if [ -n "$vdir" ]; then
     [ -n "$expect" ] || { echo "--verdict needs --expect N" >&2; exit 2; }
     verdict "$vdir" "$expect"; exit $?
