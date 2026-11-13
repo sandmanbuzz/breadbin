@@ -1,0 +1,3 @@
+al 00C000 .main
+al 00C010 .helper
+al 00C100 .other
