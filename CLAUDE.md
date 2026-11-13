@@ -55,3 +55,7 @@ Physical 1541: the root-mount stall that predates all of this is **mitigated, no
 - Each session works in its own git worktree. Local `main` is the shared truth and is checked out in the primary clone, where nobody else works; origin is a stale mirror, so start from `main`, not `origin/main`. Landing on main is a merge in the primary under a lock (`docs/process.md`).
 - Commits are signed. If signing fails (no cached passphrase), stop and ask the human; never disable signing.
 - Keep ROMs and anything derived from them out of the repo (`keytab.inc` is the standard keyboard layout; `tools/check_keytab.py` compares it with a ROM).
+
+<!-- caveman-blocks:start -->
+@.blocks/INDEX.md
+<!-- caveman-blocks:end -->
