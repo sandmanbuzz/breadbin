@@ -40,5 +40,45 @@ class LandDirty(unittest.TestCase):
         self.assertIn("new.txt  (uncommitted (no owner))", r.stderr)
 
 
+@unittest.skipUnless(shutil.which("git") and shutil.which("make"), "land.sh needs git and make")
+class LandAnywhere(unittest.TestCase):
+    """land.sh depends on neither where the clone sits nor which branch is checked out."""
+
+    def test_lands_from_moved_clone_on_other_branch(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        env = dict(os.environ, GIT_AUTHOR_NAME="sandmanbuzz", GIT_AUTHOR_EMAIL=MAIL,
+                   GIT_COMMITTER_NAME="sandmanbuzz", GIT_COMMITTER_EMAIL=MAIL,
+                   GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+        old = os.path.join(tmp.name, "old")
+        os.makedirs(old)
+
+        def git(where, *args):
+            subprocess.run(["git", "-C", where, *args], env=env, check=True, capture_output=True)
+
+        git(old, "init", "-q", "-b", "main")
+        git(old, "config", "commit.gpgsign", "false")
+        with open(os.path.join(old, "Makefile"), "w") as f:
+            f.write(".PHONY: clean all test-host\nclean all test-host:\n\t@true\n")
+        git(old, "add", "Makefile")
+        git(old, "commit", "-q", "-m", "base")
+        git(old, "switch", "-q", "-c", "feature")
+        with open(os.path.join(old, "f.txt"), "w") as f:
+            f.write("f\n")
+        git(old, "add", "f.txt")
+        git(old, "commit", "-q", "-m", "feature")
+        git(old, "switch", "-q", "-c", "elsewhere", "main")  # the checkout is not on main
+        new = os.path.join(tmp.name, "moved", "deeper", "clone")
+        os.makedirs(os.path.dirname(new))
+        shutil.move(old, new)
+        r = subprocess.run(["/bin/sh", LAND, "feature"], cwd=new, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("committed", r.stdout)
+        self.assertTrue(os.path.exists(os.path.join(new, "f.txt")))
+        branch = subprocess.run(["git", "-C", new, "rev-parse", "--abbrev-ref", "HEAD"], env=env,
+                                capture_output=True, text=True).stdout.strip()
+        self.assertEqual(branch, "elsewhere")
+
+
 if __name__ == "__main__":
     unittest.main()

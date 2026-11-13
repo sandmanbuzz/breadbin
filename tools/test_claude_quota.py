@@ -7,6 +7,7 @@ import http.server
 import io
 import json
 import os
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -635,6 +636,8 @@ class Installer(unittest.TestCase):
         os.chmod(stub, 0o755)
         self.env = dict(os.environ, HOME=self.home, PATH=self.bin + os.pathsep + os.environ["PATH"])
         self.env.pop("QUOTA_UNIT_DIR", None)
+        self.env.pop("QUOTA_BIN_DIR", None)
+        self.binhome = os.path.join(self.home, ".local", "bin")
 
     def run_sh(self, *args):
         return subprocess.run(["/bin/sh", self.SH, *args], env=self.env, capture_output=True,
@@ -646,10 +649,11 @@ class Installer(unittest.TestCase):
         self.assertIn("DRY RUN", r.stdout)
         self.assertEqual(os.listdir(self.home), [])
         self.assertFalse(os.path.exists(self.marker))
-        self.assertIn("ExecStart=/usr/bin/env python3 %s/tools/claude-quota poll --quiet" % self.REPO,
+        self.assertIn("ExecStart=/usr/bin/env python3 %s/claude-quota poll --quiet" % self.binhome,
                       r.stdout)
         self.assertIn("OnUnitActiveSec=5min", r.stdout)
-        self.assertNotIn("@REPO@", r.stdout)
+        self.assertNotIn("@BIN@", r.stdout)
+        self.assertNotIn(self.REPO, r.stdout.split("+ mkdir")[0])  # the units never name the clone
 
     def test_uninstall_dry_run_changes_nothing(self):
         r = self.run_sh("--uninstall")
@@ -661,13 +665,30 @@ class Installer(unittest.TestCase):
         d = os.path.join(self.home, ".config", "systemd", "user")
         self.assertEqual(self.run_sh("--yes").returncode, 0)
         with open(os.path.join(d, "claude-quota.service")) as f:
-            self.assertIn("%s/tools/claude-quota poll --quiet" % self.REPO, f.read())
+            self.assertIn("%s/claude-quota poll --quiet" % self.binhome, f.read())
+        self.assertTrue(os.access(os.path.join(self.binhome, "claude-quota"), os.X_OK))
         self.assertTrue(os.path.exists(os.path.join(d, "claude-quota.timer")))
         with open(self.marker) as f:
             log = f.read()
         self.assertIn("--user enable --now claude-quota.timer", log)
         self.assertEqual(self.run_sh("--uninstall", "--yes").returncode, 0)
         self.assertEqual(os.listdir(d), [])
+        self.assertFalse(os.path.exists(os.path.join(self.binhome, "claude-quota")))
+
+    def test_poller_survives_clone_move(self):
+        # Install from a throwaway copy of tools/, delete the copy, run exactly what the unit runs.
+        clone = os.path.join(self.tmp.name, "clone")
+        shutil.copytree(os.path.dirname(self.SH), os.path.join(clone, "tools"))
+        sh = os.path.join(clone, "tools", "install-quota-timer.sh")
+        r = subprocess.run(["/bin/sh", sh, "--yes"], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        shutil.rmtree(clone)
+        d = os.path.join(self.home, ".config", "systemd", "user")
+        with open(os.path.join(d, "claude-quota.service")) as f:
+            cmd = [l for l in f.read().splitlines() if l.startswith("ExecStart=")][0][len("ExecStart="):].split()
+        env = dict(self.env, CLAUDE_QUOTA_DB=os.path.join(self.tmp.name, "q.db"))
+        r = subprocess.run(cmd[:2] + [cmd[2], "status", "--json"], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 5, r.stderr)  # script ran: "DB missing or empty" is exit 5
 
     def test_unknown_arg_rejected(self):
         self.assertEqual(self.run_sh("--bogus").returncode, 2)

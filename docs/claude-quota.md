@@ -41,7 +41,7 @@ Exit 0 normally; 5 if the DB is missing or has no snapshots (a JSON error on std
 
 ### Polling with a systemd user timer
 
-Tracking needs no model inference: a poll is one HTTP GET with the logged-in user's token. `tools/systemd/claude-quota.service` (oneshot, `claude-quota poll --quiet`) and `claude-quota.timer` (`OnBootSec=1min`, `OnUnitActiveSec=5min`, `Persistent=false`) are templates; the repo path appears as `@REPO@`, substituted at install time. Install them with:
+Tracking needs no model inference: a poll is one HTTP GET with the logged-in user's token. `tools/systemd/claude-quota.service` (oneshot, `claude-quota poll --quiet`) and `claude-quota.timer` (`OnBootSec=1min`, `OnUnitActiveSec=5min`, `Persistent=false`) are templates; the install directory appears as `@BIN@`, substituted at install time; the installer copies `claude-quota` there (`QUOTA_BIN_DIR`, default `~/.local/bin`). Install them with:
 
 ```
 tools/install-quota-timer.sh              # dry run: prints the units and the commands, changes nothing
@@ -49,7 +49,7 @@ tools/install-quota-timer.sh --yes        # copy to ~/.config/systemd/user, daem
 tools/install-quota-timer.sh --uninstall --yes
 ```
 
-The script is POSIX sh and defaults to a dry run; nothing is written or run without `--yes`. `QUOTA_UNIT_DIR` overrides the unit directory. Poll failures are recorded in the `polls` table (and so show up in `status` as `recent_failures`); the unit itself also fails visibly in `systemctl --user status claude-quota`. Token expiry shows as exit 2 (`OAuth token expired`) until any Claude Code command refreshes the token; `status` then goes stale after 15 minutes. Run the installer from the long-lived clone, not a throwaway worktree: the units point at the checkout that ran it. Run the timer only on one machine per DB.
+The script is POSIX sh and defaults to a dry run; nothing is written or run without `--yes`. `QUOTA_UNIT_DIR` overrides the unit directory. Poll failures are recorded in the `polls` table (and so show up in `status` as `recent_failures`); the unit itself also fails visibly in `systemctl --user status claude-quota`. Token expiry shows as exit 2 (`OAuth token expired`) until any Claude Code command refreshes the token; `status` then goes stale after 15 minutes. The unit runs the installed copy, so it does not care where the clone is, which branch it is on, or whether it still exists; re-run the installer with `--yes` after changing `tools/claude-quota`. Run the timer only on one machine per DB.
 
 Record continuously with cron instead:
 
