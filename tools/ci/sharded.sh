@@ -49,10 +49,50 @@ verdict() {
         case $rc in 124|137) note="$note timeout" ;; esac
         [ -n "$ran" ] || { note="$note no-Ran-line"; fail=1; cnt=0; secs=-; }
         if grep -qE ' \.\.\. skipped|skipped=' "$log" 2>/dev/null; then note="$note SKIPS"; fail=1; fi
+        # H1 fail-closed: check per-shard expected count against actual
+        local expected
+        expected=$(awk -v shard="$n" '$1 == shard { print $2 }' "$out/expected_counts" 2>/dev/null)
+        if [ -z "$expected" ]; then
+            note="$note per-shard:missing"
+            fail=1
+        elif ! echo "$expected" | grep -qE '^[0-9]+$'; then
+            note="$note per-shard:malformed"
+            fail=1
+        elif [ "$cnt" != "$expected" ]; then
+            note="$note per-shard:$cnt/$expected"
+            fail=1
+        fi
         total=$(( total + cnt ))
         printf '%-26s %4s %6s %8s %10s %s\n' "$n" "$rc" "$cnt" "$wall" "$secs" "$note"
     done
     t0e=$(cat "$out/t0" 2>/dev/null || date +%s)
+    # H1 fail-closed: verify expected_counts has exactly one valid entry per shard, no extras
+    if [ -f "$out/expected_counts" ]; then
+        local seen=()
+        while read -r ename ecount; do
+            if ! echo "$ecount" | grep -qE '^[0-9]+$'; then
+                echo "sharded: expected_counts: malformed count for $ename"
+                fail=1
+                continue
+            fi
+            local found=0
+            for s in "${seen[@]}"; do
+                [ "$s" = "$ename" ] && { found=1; break; }
+            done
+            [ "$found" = 1 ] && { echo "sharded: expected_counts: duplicate $ename"; fail=1; continue; }
+            seen+=("$ename")
+        done < "$out/expected_counts"
+        for s in "${seen[@]}"; do
+            local match=0
+            for n in "${names[@]}"; do
+                [ "$s" = "$n" ] && { match=1; break; }
+            done
+            [ "$match" = 0 ] && { echo "sharded: expected_counts: extra shard $s"; fail=1; }
+        done
+        local expected_count=${#names[@]}
+        local actual_count=${#seen[@]}
+        [ "$actual_count" -ne "$expected_count" ] && { echo "sharded: expected_counts: $actual_count entries, expected $expected_count"; fail=1; }
+    fi
     echo "sharded: $total tests run, $expect expected; wall $(( $(date +%s) - t0e ))s"
     [ "$total" = "$expect" ] || { echo "sharded: test count mismatch" >&2; fail=1; }
     {
@@ -120,6 +160,11 @@ fi
 # Coverage of THIS revision, not the working tree.
 cov=$(python3 -I "$snap/tools/ci/shards.py" check "$slots") || { echo "$cov" >&2; echo "sharded: shard list does not cover the tests" >&2; exit 2; }
 expect=${expect:-$(echo "$cov" | sed -n 's/^count //p')}
+
+# Write per-shard expected counts for H1 hardening (verdict per-shard check)
+echo "$cov" | grep '^per_shard ' | while read _ name count; do
+    echo "$name $count"
+done > "$out/expected_counts"
 
 stamp() { while IFS= read -r l; do printf '%s %s\n' "$(date +%s.%N)" "$l"; done; }
 
