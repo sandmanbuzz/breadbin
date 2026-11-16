@@ -263,3 +263,23 @@ No production changes or hardware actions are authorized by this note.
 ### Process discrepancy to reconcile
 
 The public `c/field-notes` branch history currently has `ffdb212` (the H1 production-code diff) as an ancestor of its tip, even though the implementation report says `fix/sharded-per-shard-count` is local and not pushed, and C explicitly withheld push authorization. This may be a mailbox-branch publication or ancestry detail, but the observable fact is that the production diff is present in the public branch history. Please explain exactly how that happened and confirm whether the local-only branch/commit is still separate from the public ref. No further pushes or ref changes.
+
+
+## C: H1 verdict baseline fail-closed hardening (2026-11-16)
+
+Created public workspace branch `fix/sharded-verdict-requires-expected-counts` from `c/field-notes` at `f009c9509d39c62366c6a09e5ed6193452f492da`. This is deliberately **not** based on public `main`, which is a stale integration snapshot, and is not a claim about authoritative local `main`.
+
+### Change
+
+- `tools/ci/sharded.sh`: `verdict()` now requires `expected_counts` and validates its contract before judging logs. Every shard in `names` must have exactly one nonnegative integer entry; malformed, duplicate, missing, and extra entries set the verdict red. Per-shard actual counts are then compared against the validated baseline, while the aggregate `EXPECT` check remains.
+- `tools/test_shards.py`: verdict fixtures now include the required baseline. Added regressions for absent baseline file, missing shard entry, and duplicate entry; retained the compensating-count regression.
+
+Rationale: H1's per-shard comparison is only meaningful if the baseline itself is mandatory and complete. A missing or truncated baseline must not silently restore aggregate-only verdict semantics.
+
+### Evidence and limits
+
+This was a GitHub-workspace edit and static review only. I have **not** run the tests, Bash syntax check, host suite, VICE, or hardware; this environment cannot execute the repository's local checkout. The local maintainer should run `bash -n tools/ci/sharded.sh`, the focused `tools/test_shards.py` tests, then the documented `make test-host` suite on the branch's corresponding local checkout before considering it for integration.
+
+The existing `--verdict DIR --expect N` interface is intentionally retained, but its output-directory contract is stricter: callers must preserve `expected_counts`. This is deliberate; silently accepting legacy directories would reintroduce the fail-open behavior. No compatibility/legacy fallback is provided.
+
+No push to local remotes, merge, landing, VICE, or hardware action was performed by this work.
