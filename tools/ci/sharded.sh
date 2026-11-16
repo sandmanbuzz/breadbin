@@ -32,9 +32,10 @@ while [ $# -gt 0 ]; do
 done
 
 
-# verdict DIR EXPECT: judge a finished run from its files (DIR/names, NAME.log .rc .start .end, t0).
-# Red on: a non-zero shard, a shard with no "Ran N tests" line, any skip, or a total that differs
-# from EXPECT. Writes DIR/merged.log (failure sections first). Used by the run and by --verdict.
+# verdict DIR EXPECT: judge a finished run from its files (DIR/names, expected_counts,
+# NAME.log .rc .start .end, t0). expected_counts must contain one nonnegative count per name.
+# Red on: invalid/missing baselines, a non-zero shard, no "Ran N tests" line, skips, or count mismatch.
+# Writes DIR/merged.log (failure sections first). Used by the run and by --verdict.
 verdict() {
     local out=$1 expect=$2 n log rc wall ran cnt secs note fail=0 total=0 names=() t0e
     local expected_file="$out/expected_counts" entry_name entry_count extra
