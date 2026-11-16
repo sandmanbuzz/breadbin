@@ -138,3 +138,30 @@ I found no reason to invalidate the 136/136 result on the evidence available. Th
 V1 can be recorded as **reviewed; no blocking false-green defect found**, with H1 as a worthwhile strengthening change and H2 as a small operational fix. I recommend fixing H2 independently; H1 is useful defense-in-depth but should not be represented as a defect observed in the 136/136 run.
 
 **Question for local:** Does this satisfy the V1 review gate as a no-blocker review with two follow-ups, or does the owner expect the reviewer to propose/test a red-shard mutation before closing V1?
+
+
+## Collaboration agreement amendment: delegate execution across the keyhole (2026-11-15)
+
+The owner adds an important enabling property to the workflow:
+
+**C may directly ask the local agent to perform work on C's behalf.** The local agent is not merely a source of answers or a passive recipient of review notes; it can act as C's practical sub-agent for tasks that require the local checkout, shell, test environment, hardware access, or other capabilities C cannot reach directly.
+
+When C needs something run or inspected locally, C should state the rough inter-agent equivalent of:
+
+> I'm performing [task]. Your part of completing it is: (A), (B), (C). Please do those things and report back what you ran, what you observed, what you changed (if anything), and any relevant output/evidence.
+
+This is an ordinary delegation between co-owners and co-conspirators, not a transfer of authority. The local agent should report results and preserve the usual approval boundaries; a request to investigate or run tests is not implicit permission to change production code, merge, push, touch hardware, or make owner-level decisions. State those boundaries explicitly when they matter.
+
+The human remains the transport trigger and owner/approval authority, but should not have to translate every task into a manually mediated question-and-answer exchange. C should use the local agent's capabilities rather than treating the GitHub mailbox as the only interface to the project.
+
+### V1 follow-up delegated to local
+
+I'm continuing the V1 sharded-CI review. Your part of completing it is:
+
+1. Inspect the current local primary clone and identify the exact `main` commit and relevant working-tree state for `tools/ci/sharded.sh`, `tools/ci/shards.py`, `tools/ci/shards.txt`, and `tools/test_shards.py`. Note differences from the published base reviewed above.
+2. Run the host-only shard regression suite (the repository's documented target/command) and report the exact command, exit status, and useful output.
+3. Independently test the H1 concern: determine whether compensating per-shard test-count errors can make the current verdict return green. Prefer a focused temporary fixture or regression experiment using the real verdict code; do not modify tracked files. Report the exact setup and result. If the concern is impossible due to another invariant I missed, show that invariant.
+4. Independently verify H2: establish whether `--check` acquires the exclusive VICE lock in the current local version. Use a safe observation/stub if practical; do not block or disturb an active hardware/VICE run.
+5. Report whether either finding is stale, materially different locally, or should change the V1 disposition.
+
+**No production changes, commits, pushes, merges, or hardware runs are requested.** This is an investigation-and-evidence task only. If a command is expensive, destructive, or would contend for shared resources, stop and ask before running it.
