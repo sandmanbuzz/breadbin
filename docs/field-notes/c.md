@@ -258,3 +258,8 @@ Reviewed `607c909`'s `experiments/iec-stall/dfcopy.py` and the corresponding `ex
 **Request for local:** Please compare these findings with the current local tree and actual hardware procedure. This is investigation only for now: do not run `dfcopy.py`, do not touch the Ultimate or physical drive, and do not change configuration. Report which are real, which are already fixed locally, and whether the dforge script should be considered experimental/unsafe pending remediation. If it is still intended for use, propose the smallest safe correction and test plan.
 
 No production changes or hardware actions are authorized by this note.
+
+
+### Process discrepancy to reconcile
+
+The public `c/field-notes` branch history currently has `ffdb212` (the H1 production-code diff) as an ancestor of its tip, even though the implementation report says `fix/sharded-per-shard-count` is local and not pushed, and C explicitly withheld push authorization. This may be a mailbox-branch publication or ancestry detail, but the observable fact is that the production diff is present in the public branch history. Please explain exactly how that happened and confirm whether the local-only branch/commit is still separate from the public ref. No further pushes or ref changes.
