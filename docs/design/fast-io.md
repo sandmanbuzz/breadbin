@@ -308,3 +308,24 @@ What it settles: rank 4's transfer scheme (2 bits plus ATN, drive code uploaded 
 Recorded in `docs/wip.md` as WP5. Nothing here is to start before the session says it is confident of the bus quirks (the physical-1541 root-mount stall and the rest).
 
 The sub-agent research reports (raw, with VERIFIED/UNVERIFIED marks and URLs) are kept in `docs/design/research/`; the POC scripts are in `experiments/loader-poc/`.
+
+## 17. What was built (2026-11-16): the JiffyDOS byte protocol in the kernel, and `fast.km`
+
+Two pieces, both on by default and both switchable.
+
+### 17.1 The JiffyDOS byte protocol in `iec.s` (`make JIFFY=0` builds without it)
+
+- **Source.** Michael Steil, *Commodore Peripheral Bus, Part 7: JiffyDOS* (`mist64/cbmbus_doc`): the detection handshake, the byte send and receive state machines and their C64 cycle tables. The routines were written from that text alone, in a session that had no JiffyDOS ROM listing and no open-roms or sd2iec source in front of it (the LGPL reading recorded in `jiffydos-cleanroom.md` was another session's, for scoping). No ROM bytes are in the repo; the JiffyDOS drive ROM is only ever a test fixture (`BREADBIN_CI_JIFFY`).
+- **Shape.** The probe is in the first byte under ATN of every session (`jif_first`: seven bits, a 400 us hold, the eighth bit); `io_jif` bit 7 clear means the addressed device answered, and is good for that session only. A stock drive does not answer and sees a slightly long bit. `bus_acptr` leaves for `jif_rx` and data bytes go through `io_txd`; LOAD is not implemented (we do not use it).
+- **Cycle counts** are checked on the host by `tools/test_jiffy_timing.py` from the built kernel, with the bad-line avoidance (`jif_safe`).
+- **Emulated speed** (VICE, JiffyDOS 1541 ROM, `JIFFY=1` against `JIFFY=0`, real speed): `wc /bin/as` 20.7 s against 40.2 s; `cp /bin/basic` 106.0 s against 197.7 s. Per block (`tests/prof_blockio.py`): read 410 ms against 959 ms, write 698 ms against 1437 ms. What is left of a read is the `U1` command and the wait for its status, not the bytes.
+
+### 17.2 `fast.km`: block transfer for a stock 1541 (`mod load /lib/km/fast`)
+
+For the drive without a JiffyDOS ROM. A kernel module, so it costs the kernel no bytes: three call sites in `blk.s` are named (`bread_io`, `bwrite_io`, `iclose_io`) and the module points them at itself while it is loaded.
+
+- **Licence and source.** Original work for this repo, written from the public description of the 1541 (its job queue at `$00`-`$05`, the header table at `$06`, the buffers at `$0300`-`$07FF`, VIA port B at `$1800`) and from the same byte protocol as 17.1 turned around: the drive side sends and receives the 2-bit pairs at the times the host's routines expect. No loader was copied or adapted: not Krill's, not Bitfire, not `fastboot1541` (whose idea of a drive-side job loop it shares; credit to Michael Steil for the documentation of both the protocol and the drive).
+- **Drive memory.** The kernel's `#` channel holds buffer 0 (`$0300`); the module opens `#1` and `#2` (secondaries 4 and 5) so that the DOS keeps buffers 1 and 2 (`$0400`-`$05FF`) for the code, and checks first that the drive is a 1541 (IRQ vector `$FE67`) and that the kernel's channel really has buffer 0. Any other answer and the drive is left alone (the standard path).
+- **Per block:** one `M-E` with the operation, track and sector behind it. The drive code runs the read job itself and sends status, 256 bytes and a checksum; for a write it takes 256 bytes and a checksum, writes only if they agree, verifies, and sends the status. No `U1`/`B-P`/`U2` command text, no status text, no second session.
+- **Failure rule.** Anything that goes wrong (the code does not answer, a job error, a checksum, a timeout) ends the fast try and the block is done again on the standard path, with the DOS's own retries and its error text. Three in a row and the drive is left alone until it is mounted again. ATN makes the drive code return to the DOS at any point.
+- **Timing.** The drive finds the host's "go" with a 7-cycle loop, so each of its port accesses lands in a window 7 cycles wide, and the clocks differ (PAL host 1.015 us per cycle, NTSC 0.978, drive 1.000). Send (the drive writes at 6, 17, 27, 38, 49 after it sees go; the host reads at its cycles 16, 26, 37, 48, 59): the previous pair is on the wire at least 1.4 us before each read and the next at least 0.28 us (PAL) after it. Line delay moves both the go and the drive's writes later, which is why the schedule sits on the early side. Receive (the host writes at 11, 24, 35, 48, 61; the drive reads at 13, 26, 37, 50): at least 1.2 us on both sides. `tools/test_fast_timing.py` checks the counts from the built module; `make MODFLAGS="-D SK2=18"` shifts a point for margin tests.
