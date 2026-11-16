@@ -6,6 +6,41 @@ Scope: discussion, review notes and proposals only. No production-code changes a
 
 This is a working conversation, not a design authority. Please reply inline, append dated sections, or challenge any claim. Preserve earlier statements when correcting them: strike through or append a correction rather than silently rewriting history. A useful reply can be terse.
 
+## C-agent cold start: read this before rediscovering the world
+
+This section exists because a ChatGPT session is disposable. A replacement C session should be able to resume without treating this conversation as the source of truth.
+
+### First five minutes
+
+1. **Orient to the project from the local primary clone, not GitHub `main`.** The owner says local `main` is ground truth and the public `origin` is a mutable, potentially stale mirror. Ask the local agent for the current local `main` tip, working-tree state, and current work lanes if that is not already in the handoff. Do not infer current project state from the public `main` snapshot.
+2. Read, in order, `CLAUDE.md`, `docs/wip.md` (especially its final state block), and `docs/process.md`. This repo's own kickoff procedure is authoritative for local session setup, locks, test commands, roles, and landing. Then read only the task-relevant design/roadmap/testing notes.
+3. Fetch the latest `c/field-notes` tip and read this file from the top. It is C's durable correspondence and decision/review history. Do not assume the tip hash recorded in an older chat is still current.
+4. Check for replies to the latest explicit request before starting independent work. The most recent outstanding request at the time this card was written is the **V1 sharded-CI investigation** below. If the local agent has replied, assess its evidence and answer the actual questions; do not resend the same task blindly.
+5. Establish what the owner wants now. Product direction and approval remain with the owner. C should offer a concrete independent contribution, not manufacture work merely to stay busy.
+
+### How C and the local agent cooperate
+
+C is a co-owner/co-conspirator, not a passive reviewer peering through GitHub. The local agent can be delegated execution on C's behalf: local checkout inspection, shell commands, tests, experiments, and (when explicitly authorized) other local capabilities. State the task as concrete steps and request exact commands, results, observations, changes, and evidence.
+
+The local agent is a practical sub-agent, but delegation is not blanket authority. A request to inspect or test does not authorize production edits, commits, pushes, merges, hardware access, or owner-level decisions. State boundaries explicitly. The owner remains approval authority and the transport trigger; do not make them manually relay every technical byte if the agent interface can carry a direct task.
+
+The GitHub `c/field-notes` branch is a durable public mailbox / audit trail, **not** the only communication channel and not a task tracker. Use direct delegation for work that needs the local environment; record durable outcomes and decisions here. Local repo process and local-main authority take precedence over this public branch.
+
+### Current C-side thread at time of writing (2026-11-15)
+
+- Latest C mailbox commit: [`57bda5d`](https://github.com/sandmanbuzz/breadbin/commit/57bda5d1e625ec7253d131012b6418fdf704b0a6), which records the delegation agreement and the V1 task.
+- The owner has triggered the local agent to read the mail; it is currently investigating. **Await its report; do not treat the task as complete.**
+- V1 is C's review of sharded-CI verdict logic. Static review of published `main` at `7594e002` found no demonstrated false-green path, but identified two follow-ups: H1, compare per-shard counts rather than only aggregate counts (hardening hypothesis to test); H2, verify/fix whether host-only `--check` unnecessarily takes the exclusive VICE lock (static control-flow finding). The local agent was asked to inspect the actual local tree, run the host-only regression suite, experimentally test H1, and safely verify H2.
+- That delegation explicitly requested **investigation only**: no production changes, commits, pushes, merges, or hardware runs. See the full request and evidence boundary in the V1 section below.
+- The V1 review is not yet closed. Await local evidence and the owner's expectation about whether a red-shard mutation is required.
+
+### Cold-start discipline
+
+- Distinguish **known from this durable note**, **freshly verified**, and **unknown**. Re-verify mutable branch tips and local state.
+- Never claim to have run local tests, inspected the primary clone, or touched hardware unless the local agent actually reports that work and its evidence.
+- Before ending a session, append a concise handoff here: current task, exact refs/commits, findings, what was and was not done, outstanding questions, and the next action. Keep the durable record useful to a stranger with an empty context.
+- Preserve disagreement and corrections append-only; don't silently rewrite the history.
+
 ## How to use this branch as deliberately shitty IPC
 
 The branch is a shared mailbox with Git's commit history as the message ordering and attribution mechanism. It is not a task tracker, not a merge request, and not a substitute for the local primary clone.
