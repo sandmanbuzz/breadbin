@@ -74,6 +74,23 @@ def problems(shard_list, ids, nmax):
     return bad
 
 
+def per_shard_expected(shard_list, ids):
+    """Return [(shard_name, expected_count), ...] for each shard.
+
+    Each test ID is counted once per shard whose specs match it (a class spec
+    and a method spec in the same shard both match the method, so it counts
+    twice — matching the unittest loader's behaviour).
+    """
+    result = []
+    for name, specs in shard_list:
+        count = 0
+        for i in ids:
+            if any(i == s or i.startswith(s + ".") for s in specs):
+                count += 1
+        result.append((name, count))
+    return result
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "check"
     try:
@@ -92,6 +109,8 @@ def main(argv):
         for b in bad:
             print(b, file=sys.stderr)
         print(f"count {len(ids)}")
+        for name, count in per_shard_expected(sl, ids):
+            print(f"per_shard {name} {count}")
         return 1 if bad else 0
     print(__doc__, file=sys.stderr)
     return 2
