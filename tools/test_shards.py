@@ -109,7 +109,13 @@ class Driver(unittest.TestCase):
         self.assertEqual(subprocess.run(["bash", "-n", script]).returncode, 0)
         r = subprocess.run([script, "--check"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(r.stdout, r"^count \d+\n$")
+        self.assertRegex(r.stdout, r"^count \d+\n")
+        # per-shard expected counts are also emitted (H1 hardening)
+        for line in r.stdout.strip().splitlines():
+            if line.startswith("per_shard "):
+                parts = line.split()
+                self.assertEqual(len(parts), 3)
+                self.assertGreaterEqual(int(parts[2]), 0)
 
     def test_check_mode_fails_when_slots_are_fewer_than_shards(self):
         script = os.path.join(ROOT, "tools", "ci", "sharded.sh")
@@ -201,6 +207,31 @@ class Verdict(unittest.TestCase):
         r, d = self.judge(["green", "green"], 5)
         self.assertEqual(r.returncode, 1)
         self.assertIn("test count mismatch", r.stderr)
+
+    def test_compensating_per_shard_counts_are_red(self):
+        """H1 regression: one shard under by N, another over by N, aggregate equal -> red."""
+        r, d = self.judge(["green", "green"], 4)
+        # Write expected_counts: shard s0 expects 2, shard s1 expects 2
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\ns1 2\n")
+        # Now make s0 report 1 (under by 1) and s1 report 3 (over by 1)
+        # The aggregate is still 4 = expect, but per-shard counts don't match
+        with open(os.path.join(d, "s0.log")) as f:
+            content = f.read()
+        content = content.replace("Ran 2 tests", "Ran 1 tests")
+        with open(os.path.join(d, "s0.log"), "w") as f:
+            f.write(content)
+        with open(os.path.join(d, "s1.log")) as f:
+            content = f.read()
+        content = content.replace("Ran 2 tests", "Ran 3 tests")
+        with open(os.path.join(d, "s1.log"), "w") as f:
+            f.write(content)
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "4"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("per-shard", r.stdout)
+        self.assertIn("1/2", r.stdout)
+        self.assertIn("3/2", r.stdout)
 
     def test_verdict_needs_expect(self):
         r = subprocess.run([self.SCRIPT, "--verdict", "/nonexistent"], capture_output=True, text=True)

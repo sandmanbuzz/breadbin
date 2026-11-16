@@ -49,6 +49,13 @@ verdict() {
         case $rc in 124|137) note="$note timeout" ;; esac
         [ -n "$ran" ] || { note="$note no-Ran-line"; fail=1; cnt=0; secs=-; }
         if grep -qE ' \.\.\. skipped|skipped=' "$log" 2>/dev/null; then note="$note SKIPS"; fail=1; fi
+        # H1: check per-shard expected count against actual
+        local expected
+        expected=$(awk -v shard="$n" '$1 == shard { print $2 }' "$out/expected_counts" 2>/dev/null)
+        if [ -n "$expected" ] && [ "$cnt" != "$expected" ]; then
+            note="$note per-shard:$cnt/$expected"
+            fail=1
+        fi
         total=$(( total + cnt ))
         printf '%-26s %4s %6s %8s %10s %s\n' "$n" "$rc" "$cnt" "$wall" "$secs" "$note"
     done
@@ -120,6 +127,11 @@ fi
 # Coverage of THIS revision, not the working tree.
 cov=$(python3 -I "$snap/tools/ci/shards.py" check "$slots") || { echo "$cov" >&2; echo "sharded: shard list does not cover the tests" >&2; exit 2; }
 expect=${expect:-$(echo "$cov" | sed -n 's/^count //p')}
+
+# Write per-shard expected counts for H1 hardening (verdict per-shard check)
+echo "$cov" | grep '^per_shard ' | while read _ name count; do
+    echo "$name $count"
+done > "$out/expected_counts"
 
 stamp() { while IFS= read -r l; do printf '%s %s\n' "$(date +%s.%N)" "$l"; done; }
 
