@@ -37,7 +37,44 @@ done
 # from EXPECT. Writes DIR/merged.log (failure sections first). Used by the run and by --verdict.
 verdict() {
     local out=$1 expect=$2 n log rc wall ran cnt secs note fail=0 total=0 names=() t0e
+    local expected_file="$out/expected_counts" entry_name entry_count extra
+    local -A expected_by_shard=() seen_names=()
     mapfile -t names < "$out/names"
+
+    # The per-shard baseline is required evidence, not an optional enhancement. Validate
+    # complete, unique coverage before judging any logs; otherwise --verdict could silently
+    # fall back to the aggregate-only check when its baseline was lost or truncated.
+    if [ ! -f "$expected_file" ]; then
+        echo "sharded: missing expected_counts" >&2
+        fail=1
+    else
+        while read -r entry_name entry_count extra || [ -n "$entry_name$entry_count$extra" ]; do
+            if [ -z "$entry_name" ] || [ -z "$entry_count" ] || [ -n "$extra" ] ||
+               [[ ! "$entry_count" =~ ^[0-9]+$ ]]; then
+                echo "sharded: malformed expected_counts entry: $entry_name $entry_count $extra" >&2
+                fail=1
+            elif [ -n "${expected_by_shard[$entry_name]+present}" ]; then
+                echo "sharded: duplicate expected_counts entry: $entry_name" >&2
+                fail=1
+            else
+                expected_by_shard[$entry_name]=$entry_count
+            fi
+        done < "$expected_file"
+    fi
+    for n in "${names[@]}"; do
+        seen_names[$n]=1
+        if [ -z "${expected_by_shard[$n]+present}" ]; then
+            echo "sharded: missing expected count for shard $n" >&2
+            fail=1
+        fi
+    done
+    for entry_name in "${!expected_by_shard[@]}"; do
+        if [ -z "${seen_names[$entry_name]+present}" ]; then
+            echo "sharded: unexpected expected_counts entry: $entry_name" >&2
+            fail=1
+        fi
+    done
+
     printf '%-26s %4s %6s %8s %10s %s\n' shard rc tests wall_s unittest_s note
     for n in "${names[@]}"; do
         log=$out/$n.log
@@ -49,9 +86,8 @@ verdict() {
         case $rc in 124|137) note="$note timeout" ;; esac
         [ -n "$ran" ] || { note="$note no-Ran-line"; fail=1; cnt=0; secs=-; }
         if grep -qE ' \.\.\. skipped|skipped=' "$log" 2>/dev/null; then note="$note SKIPS"; fail=1; fi
-        # H1: check per-shard expected count against actual
-        local expected
-        expected=$(awk -v shard="$n" '$1 == shard { print $2 }' "$out/expected_counts" 2>/dev/null)
+        # H1: every shard must match its validated per-shard baseline.
+        local expected=${expected_by_shard[$n]:-}
         if [ -n "$expected" ] && [ "$cnt" != "$expected" ]; then
             note="$note per-shard:$cnt/$expected"
             fail=1
