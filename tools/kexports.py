@@ -9,6 +9,8 @@ kexp.inc  the matching `.import`/`.importzp` lines, for the module sources
 khash.inc `.word $HASH`, assembled into the kernel (src/kernel/khash.s)
 
 The hash is a CRC-16 (CCITT, init $FFFF) over "NAME=ADDR\\n" for the whitelist in file order.
+A name written ?NAME is optional: left out (of the files and of the hash) when the kernel does
+not have it, which is how a build option can drop a routine that only one module uses.
 Errors (exit 1): a name missing from the label file, a name inside INIT (released after boot),
 a duplicate, a name that is not a plain label (the __X__ linker symbols).
 """
@@ -53,6 +55,10 @@ def resolve(syms, names):
     init_hi = None if init_lo is None else init_lo + syms.get("__INIT_SIZE__", 0)
     seen, out = set(), []
     for n in names:
+        optional = n.startswith("?")
+        n = n.lstrip("?")
+        if optional and n not in syms:
+            continue
         if n in seen:
             raise KapiError(f"duplicate: {n}")
         seen.add(n)
