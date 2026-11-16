@@ -92,3 +92,49 @@ No need to answer from memory if the repo can answer it. Mark unknowns as unknow
 ## Operating stance
 
 I'll be opinionated, but I'll show my evidence and uncertainty. I'll challenge local-agent proposals when I see a better path; I also expect the local agent to challenge mine. The owner resolves product and policy decisions. We should optimize for a sequence of small, demonstrable improvements, not for winning the architecture argument or keeping every agent busy.
+
+
+## V1 review: sharded-CI verdict logic (2026-11-15)
+
+Reviewed published `main` at `7594e002157e1ac21600146b90d1e266fef55ac7`:
+- `tools/ci/sharded.sh`
+- `tools/ci/shards.py`
+- `tools/ci/shards.txt`
+- `tools/test_shards.py`
+- `docs/ci.md`
+- `tools/ci/run.sh`
+
+This was a static review of the published files. I did not execute the suite, run the host regression tests, or inspect the local primary clone. No production changes made.
+
+### Verdict
+
+**No demonstrated false-green path found in the normal current run path.** The main verdict checks are sound in the ordinary case:
+- nonzero shard status is red;
+- absent/non-matching `Ran N tests in Xs` is red;
+- unittest skip output (verbose per-test form or summary `skipped=`) is red;
+- the aggregate count must equal the discovered count;
+- the revision's shard manifest is checked before execution, including duplicate names, overlaps, uncovered tests, dead specs, and slot count;
+- old per-shard rc/end/log files are removed before a rerun into the same output directory;
+- timeout rc 124 remains red; the driver records the pipeline's test-runner status rather than the timestamping filter's status.
+
+The existing `Verdict` tests are meaningful: they use actual `unittest` executions for green, failure, skip and count cases, and cover a missing shard record. The driver tests also exercise timeout and Ctrl-C cleanup with a stub. That is materially better than testing only fabricated logs.
+
+### Findings / hardening
+
+**V1-H1 — aggregate count is weaker than per-shard accounting (hardening, not a demonstrated current exploit).**
+
+`verdict()` sums the last `Ran N tests` count from each shard and compares only the global sum with `EXPECT`. It does not compare each shard's actual count with the number of discovered test IDs assigned to that shard's specs. Therefore, in principle, an undercount in one shard and an equal overcount in another can cancel and preserve the global total. The current exact class/method specs and assignment check make this unlikely in normal operation, and I have no evidence it occurred in the recorded run. Still, the verdict would be stronger if the manifest/check phase emitted an expected count per shard and `verdict()` checked each shard against it. Add a regression test with deliberately compensating per-shard counts.
+
+**V1-H2 — `--check` takes the exclusive VICE lock despite being host-only (confirmed control-flow defect; operational, not a false-green).**
+
+The outer-lock dispatch occurs before the `if [ $check = 1 ]` branch. Thus the documented host-only `tools/ci/sharded.sh --check` first re-execs under `tools/with-lock -x`, unnecessarily blocking every VICE user while it only runs `shards.py check`. Move the check-mode dispatch before the outer-lock block. Existing `Driver.test_script_parses_and_check_mode_runs` verifies output and behavior but does not assert that no VICE lock is taken.
+
+### Scope / evidence boundary
+
+I found no reason to invalidate the 136/136 result on the evidence available. The 2026-11-13 run remains one run on commit `6158182`, stock VICE ROMs, six shards, with JiffyDOS ROMs, hardware and repeat runs explicitly not covered. The verdict machinery's checks are evidence of the mechanism, not a demonstrated red-test challenge: the CI documentation itself correctly says no sharded test failure has yet been shown to go red.
+
+### Recommendation
+
+V1 can be recorded as **reviewed; no blocking false-green defect found**, with H1 as a worthwhile strengthening change and H2 as a small operational fix. I recommend fixing H2 independently; H1 is useful defense-in-depth but should not be represented as a defect observed in the 136/136 run.
+
+**Question for local:** Does this satisfy the V1 review gate as a no-blocker review with two follow-ups, or does the owner expect the reviewer to propose/test a red-shard mutation before closing V1?
