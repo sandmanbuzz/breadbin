@@ -356,7 +356,7 @@ class IecFault(unittest.TestCase):
                         v._raw("disable %d" % st["bk"][st["go"]])
                         st["fired"] += 1
                 elif addr == st.get("go"):
-                    if not st.get("eoil") or rd(lbl["io_eoi"], lbl["io_eoi"])[0] != 1:
+                    if not st.get("eoil") or rd(lbl["io_eoi"], lbl["io_eoi"])[0] == 0:      # 1, or $10 since the JiffyDOS driver
                         return
                     v._raw("r pc = %04x" % st["fail"])
                     v._raw("disable %d" % st["bk"][st["go"]])
@@ -368,7 +368,7 @@ class IecFault(unittest.TestCase):
                         return
                     st["eoi_c"] += 1
                     if st["eoi_c"] == st["eoi_k"]:
-                        v._raw("> %04x 01" % lbl["io_eoi"])
+                        v._raw("> %04x 10" % lbl["io_eoi"])     # any value but 0; jif_tx wants $10
                         v._raw("disable %d" % st["bk"][lbl["io_tx"]])
                         del st["eoi_k"]
                         st["fired"] += 1
@@ -406,7 +406,7 @@ class IecFault(unittest.TestCase):
             st["fail"] = local_label("@fail", lbl["io_tx"])
             v._cmd("bk exec %x" % st["go"])
             st["ago"] = local_label("@go", lbl["bus_acptr"])
-            st["atmo"] = local_label("@tmo", lbl["bus_acptr"])
+            st["atmo"] = lbl.get("acp_tmo") or local_label("@tmo", lbl["bus_acptr"])
             v._cmd("bk exec %x" % st["ago"])
             for _ in range(5):
                 for m in re.finditer(r"BREAK:\s*(\d+)\s+C:\$([0-9a-fA-F]{4})", v._cmd("bk")):
