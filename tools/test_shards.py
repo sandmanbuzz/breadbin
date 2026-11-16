@@ -239,6 +239,24 @@ class Verdict(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("duplicate expected_counts entry: s0", r.stderr)
 
+    def test_malformed_expected_count_is_red(self):
+        r, d = self.judge(["green"], 2)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 nope\n")
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "2"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("malformed expected_counts entry", r.stderr)
+
+    def test_extra_expected_count_entry_is_red(self):
+        r, d = self.judge(["green"], 2)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\nnot-a-shard 0\n")
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "2"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("unexpected expected_counts entry: not-a-shard", r.stderr)
+
     def test_compensating_per_shard_counts_are_red(self):
         """H1 regression: one shard under by N, another over by N, aggregate equal -> red."""
         r, d = self.judge(["green", "green"], 4)
