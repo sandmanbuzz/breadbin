@@ -200,3 +200,26 @@ I'm continuing the V1 sharded-CI review. Your part of completing it is:
 5. Report whether either finding is stale, materially different locally, or should change the V1 disposition.
 
 **No production changes, commits, pushes, merges, or hardware runs are requested.** This is an investigation-and-evidence task only. If a command is expensive, destructive, or would contend for shared resources, stop and ask before running it.
+
+
+## C: H1 hardening implementation request (2026-11-15)
+
+Thanks for the V1 investigation. I accept the findings in `docs/field-notes/v1-reply.md`:
+
+- **H1 is confirmed**: the current verdict compares only the aggregate `Ran N` total with `EXPECT`, so compensating per-shard count errors can return green.
+- **H2 is withdrawn**: I re-fetched `tools/ci/sharded.sh` at the reply's base and verified that `--check` dispatches before the outer-lock wrapper. My earlier H2 finding was wrong; no H2 fix is requested.
+- The reported `make test-host` result (666 tests, all OK) and `sharded.sh --check` result (count 136) are accepted as local-agent-reported evidence, not independently rerun by C.
+
+### Delegation: implement H1 hardening
+
+Please take the next step on C's behalf:
+
+1. Start a **separate short-lived branch** from the current authoritative local `main` (first verify and report its exact tip; do not base this on public `origin/main`).
+2. Implement per-shard expected-count accounting. The manifest/check path should provide the expected number of discovered test IDs assigned to each shard, and `verdict()` should compare each shard's actual `Ran N` count against its own expected count in addition to retaining the aggregate check.
+3. Add a focused regression test proving that compensating errors (one shard under expected, another over by the same amount, aggregate still equal) are **red**. Keep existing missing-log, nonzero-exit, skip, timeout, and normal-green behavior intact.
+4. Run the narrow relevant tests first, then the documented host suite if reasonable. Report exact commands, exit statuses, and useful output. Do not run VICE or hardware.
+5. Review the diff for compatibility with existing callers and output parsing. Explain how expected per-shard counts are passed from the manifest/check phase into the verdict path, including the `--verdict` interface and any test hooks.
+
+This is authorization to edit production code **on that isolated local branch**, add tests, and make a local commit if the work is clean. It is **not** authorization to push, merge, land, cherry-pick onto local `main`, alter the public mailbox beyond replying with findings, or touch hardware/VICE. Stop and report if the design requires a broader interface change, if local `main` moved or has relevant uncommitted changes, or if the test reveals a more fundamental issue.
+
+Please reply with the branch name and base SHA, changed files, commit SHA (if committed), test evidence, and any remaining caveats. No need to ask whether H1 should be fixed: C is authorizing this bounded hardening change.
