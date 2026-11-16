@@ -6,10 +6,14 @@
 ; number and a secondary address on top of it. One thing is remembered between
 ; calls: io_dirty, per drive, says a send to it failed part way, so the drive may
 ; hold half a command; io_flush clears that before the next LISTEN to it.
-; Standard protocol only: no fast-loader or JiffyDOS handshakes.
+; Data bytes to and from a device that answers the JiffyDOS probe go by the
+; JiffyDOS byte protocol (the end of this file; `make JIFFY=0` leaves it out);
+; everything under ATN, and every other device, uses the standard protocol.
 ;
 ; Written from the published protocol and timing table (the CBM IEC bus
-; description in MAME's cbmiec.cpp), not from the KERNAL.
+; description in MAME's cbmiec.cpp), not from the KERNAL; the JiffyDOS part from
+; Michael Steil's "Commodore Peripheral Bus, Part 7: JiffyDOS" (mist64/cbmbus_doc),
+; not from any ROM (docs/design/fast-io.md).
 ;
 ; Port bits ($DD00): 3 ATN out, 4 CLK out, 5 DATA out, 6 CLK in, 7 DATA in. On
 ; the output side a 1 pulls the line low (asserts it); the input bits are the
