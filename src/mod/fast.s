@@ -76,6 +76,8 @@ wmask:  .res 1
 wn:     .res 1
 mrb:    .res 2          ; M-R answer
 up:     .res 2          ; upload: drive address
+ft_nf:  .res 1          ; blocks that fell back to the standard path (tests/test_fast.py reads both)
+ft_ng:  .res 2          ; blocks carried
 
 .segment "CODE"
 ; init is refused unless the kernel is loading the module (as cbm.km), and when the call
@@ -188,6 +190,7 @@ ft_ready:
 ; ft_fail: a block went wrong after the drive had started. Three in a row and the drive is
 ; left alone until it is mounted again.
 ft_fail: jsr ft_done
+        inc ft_nf
         ldx ft_i
         inc state,x
         lda state,x
@@ -208,7 +211,10 @@ ft_done: lda #0
 
 ; ft_good: a block went through
 ft_good: jsr ft_done
-        ldx ft_i
+        inc ft_ng
+        bne @n
+        inc ft_ng+1
+@n:     ldx ft_i
         lda #1
         sta state,x
         clc
