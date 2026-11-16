@@ -80,3 +80,31 @@ The directory entry `BREADBIN PRG 59 blocks` is the same on the source image and
 ### Backlog
 
 - **"Grab working copy from the SD"** as a `write-physical.sh` enhancement: fetch the nibbler PRG from the Ultimate's SD card (`/SD/utils/disk/`) over FTP into a local path, so `NIBBLER` need not be set by hand. Not implemented; the PRG stays untracked (`.gitignore`).
+
+## dforge (Disk Forge C64U) alternative
+
+`dfcopy.py` automates Disk Forge, a C64 Ultimate-specific disk copier by Horned Goat Productions.
+dforge.prg (30,529 bytes, load `$0801`) is on the Ultimate's SD card at `SD/dforge.prg`.
+
+**How it works:**
+1. Download dforge.prg from SD via FTP and DMA-poke into memory
+2. Mount the .d64 image on Drive A
+3. Run dforge, press F1 to scan the mounted disk, F7 to write
+4. Wait ~90s for turbo write (machine is paused during transfer)
+5. Send RUN/STOP to complete, verify physical drive
+
+**Usage:**
+```sh
+BREADBIN_ULTIMATE=host python3 experiments/iec-stall/dfcopy.py build/breadbin.d64
+```
+
+**Timing comparison:**
+| Method | Time | Verified |
+|--------|------|----------|
+| nibbler (nibcopy.py) | ~50s | GCR-level byte-identical |
+| dforge (dfcopy.py) | ~120s | Sector-verified (stock path) |
+| mcdup.py | ~27 min | Full read-back compare |
+
+**dforge advantages:** no device renumbering, built-in verification, Ultimate-native file browser
+**dforge disadvantages:** ~2x slower, requires REU 256K+, Command Interface enabled
+**dforge limitations:** 35-track .d64 only, no copy protection reproduction
