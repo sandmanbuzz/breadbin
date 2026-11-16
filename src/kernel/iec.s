@@ -775,6 +775,7 @@ jif_rx: pla
         ora #A_DAT
         tay                 ; Y: DATA held (busy)
         jsr jif_safe
+jif_rx_go:                  ; (tools/test_jiffy_timing.py counts the cycles from here)
         stx PORT            ; go.                         cycle  0
         jsr jif_rts         ; 12
         lda PORT            ; CLK, DATA = bits 0, 1             16
@@ -836,6 +837,7 @@ jif_tx: sta io_b
         jsr jif_safe
         lda io_b
         ora #$0f
+jif_tx_go:
         sty PORT            ; go.                         cycle  0
         pha
         pla
