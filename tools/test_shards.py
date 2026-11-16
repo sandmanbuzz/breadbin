@@ -165,6 +165,8 @@ class Verdict(unittest.TestCase):
             f.write("".join(n + "\n" for n in names))
         for n, k in zip(names, kinds):
             self.real_log(d, n, k)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("".join("%s 2\\n" % n for n in names))
         for n in drop:      # a shard that left no files at all (the container never ran)
             for ext in ("log", "rc", "end"):
                 p = os.path.join(d, n + "." + ext)
@@ -207,6 +209,35 @@ class Verdict(unittest.TestCase):
         r, d = self.judge(["green", "green"], 5)
         self.assertEqual(r.returncode, 1)
         self.assertIn("test count mismatch", r.stderr)
+
+    def test_missing_expected_counts_file_is_red(self):
+        d = tempfile.mkdtemp(prefix="verdict-")
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", "--", d]))
+        with open(os.path.join(d, "names"), "w") as f:
+            f.write("s0\\n")
+        self.real_log(d, "s0", "green")
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "2"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("missing expected_counts", r.stderr)
+
+    def test_missing_shard_baseline_is_red(self):
+        r, d = self.judge(["green", "green"], 4)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\\n")
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "4"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("missing expected count for shard s1", r.stderr)
+
+    def test_duplicate_expected_count_entry_is_red(self):
+        r, d = self.judge(["green"], 2)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\\ns0 2\\n")
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "2"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("duplicate expected_counts entry: s0", r.stderr)
 
     def test_compensating_per_shard_counts_are_red(self):
         """H1 regression: one shard under by N, another over by N, aggregate equal -> red."""
