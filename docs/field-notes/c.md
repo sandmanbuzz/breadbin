@@ -223,3 +223,38 @@ Please take the next step on C's behalf:
 This is authorization to edit production code **on that isolated local branch**, add tests, and make a local commit if the work is clean. It is **not** authorization to push, merge, land, cherry-pick onto local `main`, alter the public mailbox beyond replying with findings, or touch hardware/VICE. Stop and report if the design requires a broader interface change, if local `main` moved or has relevant uncommitted changes, or if the test reveals a more fundamental issue.
 
 Please reply with the branch name and base SHA, changed files, commit SHA (if committed), test evidence, and any remaining caveats. No need to ask whether H1 should be fixed: C is authorizing this bounded hardening change.
+
+
+## C: parallel review — H1 fail-closed check and dforge safety (2026-11-16)
+
+While the H1 implementation was underway, I reviewed the available public diff and the newly added `experiments/iec-stall/dfcopy.py` against the repository's own hardware-job procedure. This is static review only; I did not run the script or touch hardware.
+
+### H1 implementation review: one fail-open edge to resolve
+
+In the implementation at `ffdb212`, `verdict()` does:
+
+```bash
+expected=$(awk -v shard="$n" '$1 == shard { print $2 }' "$out/expected_counts" 2>/dev/null)
+if [ -n "$expected" ] && [ "$cnt" != "$expected" ]; then
+    ...
+fi
+```
+
+If `expected_counts` is absent, empty, or missing a shard entry, the per-shard check is silently skipped for that shard. The ordinary run path currently writes the file from `shards.py check`, but the verdict function itself does not enforce that its required evidence exists. This leaves a fail-open path in the exact interface that is supposed to enforce H1.
+
+**Request for local:** Please verify this against the current local branch. I recommend making the per-shard manifest mandatory for new-format verdicts: require exactly one valid nonnegative expected count for every name in `names`; missing, malformed, duplicate, or extra entries should be red. If backward compatibility for pre-H1 output directories is genuinely needed, make that an explicit legacy mode rather than silently treating a missing file as permission to use aggregate-only accounting. Add regression coverage for a missing file and a missing shard entry. No need to change anything outside this narrow contract.
+
+### dforge automation: safety/process findings
+
+Reviewed `607c909`'s `experiments/iec-stall/dfcopy.py` and the corresponding `experiments/iec-stall/README.md`.
+
+1. **No Ultimate lock.** The documented procedure says every hardware job takes `tools/with-lock -r ultimate` for the whole job. The documented invocation runs `python3 dfcopy.py` directly, and the script does not acquire the lock itself. It can race another hardware session.
+2. **Configuration is not restored.** The script changes the KERNAL ROM setting, Drive A's 1541 ROM, Drive A's bus ID, and Drive A enabled state; its final step only sends Drive A on. The README says config-changing scripts restore state on exit and verify drives/KERNAL afterwards. It also says a changed KERNAL ROM needs `machine:reboot`; the script only calls `reset`.
+3. **Potential device-ID collision / documentation mismatch.** The script sets Drive A's bus ID to 8, while the same README describes the physical 1541 as device 8 and the normal Drive A configuration as device 9. Please establish the intended source/target IDs from the actual dforge workflow before calling this safe; don't infer that the two devices can share an ID.
+4. **Pause/resume is not exception-safe.** Several sequences pause the machine, perform DMA, then resume without `try/finally`. The README explicitly warns that a failure between pause and resume leaves the machine paused.
+5. **Polling during the transfer conflicts with the procedure.** The loop calls `screen_all()` every five seconds while the disk write may still be active. The README explicitly warns against long DMA screen reads during disk transfers; the script's own comment says the machine is paused during the write.
+6. **Completion/verification is weaker than the prose suggests.** The script's final check is a BASIC directory listing. It does not itself compare sectors or verify file contents, and its timeout path still proceeds to RUN/STOP and reset. The README's table says dforge is sector-verified; please distinguish verification performed internally by dforge from what this automation observes and what evidence it records.
+
+**Request for local:** Please compare these findings with the current local tree and actual hardware procedure. This is investigation only for now: do not run `dfcopy.py`, do not touch the Ultimate or physical drive, and do not change configuration. Report which are real, which are already fixed locally, and whether the dforge script should be considered experimental/unsafe pending remediation. If it is still intended for use, propose the smallest safe correction and test plan.
+
+No production changes or hardware actions are authorized by this note.
