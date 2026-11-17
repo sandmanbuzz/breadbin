@@ -65,3 +65,16 @@ namei
 nameiparent
 mod_busy
 cbm_up
+# d81.km (src/mod/d81.s): the hook sites and what the mapping reads and writes
+ts_rd_io
+ts_wr_io
+open_mnt_io
+open_dio_io
+blk_to_ts
+iec_open
+rq_dev
+rq_lo
+rq_hi
+trk
+sct
+dev_present

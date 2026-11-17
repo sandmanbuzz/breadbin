@@ -161,6 +161,100 @@ class TestImage(unittest.TestCase):
         self.assertEqual(M.block_to_ts(376), (19, 0))
 
 
+class TestD81(unittest.TestCase):
+    """`mkimage.py d81`: a c64fs volume for a 1581 (mounted with /lib/km/d81)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = os.path.join(cls.tmp.name, "root")
+        os.makedirs(os.path.join(root, "sub"))
+        cls.big = bytes((i * 31 + (i >> 8)) & 0xFF for i in range(140 * 256))     # the largest file c64fs v1 holds
+        with open(os.path.join(root, "big"), "wb") as f:
+            f.write(cls.big)
+        with open(os.path.join(root, "sub", "a"), "wb") as f:
+            f.write(b"a\n")
+        cls.out = os.path.join(cls.tmp.name, "v.d81")
+        M.main(["d81", cls.out, "--root", root, "--name", "vol"])
+        with open(cls.out, "rb") as f:
+            cls.data = f.read()
+        cls.fs = M.FS(M.load(cls.out))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def blk(self, t, s):
+        b = M.d81_block(t, s)
+        return self.data[b * 256:(b + 1) * 256]
+
+    def test_size_and_mapping(self):
+        self.assertEqual(len(self.data), 819200)
+        self.assertEqual(M.d81_block(1, 0), 0)
+        self.assertEqual(M.d81_block(40, 0), 1560)
+        self.assertEqual(M.d81_block(80, 39), 3199)
+
+    def test_superblock_says_2048_blocks(self):
+        sb = self.data[376 * 256:377 * 256]
+        self.assertEqual(sb[0:6], b"C64FS\x01")
+        self.assertEqual(sb[6] | sb[7] << 8, 2048)
+        self.assertEqual(sb[9] | sb[10] << 8, 377)
+        self.assertEqual(sb[11] | sb[12] << 8, 378)
+        self.assertEqual(self.fs.nblocks, 2048)
+        self.assertEqual(sb[M.SB_BUILD_ID:M.SB_BUILD_ID + 4], bytes(4))   # no REU cache key: not a boot disk
+
+    def test_files_roundtrip(self):
+        self.assertEqual(self.fs.read_file(self.fs.lookup("/big")), self.big)
+        self.assertEqual(self.fs.read_file(self.fs.lookup("/sub/a")), b"a\n")
+
+    def test_reserved_blocks(self):
+        for b in [0] + list(range(376, 394)) + list(range(1560, 1600)):
+            self.assertTrue(self.fs.is_used(b), b)
+        ino = self.fs.read_inode(self.fs.lookup("/big"))
+        used = [self.fs.bmap(ino, i) for i in range(140)] + [ino["indirect"]]
+        self.assertFalse(any(b == 0 or 376 <= b < 394 or 1560 <= b < 1600 or b >= 2048 for b in used))
+
+    def test_alloc_stops_at_2048_and_skips_track_40(self):
+        img = M.Image(size=M.D81_SIZE)
+        fs = M.FS(img)
+        fs.format(img.write_cbm_d81() | {0}, M.D81_VOLUME)
+        got = []
+        with self.assertRaises(OSError):
+            while True:
+                got.append(fs.alloc_block())
+        self.assertEqual(len(got), 2048 - 2 - 18 - 40)       # block 0, root dir, metadata, track 40
+        self.assertLess(max(got), 2048)
+        self.assertFalse(any(1560 <= b < 1600 for b in got))
+        self.assertEqual(fs.free_blocks(), 0)
+
+    def test_cbm_header_bam_and_directory(self):
+        h = self.blk(40, 0)
+        self.assertEqual(h[0:3], bytes([40, 3, 0x44]))
+        self.assertEqual(h[4:20], b"VOL".ljust(16, b"\xa0"))
+        self.assertEqual(h[0x16:0x18], b"BB")
+        self.assertEqual(h[0x19:0x1b], b"3D")
+        for s, link in ((1, (40, 2)), (2, (0, 0xff))):
+            bam = self.blk(40, s)
+            self.assertEqual(tuple(bam[0:2]), link)
+            self.assertEqual(bam[2:7], bytes([0x44, 0xbb]) + b"BB" + bytes([0xc0]))
+            self.assertEqual(bam[0x10:0x10 + 6 * 40], bytes(240))      # every track: 0 free, all allocated
+        self.assertEqual(self.blk(40, 3)[0:2], bytes([0, 0xff]))
+        self.assertEqual(self.blk(40, 3)[2:], bytes(254))               # an empty directory
+
+    def test_d64_load_still_rejects_other_sizes(self):
+        with self.assertRaises(ValueError):
+            M.Image(bytes(1000))
+
+    def test_ls_and_cat_on_a_d81(self):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            M.main(["ls", self.out, "/"])
+        self.assertIn("big", buf.getvalue())
+        self.assertIn("sub", buf.getvalue())
+
+
 class TestCX(unittest.TestCase):
     def test_relocs(self):
         a = bytes([0xad, 0x10, 0x00, 0xea, 0x20, 0x00, 0xa0])

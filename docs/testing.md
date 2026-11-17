@@ -109,6 +109,7 @@ By test name; refine this as we learn what actually catches what.
 | The compiler (`tools/cc.py`, through slice 3) | `tools/test_cc.py`, `tools/test_cc_run.py` (host; programs run on a 6502 simulator), then `tests.test_compiled.Compiled` on the machine |
 | Image tools, key tables (`tools/`) | `make test-host` |
 | UCI v1 (`src/mod/uci.s` = `/lib/km/uci`, the stubs in `src/kernel/uci.s`, the `bmi` sites in `file.s`, `fs.s`, `exec.s`, `cbm.s`) | `make test-host` with py65 (`tools/test_uci_sim.py`), plus `Drives`, `REU`, `Pool`, `Modules` and a smoke run in VICE |
+| 1581 volumes (`src/mod/d81.s` = `/lib/km/d81`, the hook labels `ts_rd_io`, `ts_wr_io` in `blk.s` and `open_mnt_io`, `open_dio_io` in `cbm.s`, `tools/mkimage.py d81`) | `make test-host` (`tools/test_mkimage.py`, and `tools/test_d81_sim.py` with py65: fake drives at the DOS-command level), plus `tools/ci/run.sh test-only T="tests.d81_vice"` (its 1581 test skips without a `dos1581*` ROM, which `tools/setup-vice-roms.sh` does not fetch) and `Drives` |
 | Anything that adds or removes kernel code | `make size`, and quote the numbers in the commit message |
 
 Examples:
