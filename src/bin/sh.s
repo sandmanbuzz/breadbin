@@ -96,8 +96,6 @@ hsn:     .res 1             ; slot index for hslot
 hctr:    .res 1             ; print counter (putc may clobber X and Y)
 ; exit status of last command ($?)
 last_status: .res 1
-; where stage loop stopped (for &&/|| operator detection)
-stage_stop: .res 1
 
 .segment "CODE"
 start:
@@ -833,12 +831,8 @@ run_line:
         inc cur_tok
         jmp @skip_and
 @skip_and_body_delim:
-        ; found delimiter: save position to stage_stop
-        stx stage_stop
         jmp @cmd_loop
 @skip_next:
-        ; save delimiter position to stage_stop
-        stx stage_stop
         ; skip past this operator
         inc cur_tok
         lda cur_tok
@@ -860,8 +854,6 @@ run_line:
         inc cur_tok
         jmp @skip_and
 @skip_delim:
-        ; found another delimiter: save to stage_stop
-        stx stage_stop
         jmp @cmd_loop
 @skip_word:
         ; skip the word
@@ -998,11 +990,7 @@ stage:  lda #0
         jmp @t
 @syn:   pla
         jmp syntax
-@tend:  stx stage_stop
-        cpx ntok
-        bcs @tend_done
-        inc stage_stop
-@tend_done:
+@tend:  cpx ntok
         stx tmpb
         lda #0
         sta last
@@ -1407,6 +1395,8 @@ abort:  jsr close_pin
         sta bg
         lda #1
         sta last
+        lda #1
+        sta last_status
         ldx #0
         cpx npids
         beq @r

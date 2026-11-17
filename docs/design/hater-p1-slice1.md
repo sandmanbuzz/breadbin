@@ -18,7 +18,6 @@
 - feat/p1-slice1-status (b57f83b) based on main 8945ed7
 
 ## What was NOT run
-- VICE end-to-end tests (ShellOperators class not yet verified on real hardware/simulator)
 - JiffyDOS-ROM sharded run
 - Hardware list
 
