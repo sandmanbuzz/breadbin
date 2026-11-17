@@ -209,6 +209,169 @@ other code or on other machines.
 A failed experiment is a valid contribution if it establishes a boundary,
 invalidates an assumption, or saves the next investigator time.
 
+## Metapatterns: the reusable shapes of discovery
+
+A trick is target-specific. A metapattern is a reusable way to search for
+solutions across different instructions, machines, and problem domains. When
+studying an example, try to identify one or more of these shapes.
+
+### 1. State transduction
+
+**Pattern:** an operation transforms state in a way that makes a later operation
+cheaper. Preserve and compose the transformation instead of materializing an
+intermediate result and rebuilding state.
+
+**6502 sightings:** carry propagation; arithmetic flags consumed by a branch;
+shift results consumed by rotate or compare; pointer/index state passed directly
+to the next loop.
+
+**Transfer:** streaming parsers, compiler pipelines, protocol state machines,
+incremental algorithms, and APIs whose postconditions can replace redundant work.
+
+### 2. Representation duality
+
+**Pattern:** one physical representation has multiple useful interpretations.
+Choose a representation whose incidental structure is useful to more than one
+consumer.
+
+**6502 sightings:** instruction operands as data; code/data overlap; bit-7
+booleans tested through N; return addresses as dispatch data; split lookup tables.
+
+**Transfer:** tagged encodings, bitsets, packed structures, zero-copy parsing,
+memory-mapped formats, SIMD lanes, and database indexes.
+
+### 3. Temporal multiplexing
+
+**Pattern:** storage or machinery is reused by different activities whose
+lifetimes do not overlap. Prove the non-overlap, then share the resource.
+
+**6502 sightings:** overlaying scratch buffers; reusing stack bytes; using a
+precalculation buffer later as runtime storage; reusing registers across phases.
+
+**Transfer:** arena allocators, compiler register allocation, embedded memory
+planning, DMA buffers, packet buffers, and scratch-space scheduling.
+
+### 4. Work migration
+
+**Pattern:** move work to a phase where it is cheaper, less frequent, or easier
+to batch. Optimize total cost, not the cost of one isolated operation.
+
+**6502 sightings:** precomputed tables; table generation at startup; specializing
+an operand once instead of recalculating it in a hot loop; moving setup out of
+inner loops.
+
+**Transfer:** JIT specialization, query planning, caching, build-time generation,
+batching, memoization, and incremental computation. Always include setup and
+storage costs in the accounting.
+
+### 5. Implicit communication
+
+**Pattern:** two components communicate through state that already exists,
+rather than introducing a new variable, message, or synchronization step.
+
+**6502 sightings:** flags as boolean return values; registers as parameters;
+stack as a LIFO mailbox; a routine's exit pointer as the next routine's input.
+
+**Transfer:** producer/consumer protocols, fused iterators, parser combinators,
+dataflow systems, and APIs that return useful structured postconditions.
+
+### 6. Boundary elimination
+
+**Pattern:** remove a conversion, branch, call, copy, abstraction boundary, or
+protocol round-trip by composing adjacent operations under a stronger contract.
+
+**6502 sightings:** fall-through; tail calls; shared epilogues; direct reuse of
+a subroutine's result; eliminating save/restore when a process does not change.
+
+**Transfer:** compiler fusion, syscall batching, zero-copy I/O, inlining,
+protocol fusion, and reducing serialization boundaries.
+
+### 7. Exploiting ambient machinery
+
+**Pattern:** use work already performed by the environment—hardware, firmware,
+runtime, protocol, or data structure—instead of reproducing it.
+
+**6502 sightings:** Apple II SCROLL leaving a useful pointer; hardware address
+increment; video memory layout; firmware PRNG or timing services.
+
+**Transfer:** DMA engines, NIC offloads, filesystem extent layout, database
+indexes, GPU texture units, and operating-system primitives. Treat ambient
+behaviour as a dependency with a versioned contract, not as magic.
+
+### 8. Partial evaluation and specialization
+
+**Pattern:** when some inputs or conditions are invariant, resolve them once and
+make the repeated path simpler.
+
+**6502 sightings:** self-modified operands; generated tables; fixed-address
+specialization; unrolled loops; precomputed address pages.
+
+**Transfer:** compiler constant folding, JITs, template specialization, generated
+parsers, query compilation, and configuration-specific builds.
+
+### 9. Constraint inversion
+
+**Pattern:** turn a limitation into a useful invariant, or choose a problem
+formulation that makes the limitation irrelevant.
+
+**6502 sightings:** page alignment to avoid high-byte arithmetic; byte-sized
+counters with wraparound; reverse iteration; accepting bounded precision to
+remove multiplication or a large table.
+
+**Transfer:** bounded queues, modular arithmetic, fixed-capacity structures,
+approximate algorithms, cache-aware layouts, and streaming systems.
+
+### 10. Experimental compression
+
+**Pattern:** repeated manual investigation reveals a family resemblance.
+Capture the discriminating observation as a reusable test, recognizer, or
+transformation.
+
+**6502 sightings:** disk-protection signatures, RWTS identification, repeated
+patch patterns, and the evolution of Passport from expert procedures into an
+automated verification/copy workflow.
+
+**Transfer:** fuzzing oracles, static analysis rules, compiler peephole passes,
+migration tools, protocol decoders, and incident-response automation.
+
+### 11. Observability as a discovery instrument
+
+**Pattern:** make hidden state visible, then use the observations to improve the
+model. Instrumentation is not merely for debugging; it can reveal the algorithm.
+
+**6502 sightings:** cycle traces, memory dumps, ROM side-effect probes,
+disassembly, differential output, and instrumented opcode tests.
+
+**Transfer:** tracing distributed systems, performance counters, event logs,
+differential testing, hardware logic analyzers, and model checking.
+
+### 12. Cost-vector thinking
+
+**Pattern:** there is no single notion of "better". Compare solutions across a
+vector of costs and make trade-offs explicit.
+
+**6502 sightings:** bytes versus cycles; startup work versus frame time; table
+space versus multiply cost; flicker versus size; portability versus firmware
+reuse.
+
+**Transfer:** latency/throughput/capacity/energy/complexity trade-offs in any
+system. Avoid optimizing one coordinate while silently worsening the objective.
+
+### Extracting a metapattern from a new example
+
+For each case study, write a short chain:
+
+1. **Concrete trick:** what exact implementation did the author use?
+2. **Enabling observation:** what did they notice about the machine/problem?
+3. **Metapattern:** which reusable shape above does it instantiate? Is a new
+   shape needed?
+4. **Boundary conditions:** when does the pattern fail or become harmful?
+5. **Transfer experiment:** propose a small test applying the pattern to a
+   different subsystem or architecture.
+
+Do not force every discovery into this list. Add or revise metapatterns when
+examples reveal a genuinely new shape. The taxonomy is a map, not a prison.
+
 ## Runbooks
 
 These are search procedures. Use the ones relevant to the problem; combine them
