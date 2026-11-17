@@ -108,7 +108,7 @@ Replaced by the roster: `fleet/roster.md` on `fleet-store`. Claims, results and 
 - **Modules are a cooperative trust model:** no file owners or modes, no memory protection (`docs/design/next/modules-v1.md`, "Security model").
 - **Wart list:** the mount call clobbers the caller's first argument register; the argument copier has an inherited bound hole (needs memory the caller does not own); `mod_load` maps a refused `init` to ENODEV.
 - **Tests:** `test_keyboard` sends real X key events in bursts and has lost keys twice in about 20 runs on one host; hardware coverage of the final tip is Agent 2's series.
-- **Held for the user's decision:** `p_save` into process pages (about +6 pages at an idle prompt, touches the scheduler); `p_cwd` as an inode (about 2 pages).
+- **Held for the user's decision:** `p_save` into process pages (about +6 pages at an idle prompt, touches the scheduler); `p_cwd` as an inode (about 2 pages). A third option, on branch `feat/psave-io` (2026-11-16, not landed): `p_save` in the RAM under I/O at `$D040` (copied with interrupts off and `$01` = `$34`; 8 bytes of code), which with cold code moved to `CODEHI` raises `KSTART` to `$A800` (160 pages) without changing the process model.
 - **Fleet-level item, from the user:** the physical-1541 image write takes about 25 minutes and holds the `ultimate` lock for all of it. A faster write path (a drive-side fast loader, or writing only the changed sectors) would cut task latency and lock hold time for everyone; do it before the next major series of image writes.
 - **Origin:** declared 2026-11-01, `docs/process.md`, "Origin" (a mirror; history on GitHub is mutable and can be force-pushed).
 
