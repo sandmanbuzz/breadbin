@@ -98,7 +98,7 @@ Measured 2026-10-31, after M0-1 to M0-4. The takeover cost the kernel 1.9 KB (18
 | Free and unused: `$CF5D–$CFFF` (past the syscall table) | 163 |
 | User process pool: `$0800–$7FFF` | 30,720 (120 pages) |
 
-Where the kernel's bytes go: `proc` 4321 (3315 BSS, of which 2304 are the per-process save areas), `file` 2986, `fs` 2847, `blk` 2682 (1536 BSS is the block cache), `cbm` 1956, `exec` 1373, `con` 1363, `iec` 780, `kbd` 747.
+Where the kernel's bytes go: `proc` 4321 (3315 BSS, of which 2304 are the per-process save areas; on `feat/psave-io` the 1,900-byte save areas move to the RAM under I/O), `file` 2986, `fs` 2847, `blk` 2682 (1536 BSS is the block cache), `cbm` 1956, `exec` 1373, `con` 1363, `iec` 780, `kbd` 747.
 
 **Levers, biggest first** (all are independent):
 
@@ -308,4 +308,4 @@ The shortest route to *a compiler exists* is **S12, S13, S14**, and it does not 
 
 ## Numbers at the first milestone (2026-11-01)
 
-User pool 160 pages (40,960 bytes) against 120 at the fork and 38,911 for stock BASIC; an idle prompt keeps about 23 pages resident (init 5, sh 18; `login` execs into `sh`). The module and UCI costs: `cbm.km` is a 1.5 KB file loaded at the first CBM mount (about 5 pages while a CBM disk is mounted); `uci.km` is about 10 pages while `/u` is mounted and is never loaded on a machine without the Ultimate's Command Interface. What was rejected on measurement: block cache buffers 6 -> 3 (+18% disk reads at the prompt on a machine without an REU, for 3 pages).
+User pool 159 pages (40,704 bytes) against 120 at the fork and 38,911 for stock BASIC; an idle prompt keeps about 23 pages resident (init 5, sh 18; `login` execs into `sh`). The module and UCI costs: `cbm.km` is a 1.5 KB file loaded at the first CBM mount (about 5 pages while a CBM disk is mounted); `uci.km` is about 10 pages while `/u` is mounted and is never loaded on a machine without the Ultimate's Command Interface. What was rejected on measurement: block cache buffers 6 -> 3 (+18% disk reads at the prompt on a machine without an REU, for 3 pages).

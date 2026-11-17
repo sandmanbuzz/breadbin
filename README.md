@@ -157,7 +157,7 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 
 ## How it works
 
-- **Memory.** The BASIC and KERNAL ROMs are banked out (the KERNAL is replaced; no ROM is used at run time). The kernel starts at `$A800` (`KSTART`) with the syscall table at `$CF00`, and programs get 256-byte pages from `$0800–$A7FF` (160 pages, 40,960 bytes). `KSTART` (`src/kernel/k.inc`) and `KRAM` (`src/kernel.cfg`) move together, a page at a time.
+- **Memory.** The BASIC and KERNAL ROMs are banked out (the KERNAL is replaced; no ROM is used at run time). The kernel starts at `$A700` (`KSTART`) with the syscall table at `$CF00`, and programs get 256-byte pages from `$0800–$A6FF` (159 pages, 40,704 bytes). `KSTART` (`src/kernel/k.inc`) and `KRAM` (`src/kernel.cfg`) move together, a page at a time.
 - **Context switch.** Each process has its own zero page `$02–$3F` and its slice of the stack page; both are saved and restored on every switch.
 - **Kernel preemption.** The kernel itself is not preemptible, so disk I/O is a critical section. The kernel's own IEC driver is not re-entrant.
 - **Executables (CX format).** Each program is linked twice, at `$0000` and at `$0100`. The bytes that differ by one are high bytes of addresses, and their offsets become the relocation table. The loader adds the load page to each of them.

@@ -57,7 +57,7 @@ proc_init:
 
 ; p_save: the saved zero page and stack of every process, in the RAM under I/O (nothing else
 ; uses $D000-$DFFF). It is read and written only with interrupts off and $01 one lower
-; ($35 -> $34, all RAM): sched's two loops and new_proc's setup in exec.s. $D040 leaves the
+; ($35 -> $34, all RAM): sched's two loops and setup_proc in exec.s. $D040 leaves the
 ; VIC registers and colour RAM alone, which the simulators in tools/ map flat.
 p_save = $D040
 .assert p_save + MAXPROC*SAVESZ <= $D800, error, "p_save runs into colour RAM"
