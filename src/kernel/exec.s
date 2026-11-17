@@ -690,7 +690,7 @@ copy_cwd:
 ; new image is loaded, relocated, and its argv copied, while the caller's own image is still
 ; intact. From here nothing may fail (a fallible step added below would leave a half-replaced
 ; process). The caller is `cur`; its zero page and stack are live, so p_save is not touched.
-.segment "CODE"
+.segment "CODEHI"            ; cold: exec_commit and the module syscalls
 exec_commit:
         jsr set_name            ; pp still points at the path, in the old image
         ldx cur

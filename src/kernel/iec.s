@@ -68,7 +68,7 @@ io_dirty: .res 4    ; per drive (number & 3): a send to it failed part way, or n
                     ; a mark with 8-11 (a send to a printer is not supported here)
 
 .segment "IECBUS"
-; This module has a segment of its own, the first in KRAM ($A300, kernel.cfg): its place in
+; This module has a segment of its own, the first in KRAM ($A800, kernel.cfg): its place in
 ; the page then depends on this file alone, not on the size of every module linked before it.
 ; The bit loops below are timed by the cycle, and a taken branch that crosses a page costs one
 ; more. The channel level (nothing timed) comes first and puts io_set at IO_AT in its page, so
