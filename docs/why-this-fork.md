@@ -23,7 +23,7 @@ Upstream has a lot we also have (see the next section). These are the parts that
 - **REU block cache** for the boot drive: write-through, keyed by a build id and the disk label (`cache` command, `make CACHE=0|1|2`). Upstream also keeps a copy of drive 8's blocks in the REU as they are read (`84f0981`), which the survey treats as an earlier version of the same idea.
 - **`turbo`.** Upstream has no equivalent.
 - **Kernel size is measured.** `make size` reports the bytes per module and the headroom, and `docs/size-ledger.tsv` has a row per landing. Upstream also treats RAM as scarce and has an INIT segment and code under the ROM; it has no measurement tool or ledger that we found.
-- **User memory.** The user pool is 159 pages (`$0800-$A6FF`, 40,704 bytes), above a stock C64's 38,911 BASIC bytes. Upstream's `release-0.6` gives programs 125 pages (`61f006d`, kernel at `$8500`).
+- **User memory.** The user pool is 155 pages (`$0800-$A2FF`, 39,680 bytes), above a stock C64's 38,911 BASIC bytes. Upstream's `release-0.6` gives programs 125 pages (`61f006d`, kernel at `$8500`).
 - **Test infrastructure.** Upstream has VICE system tests run in parallel on one machine (`tools/ptest.py`, about 40 minutes by its `CLAUDE.md`) and host tests. This fork adds VICE tests sharded across containers (`tools/ci`, `docs/ci.md`), a real-keystroke test, a py65-based simulator for UCI and for `as`, a fake Ultimate server, a hardware test backend (`tools/ultimatetest.py`), locks for shared machines (`tools/with-lock`), and a landing script (`tools/land.sh`) that builds and runs `make test-host` on the merged tree before it commits.
 - **Host-side compiler.** `tools/cc.py`, a C-subset compiler that emits `as` source. It is a host-side reference for now (`README.md`).
 
