@@ -161,3 +161,11 @@ From `git branch -a --merged main` / `--no-merged main` on 2026-11-06 (dates are
   4. SYS_WAIT exit code capture (stx vs sta)
   5. Host sim WAIT return value modeling
 - **Not run:** VICE end-to-end, JiffyDOS-ROM, hardware
+
+## Hater Review Round 2 (2026-11-16)
+- C agent responded with P1 findings:
+  1. abort() doesn't set last_status on redirect/pipe failures
+  2. stage_stop is dead code (written but never read)
+  3. Design doc still says VICE tests not run
+- All three fixed and pushed (1d48353)
+- Waiting for final verdict
