@@ -2,8 +2,9 @@
 
     tools/ci/run.sh test-only T="tests.d81_vice"
 
-Needs a 1581 drive ROM, which tools/setup-vice-roms.sh does not fetch: the test skips, saying so, unless a
-dos1581* image is in VICE's DRIVES directory or BREADBIN_VICE_ARGS names one (-dos1581 PATH). The volume is
+Needs a 1581 drive ROM (tools/setup-vice-roms.sh fetches dos1581-318045-02.bin; run.sh copies the ROM dir into
+the container's VICE DRIVES directory): the D81 class skips, saying so, unless a dos1581* image is in VICE's
+DRIVES directory or BREADBIN_VICE_ARGS names one (-dos1581 PATH). The volume is
 built with `tools/mkimage.py d81`; a file is copied onto it and off it, and both are compared on the host.
 """
 import glob
@@ -51,8 +52,8 @@ class With1541(unittest.TestCase):
             self.assertEqual(out.stdout, f.read())
 
 
-@unittest.skipUnless(rom_1581(), "no 1581 drive ROM (dos1581*) in VICE's DRIVES directory: not fetched by "
-                                 "tools/setup-vice-roms.sh; put one there or pass -dos1581 in BREADBIN_VICE_ARGS")
+@unittest.skipUnless(rom_1581(), "no 1581 drive ROM (dos1581*) in VICE's DRIVES directory: run "
+                                 "tools/setup-vice-roms.sh or pass -dos1581 in BREADBIN_VICE_ARGS")
 class D81(unittest.TestCase):
     def test_copy_to_and_from_a_1581_volume(self):
         mk = os.path.join(ROOT, "tools", "mkimage.py")
