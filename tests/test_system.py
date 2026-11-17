@@ -1043,7 +1043,8 @@ class ShellOperators(unittest.TestCase):
     def test_and_fail(self):
         """cat /nope && echo no: second command skipped."""
         out = self.v.run("cat /nope && echo no")
-        self.assertNotIn("no", out)
+        # the error text itself contains "no" ("/nope", "no such file")
+        self.assertNotIn("no", out.splitlines())
 
     def test_or_success(self):
         """echo ok || echo no: second command skipped."""
@@ -1058,13 +1059,14 @@ class ShellOperators(unittest.TestCase):
     def test_dollar_question_after_success(self):
         """$? after echo ok is 0."""
         self.v.run("echo ok")
-        out = self.v.run("echo $?")
+        out = self.v.run("echo $?", clear=False)
         self.assertEqual(out.strip(), "0")
 
     def test_dollar_question_after_fail(self):
         """$? after cat /nope is 1."""
         self.v.run("cat /nope")
-        out = self.v.run("echo $?")
+        # clear=False: run() types "clear" first, which would set $? to its own 0
+        out = self.v.run("echo $?", clear=False)
         self.assertEqual(out.strip(), "1")
 
     def test_chained_and_or(self):
