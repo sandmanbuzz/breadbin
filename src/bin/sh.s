@@ -1099,6 +1099,9 @@ stage:  lda #0
         ldx pout
         jsr SYS_SPAWN
         bcc @spok
+        ; SYS_SPAWN failed: set nonzero status
+        lda #1
+        sta last_status
         ldx av
         ldy av+1
         jsr perr
@@ -1112,8 +1115,13 @@ stage:  lda #0
         sta prev_in
         lda last
         bne @wait
-        ; no pipe: still need to wait for foreground commands
-        jmp @wait
+        ; last == 0: not final stage, continue to next pipeline stage
+        lda #0
+        sta first
+        ldx tmpb
+        inx
+        stx st_start
+        jmp stage
 @wait:  lda npids
         beq @r
         lda bg
@@ -1563,7 +1571,9 @@ bi_kill:
         jsr perr
 @n:     inc bk_i
         jmp @l
-@done:  sec
+@done:  lda #0
+        sta last_status
+        sec
         rts
 
 ; jobs: background children of this shell (from the process table)
@@ -1601,6 +1611,8 @@ bi_jobs:
         lda bk_i
         cmp #16
         bne @l
+        lda #0
+        sta last_status
         sec
         rts
 
