@@ -354,7 +354,7 @@ may already perform.
 5. Decide whether the dependency is acceptable; isolate it behind a named
    platform contract if adopted.
 
-**Example:** in Deaterage's 64-byte Apple II fire demo, qkumba noticed that the
+**Example:** in Deater's 64-byte Apple II fire demo, qkumba noticed that the
 Apple II SCROLL routine left BAS2L:BAS2H pointing at $07D0. That observation
 saved address setup. The optimization history also records a real-hardware
 difference involving MIXCLR, and experiments that failed to pay off. This is
@@ -408,7 +408,7 @@ current data representation makes them convenient.
 5. Compare complete cost, including table generation, storage, and precision
    loss.
 
-**Example:** Deaterage's Star Path optimization history is a particularly good
+**Example:** Deater's Star Path optimization history is a particularly good
 study: it records changing algorithms, table generation, multiplication,
 self-modified operands, and the size/cycle trade-offs across many iterations.
 The sequence matters more than any single final trick.
@@ -573,7 +573,7 @@ These are starting points, not a canon. Prefer primary artifacts, original
 source, disassembly, manuals, and author-written optimization histories over
 lists of tricks.
 
-### Deaterage / VMW
+### Deater / VMW
 - [Size Coding on the Apple II](https://www.deater.net/weave/vmwprod/demos/sizecoding.html)
 - [Lovebyte 2021 sizecoding slides (PDF)](https://www.deater.net/weave/vmwprod/demos/lovebyte2021_sizecoding.pdf)
 - [fire_qkumba.s](https://github.com/deater/dos33fsprogs/blob/master/demos/fire/fire_qkumba.s)
