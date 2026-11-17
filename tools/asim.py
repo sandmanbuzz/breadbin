@@ -250,6 +250,8 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
                 res.spawns.append((cstr(r(2)), argv, cpu.a, cpu.x, cpu.y))
                 ret(False, 2 + len(res.spawns))  # a fake pid; the child is recorded, not run
             elif name == "WAIT":             # A = pid ($FF: any), nothing is ever reaped
+                # All spawns succeed in the host sim: return exit code 0 in X
+                cpu.x = 0
                 ret(True)
             elif name == "KILL":
                 ret(False, 0)

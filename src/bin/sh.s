@@ -11,7 +11,7 @@
 ; On the console, lines are edited in raw mode: DEL, CTRL-D, and CTRL-I (TAB)
 ; completes a command or file name (see readline).
 .include "../../include/breadbin.inc"
-.import print, eprint, putc, newline, print_dec, perr, argn, strlen, exit, parse_dec
+.import print, eprint, putc, newline, print_dec, perr, argn, strlen, exit, parse_dec, dec_str
 .importzp lp1, lp2
 
 MAXTOK  = 32
@@ -23,6 +23,9 @@ zp1 = $23
 zp2 = $25
 
 T_WORD  = 0
+T_AND   = $80
+T_OR    = $81
+T_DOLLAR = $82
 
 .segment "BSS"
 in_fd:   .res 1
@@ -91,6 +94,10 @@ hcount:  .res 1             ; lines held, up to HISTN
 hpos:    .res 1             ; 0 = the line being typed, n = n lines back
 hsn:     .res 1             ; slot index for hslot
 hctr:    .res 1             ; print counter (putc may clobber X and Y)
+; exit status of last command ($?)
+last_status: .res 1
+; where stage loop stopped (for &&/|| operator detection)
+stage_stop: .res 1
 
 .segment "CODE"
 start:
@@ -619,9 +626,9 @@ tokenize:
         jmp @toomany
 @tok:
         cmp #'|'
-        beq @op
+        beq @pipe
         cmp #'&'
-        beq @op
+        beq @amp
         cmp #';'
         beq @op
         cmp #'<'
@@ -634,12 +641,53 @@ tokenize:
         lda #'A'
         iny
         jmp @op
-@gt:    lda #'>'
+@g:    lda #'>'
+@gt:   sta ttype,x
+        inc ntok
+        iny
+        jmp @skip
 @op:    sta ttype,x
         inc ntok
         iny
         jmp @skip
-@word:  lda #T_WORD
+@pipe: lda line+1,y
+        cmp #'|'
+        beq @or
+        lda #'|'
+        jmp @op
+@or:   lda #T_OR
+        sta ttype,x
+        inc ntok
+        iny
+        iny
+        jmp @skip
+@amp:  lda line+1,y
+        cmp #'&'
+        beq @and
+        lda #'&'
+        jmp @op
+@and:  lda #T_AND
+        sta ttype,x
+        inc ntok
+        iny
+        iny
+        jmp @skip
+@word:  ; check for $? - if current char is $ and next is ?, emit T_DOLLAR
+        lda line,y
+        cmp #'$'
+        bne @word_start
+        lda line+1,y
+        cmp #'?'
+        bne @word_start
+        ; it's $? - emit T_DOLLAR and skip both chars
+        lda #T_DOLLAR
+        sta ttype,x
+        inc ntok
+        iny
+        iny
+        jmp @skip
+@word_start:
+        lda #T_WORD
         sta ttype,x
         lda tpos
         clc
@@ -708,9 +756,12 @@ run_line:
         sta gpos
         sta gpos+1
         sta cur_tok
-@cmd:   lda cur_tok
+@cmd_loop:
+        lda cur_tok
         cmp ntok
-        bcs @r
+        bcc @cmd_body
+        jmp @cmd_exit
+@cmd_body:
         ; find end of this command (';' or end)
         tax
 @f:     cpx ntok
@@ -718,14 +769,119 @@ run_line:
         lda ttype,x
         cmp #';'
         beq @fe
+        cmp #T_AND
+        beq @fe
+        cmp #T_OR
+        beq @fe
         inx
         jmp @f
 @fe:    stx cmd_end
         jsr run_cmd
+        ; check what's at cmd_end (the operator we stopped at)
         ldx cmd_end
+        cpx ntok
+        beq @cmd_done
+        lda ttype,x
+        cmp #';'
+        beq @cmd_semi
+        cmp #T_AND
+        beq @and_check
+        cmp #T_OR
+        beq @or_check_target
+@skip_or:
+        ; unknown token, just continue
+        jmp @cmd_loop
+@or_check_target:
+        jmp @or_check
+@cmd_semi:
+        ; ';' at cmd_end: skip past it
         inx
         stx cur_tok
-        jmp @cmd
+        jmp @cmd_loop
+@cmd_done:
+        ldx ntok
+        stx cur_tok
+        jmp @cmd_loop
+@and_check:
+        ; &&: only continue if last_status == 0
+        lda last_status
+        bne @and_fail
+        ; condition met, skip operator and continue
+        inx
+        stx cur_tok
+        jmp @cmd_loop
+@and_fail:
+        ; condition not met, skip operator and next command
+        inx
+        stx cur_tok
+        ; find next ';' or end, skipping ||
+@skip_and:
+        lda cur_tok
+        cmp ntok
+        bne @skip_and_body
+        jmp @cmd_loop
+@skip_and_body:
+        ldx cur_tok
+        lda ttype,x
+        cmp #T_AND
+        beq @skip_and_body_delim
+        cmp #T_OR
+        beq @skip_and_body_delim
+        cmp #';'
+        beq @skip_and_body_delim
+        ; not a delimiter, just skip
+        inc cur_tok
+        jmp @skip_and
+@skip_and_body_delim:
+        ; found delimiter: save position to stage_stop
+        stx stage_stop
+        jmp @cmd_loop
+@skip_next:
+        ; save delimiter position to stage_stop
+        stx stage_stop
+        ; skip past this operator
+        inc cur_tok
+        lda cur_tok
+        cmp ntok
+        bne @skip_next_body
+        jmp @cmd_loop
+@skip_next_body:
+        ldx cur_tok
+        lda ttype,x
+        cmp #T_AND
+        beq @skip_delim
+        cmp #T_OR
+        beq @skip_delim
+        cmp #T_WORD
+        beq @skip_word
+        cmp #T_DOLLAR
+        beq @skip_word
+        ; not a delimiter or word, just skip
+        inc cur_tok
+        jmp @skip_and
+@skip_delim:
+        ; found another delimiter: save to stage_stop
+        stx stage_stop
+        jmp @cmd_loop
+@skip_word:
+        ; skip the word
+        inc cur_tok
+        jmp @skip_and
+@or_check:
+        ; ||: only continue if last_status != 0
+        lda last_status
+        bne @or_cont
+        ; condition not met, skip operator and next command
+        inx
+        stx cur_tok
+        jmp @skip_and
+@or_cont:
+        ; condition met, skip operator and continue
+        inx
+        stx cur_tok
+        jmp @cmd_loop
+@cmd_exit:
+        jmp @r
 @r:     rts
 
 ; run_cmd: tokens cur_tok .. cmd_end-1
@@ -759,11 +915,19 @@ stage:  lda #0
         sta outf_hi
         sta outapp
         ldx st_start
-@t:     cpx cmd_end
+@t:     cpx ntok
+        beq @tend_near
+        cpx cmd_end
         bne @t1
+@tend_near:
+        jmp @tend
 @jtend: jmp @tend
 @t1:    lda ttype,x
         cmp #'|'
+        beq @jtend
+        cmp #T_AND
+        beq @jtend
+        cmp #T_OR
         beq @jtend
         cmp #T_WORD
         bne @op
@@ -786,9 +950,26 @@ stage:  lda #0
         ldx g_tok
         inx
         jmp @t
-@op:    cmp #'&'
+@op:    cmp #T_DOLLAR
+        beq @dollar_exp
+        cmp #'&'
         bne @op2
         jmp syntax
+@dollar_exp:
+        ; save current token index (T_DOLLAR position)
+        stx g_tok
+        ; expand $? to decimal string of last_status
+        lda last_status
+        ldx #0
+        jsr dec_str
+        ; A/X = pointer to first digit, Y = length
+        ; store as argument: zp1 = pointer to string
+        sta zp1
+        stx zp1+1
+        jsr add_arg
+        ldx g_tok
+        inx
+        jmp @t
 @op2:   pha
         inx
         cpx cmd_end
@@ -817,7 +998,12 @@ stage:  lda #0
         jmp @t
 @syn:   pla
         jmp syntax
-@tend:  stx tmpb
+@tend:  stx stage_stop
+        cpx ntok
+        bcs @tend_done
+        inc stage_stop
+@tend_done:
+        stx tmpb
         lda #0
         sta last
         cpx cmd_end
@@ -926,12 +1112,8 @@ stage:  lda #0
         sta prev_in
         lda last
         bne @wait
-        lda #0
-        sta first
-        ldx tmpb
-        inx
-        stx st_start
-        jmp stage
+        ; no pipe: still need to wait for foreground commands
+        jmp @wait
 @wait:  lda npids
         beq @r
         lda bg
@@ -950,6 +1132,7 @@ stage:  lda #0
         lda pids,x
         ldx #0
         jsr SYS_WAIT
+        stx last_status
         ldx tmpb
         inx
         cpx npids
@@ -1294,11 +1477,17 @@ builtin:
         lda av+3
         sta r0+1
 @cd:    jsr SYS_CHDIR
-        bcc @done
+        bcc @ok
         ldx r0
         ldy r0+1
         jsr perr
-@done:  sec
+        lda #1
+        sta last_status
+        sec
+        rts
+@ok:    lda #0
+        sta last_status
+        sec
         rts
 @nocd:  lda #<s_kill
         sta lp2
