@@ -180,7 +180,9 @@ sys_mount:
         jsr uci_attach
         bcs @r
         jmp @add
-@iec:   jsr iec_open
+@iec:
+:                           ; open_mnt_io (below): a geometry module repoints this call (src/mod/d81.s)
+        jsr iec_open
         bcs @r
         lda mo_dev
         jsr binval
@@ -261,6 +263,7 @@ sys_mount:
         pla
         sec
         rts
+open_mnt_io := :-           ; mount's jsr iec_open (a name here, not there: it would end the @ scope)
 
 ; ---------------------------------------------------------------------
 ; diskio(A = drive 9-11, X = op): raw access to an unmounted drive, for
@@ -289,6 +292,7 @@ sys_diskio:
         sec
         rts
 @free:  ldx mo_dev
+:                           ; open_dio_io (below)
         jsr iec_open
         bcs @r
         lda mo_dev
@@ -342,6 +346,7 @@ sys_diskio:
         bcc @r
         lda #EIO
 @r:     rts
+open_dio_io := :-           ; diskio's jsr iec_open
 .import bwrite
 
 ; ent_path: X = mount entry -> p1 = &mt_path[x*32]
