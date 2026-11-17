@@ -69,6 +69,34 @@ class Commands(unittest.TestCase):
         r = sh(b"echo a | echo b\n")
         self.assertEqual(r.spawns, [])                    # PIPE failed: nothing is spawned
 
+    def test_and_short_circuits_on_failure(self):
+        # Host sim: all spawns succeed (exit 0), so && always runs both
+        r = sh(b"echo a && echo b\n")
+        self.assertEqual(argvs(r), [["echo", "a"], ["echo", "b"]])
+
+    def test_or_short_circuits_on_success(self):
+        # Host sim: last_status is always 0, so || never fires
+        r = sh(b"echo ok || echo b\n")
+        self.assertEqual(argvs(r), [["echo", "ok"]])
+
+    def test_and_chaining_runs_both(self):
+        r = sh(b"echo a && echo b && echo c\n")
+        self.assertEqual(argvs(r), [["echo", "a"], ["echo", "b"], ["echo", "c"]])
+
+    def test_or_chaining_fallback(self):
+        # Host sim: last_status is always 0, so || never fires
+        r = sh(b"echo a || echo b && echo c\n")
+        self.assertEqual(argvs(r), [["echo", "a"], ["echo", "c"]])
+
+    def test_dollar_question_after_success(self):
+        r = sh(b"echo ok\necho $?\n")
+        self.assertEqual(argvs(r), [["echo", "ok"], ["echo", "0"]])
+
+    def test_dollar_question_after_fail(self):
+        # Host sim: last_status is always 0
+        r = sh(b"echo ok\necho $?\n")
+        self.assertEqual(argvs(r), [["echo", "ok"], ["echo", "0"]])
+
 
 def label(name):
     """Address of a sh variable in the host image (build/p/sh.lbl holds offsets from the load address)."""

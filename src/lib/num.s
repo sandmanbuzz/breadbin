@@ -2,7 +2,7 @@
 .include "../../include/breadbin.inc"
 .include "lib.inc"
 .import print, putc
-.export print_dec, print_dec_w, print_hex, parse_dec
+.export print_dec, print_dec_w, print_hex, parse_dec, dec_str, dec_str
 
 .segment "BSS"
 ldec:   .res 7
