@@ -13,6 +13,7 @@
 #      BREADBIN_CI_JIFFY  host dir with JiffyDOS-C64.bin and JiffyDOS_1541-II.bin: mounted
 #                         read-only and passed to VICE as the KERNAL and the 1541 ROMs
 #      BREADBIN_VICE_ARGS extra VICE options for the whole run (passed through)
+#      BREADBIN_FAST_BENCH   passed through: tests/test_fast.py likewise, with the module and without
 #      BREADBIN_JIFFY_BENCH  passed through: tests/test_jiffy.py runs at real speed and prints the copy time
 #      BREADBIN_VICE_PRINT_ARGS  passed through: the harness prints the VICE command line (tools/vicetest.py)
 # The repo is mounted read-only and copied inside, so concurrent runs do not collide.
@@ -69,7 +70,7 @@ fi
 lockbin=
 for t in "$@"; do
     case $t in
-        test-host|size|all|clean|T=*|CACHE=*|JIFFY=*) ;;
+        test-host|size|all|clean|T=*|CACHE=*|JIFFY=*|MODFLAGS=*) ;;
         *) lockbin="$repo/tools/with-lock" ;;
     esac
 done
@@ -82,6 +83,7 @@ set -- "$img" "$@"
 [ -n "$broker" ] && set -- -e "BREADBIN_BROKER=$broker" "$@"
 [ -n "${BREADBIN_VICE_PRINT_ARGS:-}" ] && set -- -e "BREADBIN_VICE_PRINT_ARGS=$BREADBIN_VICE_PRINT_ARGS" "$@"
 [ -n "${BREADBIN_JIFFY_BENCH:-}" ] && set -- -e "BREADBIN_JIFFY_BENCH=$BREADBIN_JIFFY_BENCH" "$@"
+[ -n "${BREADBIN_FAST_BENCH:-}" ] && set -- -e "BREADBIN_FAST_BENCH=$BREADBIN_FAST_BENCH" "$@"
 # The container copies the tree without .git, so the disk's revision stamp is worked out here
 # (the Makefile's BUILDREV rule, run on the host) and passed in; make takes it from the environment.
 rev=${BUILDREV:-$(make -s -C "$repo" --no-print-directory print-buildrev 2>/dev/null || echo unknown)}

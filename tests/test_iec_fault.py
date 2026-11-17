@@ -57,6 +57,9 @@ STOP = re.compile(r"#(\d+) \(Stop on\s+exec ([0-9a-f]+)\)")
 ST = 0x90
 
 
+JIFFY_DRIVE = "JiffyDOS_1541" in os.environ.get("BREADBIN_VICE_ARGS", "")
+
+
 def labels():
     out = {}
     with open(os.path.join(ROOT, "build", "kernel.lbl")) as f:
@@ -243,6 +246,11 @@ class IecFault(unittest.TestCase):
         $3F byte is not acknowledged: not a lost ATN edge). reu: KB of REU (the block cache is on).
         Returns the record."""
         lbl = self.lbl
+        if kind.endswith(("eoi", "eoil")) and "io_jif" in lbl and JIFFY_DRIVE:
+            # these faults are the standard byte protocol's (io_tx's EOI handshake); with a
+            # JiffyDOS drive the data bytes of a command go through jif_tx, which has no such
+            # handshake. A gap, recorded in docs/testing.md: no byte-level fault test for jif_tx.
+            self.skipTest("a fault of the standard byte protocol; this drive speaks JiffyDOS")
         img = os.path.join(self.tmp, "a.d64")
         shutil.copyfile(IMAGE, img)
         nth = int(os.environ.get("FAULT_N", nth))

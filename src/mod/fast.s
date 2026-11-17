@@ -23,10 +23,10 @@
 ; drive: our program is gone then). fini puts them back.
 ;
 ; Drive memory. The kernel's own "#" channel (secondary 2) owns one drive buffer; install
-; checks that it is buffer 0 ($0300), and the drive code uses that buffer and its job
-; slot ($00, header $06/$07) for the sector. The code lives in buffers 1 and 2
-; ($0400-$05FF), reserved with "#1" and "#2" on secondaries 4 and 5 so the drive's DOS
-; leaves them alone. One buffer stays free. Only drives whose mount is c64fs are touched:
+; checks that it is buffer 2 ($0500: what a stock 1541 gives the first "#"), and the drive
+; code uses that buffer and its job slot ($02, header $0A/$0B) for the sector. The code
+; lives in buffers 0 and 1 ($0300-$04FF), reserved with "#0" and "#1" on secondaries 4 and
+; 5 so the drive's DOS leaves them alone. One buffer stays free. Only drives whose mount is c64fs are touched:
 ; a CBM DOS disk needs the buffers for its files.
 ;
 ; One block: "M-E" lo hi op track sector (the drive runs the code once and returns to its
@@ -50,8 +50,8 @@ PORT    = $dd00
 A_CLK   = $10
 A_DAT   = $20
 
-DRV     = $0400         ; where the drive code runs (buffers 1 and 2)
-DBUF    = $0300         ; buffer 0: the sector
+DRV     = $0300         ; where the drive code runs (buffers 0 and 1)
+DBUF    = $0500         ; buffer 2, the kernel's own "#" buffer: the sector
 PB      = $1800         ; the drive's serial port (VIA 1 port B)
 OP_RD   = $80           ; the job codes
 OP_WR   = $90
@@ -448,20 +448,21 @@ probe:  ldx #$fe                ; a 1541? Its ROM ends in the IRQ vector $FE67. 
         ldy #1
         jsr mr
         bcs @no
-        lda mrb                 ; buffer 0, or we stay out
+        lda mrb                 ; buffer 2, or we stay out
+        cmp #2
         bne @no
         clc
         rts
 @no:    sec
         rts
 
-; upload: reserve buffers 1 and 2 and fill them. Carry set if the drive did not take it
+; upload: reserve buffers 0 and 1 and fill them. Carry set if the drive did not take it
 ; all (the buffers are given back).
-upload: lda #'1'
+upload: lda #'0'
         ldx #4
         jsr reserve
         bcs @cl
-        lda #'2'
+        lda #'1'
         ldx #5
         jsr reserve
         bcs @cl
@@ -736,9 +737,9 @@ d_go:   sei
         lsr a
         bcc @s
         lda $0206               ; track and sector from the command
-        sta $06
+        sta $0a
         lda $0207
-        sta $07
+        sta $0b
         ldy #0
         sty d_ck
         lda $0205
@@ -802,13 +803,13 @@ d_wr:   lda #$02
         jsr d_send
         jmp d_quit
 
-; d_job: A = job code for buffer 0. Returns its result (1 = good). The disk controller
+; d_job: A = job code for buffer 2. Returns its result (1 = good). The disk controller
 ; runs in the drive's interrupt.
-d_job:  sta $00
+d_job:  sta $02
         cli
 @w:     bit PB
         bmi d_quit
-        lda $00
+        lda $02
         bmi @w
         sei
 d_rts:  rts

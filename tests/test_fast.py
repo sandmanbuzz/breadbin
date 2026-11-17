@@ -21,7 +21,7 @@ MOD = os.path.join(ROOT, "build", "mod")
 JIFFY_DRIVE = "JiffyDOS_1541" in os.environ.get("BREADBIN_VICE_ARGS", "")
 BENCH = bool(os.environ.get("BREADBIN_FAST_BENCH"))
 PAL_HZ = 985248
-DRV = 0x0400
+DRV = 0x0300
 
 
 def blob():
@@ -53,11 +53,11 @@ def drive_mem(v, start, end):
     out = v._cmd("m 8:%04x 8:%04x" % (start, end), wait=0.3)
     v._cmd("x")
     mem = {}
-    for ln in out.split("\n"):
-        m = re.match(r"^>8:([0-9a-f]{4})\s+((?:[0-9a-f]{2}\s+){1,16})", ln)
-        if m:
-            for i, h in enumerate(m.group(2).split()):
-                mem[int(m.group(1), 16) + i] = int(h, 16)
+    for m in re.finditer(r">8:([0-9a-f]{4})\s+((?:[0-9a-f]{2} +){1,16})", out):
+        for i, h in enumerate(m.group(2).split()):
+            mem[int(m.group(1), 16) + i] = int(h, 16)
+    if len(mem) <= end - start:
+        print("drive_mem: no parse of", repr(out[:400]), file=sys.stderr)
     return bytes(mem.get(a, 0x100) & 0xff for a in range(start, end + 1)) if len(mem) > end - start else None
 
 
@@ -115,7 +115,7 @@ class Fast(unittest.TestCase):
             self.assertGreater(ng, 300)
         else:
             self.assertEqual((state, ng), (0x80, 0))
-        slot = re.search(r"slot (\d+):[^\n]*fast", ls).group(1)
+        slot = re.search(r"slot (\d+) \(fast\)", ls).group(1)
         self.assertEqual(v.run("mod unload " + slot), "")
         self.assertNotIn("fast", v.run("mod ls"))
         self.assertEqual(v.run("cp /home/f3 /home/f4", timeout=900), "")     # the standard path again

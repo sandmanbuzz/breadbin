@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOD = os.path.join(ROOT, "build", "mod")
 SRC = os.path.join(ROOT, "src", "mod", "fast.s")
 PB = 0x1800             # the drive's serial port (VIA 1 port B)
-DRV = 0x0400            # where the drive code runs
+DRV = 0x0300            # where the drive code runs
 
 # Write (send) and read (receive) cycles; they mirror SK1..SK5 and RK1..RK5 in src/mod/fast.s
 # (RK5 is the one port write of d_recv). test_constants_mirror_source keeps them in step.
