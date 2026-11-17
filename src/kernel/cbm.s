@@ -30,9 +30,6 @@ mo_pdev: .res 1
 mo_pino: .res 1
 mo_ent:  .res 1
 
-.segment "RODATA"
-magic:   .byte "C64FS"
-
 ; ---------------------------------------------------------------------
 ; The CBM filesystem lives in /lib/km/cbm (src/mod/cbm.s). These stubs are what file.s and
 ; fs.s call; the module's init points them at its routines by writing the jmp operands
@@ -186,26 +183,15 @@ sys_mount:
         bcs @r
         lda mo_dev
         jsr binval
-        ; a Breadbin disk?
-        lda mo_dev
-        ldx #<376
-        ldy #>376
-        jsr bread
-        bcs @nodisk
-        ldy #4
-@m:     lda (bp),y
-        cmp magic,y
-        bne @cbm
-        dey
-        bpl @m
-        ldx mo_dev
-        lda #FS_C64
-        sta dev_type,x
+        ; a Breadbin disk? (mount_dev checks the magic and the version; upstream 5f2a9ec)
         lda mo_dev
         ldx #<376
         ldy #>376
         jsr mount_dev
-        bcs @nodisk
+        bcs @cbm
+        ldx mo_dev
+        lda #FS_C64
+        sta dev_type,x
         jmp @add
 @cbm:   ; a CBM DOS disk: track 18 sector 0 is a BAM with format 'A'
         lda mo_dev

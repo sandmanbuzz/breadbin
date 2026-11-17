@@ -39,7 +39,8 @@ SB_BLOCK    = 376
 CH_LEN      = 24        ; cache header: magic(4) build id(4) disk label(16)
 BAM_BLOCK   = 357       ; track 18 sector 0: the CBM disk label is at offset $90
 BAM_LABEL   = $90
-SB_BUILD_ID = 15        ; superblock offset of the 4-byte build id (tools/mkimage.py)
+SB_BUILD_ID = 252       ; superblock offset of the 4-byte build id (tools/mkimage.py): clear of
+                        ; upstream's fields (0-18; 15-18 is its last_time)
 
 .segment "ZEROPAGE"
 bp:      .res 2         ; pointer to the buffer returned by bread
@@ -183,7 +184,7 @@ blk_init:
         jmp con_puts_ax
 @r:     rts
 
-; reu_sb: A = 1 the REU holds a root image (c64fs superblock at block SB_BLOCK, version 1,
+; reu_sb: A = 1 the REU holds a root image (c64fs superblock at block SB_BLOCK, version 2,
 ; nblocks within the REU), 2 it has the magic but does not fit, 0 none.
 reu_sb: lda reu_banks
         cmp #3                  ; the superblock is in bank 1; the disk reaches into bank 2
@@ -204,7 +205,7 @@ reu_sb: lda reu_banks
         dey
         bpl @m
         lda bufs+5              ; version: another one is not ours to mount
-        cmp #1
+        cmp #C64FS_VERSION
         bne @no
         lda bufs+7              ; nblocks (16 bit) <= reu_banks * 256
         cmp reu_banks

@@ -170,7 +170,7 @@ name_of:
 
 ; cbm_iget: ci_dev/ci_ino set -> ci synthesized from the directory
 cbm_iget:
-        ldx #INO_SIZE-1
+        ldx #CI_SIZE-1
         lda #0
 @z:     sta ci,x
         dex

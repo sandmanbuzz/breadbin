@@ -201,7 +201,7 @@ def volume(root_files, fill=0):
         img = mkimage.Image(size=mkimage.D81_SIZE)
         reserved = img.write_cbm_d81()
         fs = mkimage.FS(img)
-        fs.format(reserved | {0}, mkimage.D81_VOLUME)
+        fs.format(reserved | {0})
         fs.add_tree(d, mkimage.ROOT_INO)
         return bytes(img.data)
     finally:
@@ -336,16 +336,16 @@ class Mounted(unittest.TestCase):
         self.assertEqual(s.cat("/mnt/new"), new)
         s.check(s.umount(), "umount")
         fs = mkimage.FS(mkimage.Image(s.drives[9].image))
-        self.assertEqual(fs.nblocks, 2048)
+        self.assertEqual((fs.nblocks, fs.nbm, fs.istart), (3200, 2, 379))
         self.assertEqual(fs.read_file(fs.lookup("/new")), new)
         self.assertEqual(fs.read_file(fs.lookup("/d/inner")), b"inside\n")
         for name, data in self.FILES.items():
             self.assertEqual(fs.read_file(fs.lookup("/" + name)), data, name)
 
-    def test_files_grow_around_track_40_and_stop_at_block_2048(self):
+    def test_files_grow_around_track_40(self):
         img = volume({}, fill=1500)
         before = mkimage.FS(mkimage.Image(img))
-        first = min(b for b in range(2048) if not before.is_used(b))
+        first = min(b for b in range(3200) if not before.is_used(b))
         self.assertLess(first, 1560)
         self.assertGreater(first, 1500)
         s = BusSim({9: Drive("1581", img)})
@@ -363,12 +363,16 @@ class Mounted(unittest.TestCase):
         self.assertTrue(any(b < 1560 for b in used) and any(b >= 1600 for b in used), used)
         self.assertFalse(any(1560 <= b < 1600 for b in used), used)
         self.assertEqual(out[1560 * 256:1600 * 256], img[1560 * 256:1600 * 256])     # the 1581's own track
-        self.assertEqual(out[2048 * 256:], img[2048 * 256:])                          # and past the volume
         self.assertIn((41, 0), s.drives[9].writes)
-        self.assertFalse(any(t == 40 or t > 52 for t, _ in s.drives[9].writes), s.drives[9].writes)
+        self.assertFalse(any(t == 40 for t, _ in s.drives[9].writes), s.drives[9].writes)
 
     def test_full_volume_is_enospc_not_a_write_past_it(self):
-        img = volume({}, fill=1500)
+        """Format 2: 3200 blocks, two bitmap blocks. The volume is full up to past block 2048,
+        so every block the kernel finds is in the second bitmap block (378); up to 3199, then
+        ENOSPC."""
+        img = volume({}, fill=2900)
+        before = mkimage.FS(mkimage.Image(img))
+        self.assertGreater(min(b for b in range(3200) if not before.is_used(b)), 2048)
         s = BusSim({9: Drive("1581", img)})
         s.check(s.mod_load(), "load")
         s.check(s.mount(9), "mount")
@@ -396,8 +400,11 @@ class Mounted(unittest.TestCase):
         s.check(s.umount(), "umount")
         out = bytes(s.drives[9].image)
         self.assertEqual(out[1560 * 256:1600 * 256], img[1560 * 256:1600 * 256])
-        self.assertEqual(out[2048 * 256:], img[2048 * 256:])
-        self.assertFalse(any(t == 40 or t > 52 or (t == 52 and sec > 7) for t, sec in s.drives[9].writes))
+        self.assertFalse(any(t == 40 or t > 80 or sec > 39 for t, sec in s.drives[9].writes))
+        after = mkimage.FS(mkimage.Image(out))
+        self.assertEqual(after.free_blocks(), 0)
+        self.assertIn((80, 39), s.drives[9].writes)                 # block 3199: the last one
+        self.assertIn((10, 18), s.drives[9].writes)                 # bitmap block 378 (the second)
 
     def test_1541_volume_beside_a_1581_volume(self):
         with open(os.path.join(BUILD, "breadbin.d64"), "rb") as f:
@@ -452,6 +459,61 @@ class Mounted(unittest.TestCase):
         s = BusSim({})
         s.check(s.mod_load(), "load")
         self.assertEqual(s.errno(s.mount(9)), "ENODEV")
+
+
+
+@unittest.skipIf(SKIP, SKIP)
+class Format2(unittest.TestCase):
+    """c64fs format 2 (upstream's) on a 1541 in drive 10, no module: the version check, and
+    inode bytes 32-63 (upstream's times), which iput writes as zero."""
+
+    def d64(self, patch=None):
+        with open(os.path.join(BUILD, "breadbin.d64"), "rb") as f:
+            img = bytearray(f.read())
+        if patch:
+            patch(img)
+        return img
+
+    @staticmethod
+    def ino_raw(img, n):
+        off = (378 + n // 4) * 256 + (n % 4) * 64
+        return bytes(img[off:off + 64])
+
+    def test_times_kept_where_untouched_zero_where_changed(self):
+        img = self.d64()
+        fs = mkimage.FS(mkimage.Image(img))
+        motd, tmp = fs.lookup("/etc/motd"), fs.lookup("/tmp")
+        for n in (motd, tmp):
+            off = (378 + n // 4) * 256 + (n % 4) * 64
+            img[off + 32:off + 64] = bytes(range(1, 33))          # as if upstream had set times
+        s = BusSim({10: Drive("1541", img)})
+        s.check(s.mount(10), "mount")
+        self.assertEqual(s.cat("/mnt/etc/motd"), fs.read_file(motd))
+        s.store("/mnt/tmp/y", pattern(600, 1))
+        s.check(s.umount(), "umount")
+        out = bytes(s.drives[10].image)
+        fs2 = mkimage.FS(mkimage.Image(out))
+        y = fs2.lookup("/tmp/y")
+        self.assertEqual(fs2.read_file(y), pattern(600, 1))
+        self.assertEqual(self.ino_raw(out, motd)[32:], bytes(range(1, 33)))   # read only: kept
+        self.assertEqual(self.ino_raw(out, tmp)[32:], bytes(32))             # changed: 0, unknown
+        self.assertEqual(self.ino_raw(out, y)[32:], bytes(32))
+
+    def _not_c64fs(self, patch):
+        s = BusSim({10: Drive("1541", self.d64(patch))})
+        s.mount(10)                         # a CBM DOS disk now (its BAM), or no mount at all
+        self.assertIsNotNone(s.errno(s.open("/mnt/etc/motd")))
+        self.assertEqual(s.drives[10].writes, [])
+
+    def test_format_1_is_not_mounted_as_c64fs(self):
+        def v1(img):
+            img[376 * 256:376 * 256 + 6] = b"C64FS\x01"
+        self._not_c64fs(v1)
+
+    def test_other_version_is_not_mounted(self):
+        def v3(img):
+            img[376 * 256 + 5] = 3
+        self._not_c64fs(v3)
 
 
 if __name__ == "__main__":

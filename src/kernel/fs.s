@@ -34,7 +34,7 @@ mt_pino: .res NMNT
 mt_dev:  .res NMNT
 mt_path: .res NMNT*32
 
-ci:      .res INO_SIZE  ; working inode
+ci:      .res CI_SIZE   ; working inode (its first 32 bytes)
 ci_dev:  .res 1
 ci_ino:  .res 1
 fs_name: .res 16        ; path component, NUL-padded to 15
@@ -62,6 +62,7 @@ io_w:    .res 1
 cnt:     .res 2
 tr_i:    .res 1
 ba_dev:  .res 1
+bm_i:    .res 1         ; bitmap block (of the device's sb_bitmap..sb_istart-1)
 
 .export sb_ok, fs_name2, nm_dev, nm_ino, dl_off, dl_ino, f_done, dir_put
 .export bfree, mnt_active, mnt_ino, fs_count_inodes, sb_ninodes, ci_load_type
@@ -72,7 +73,7 @@ ba_dev:  .res 1
 .export nm_parent, magic
 
 .segment "RODATA"
-magic:  .byte "C64FS"
+magic:  .byte "C64F2"         ; c64fs format 2 (upstream Breadbin's), version C64FS_VERSION
 s_dot:  .byte ".", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 s_dotdot: .byte "..", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 s_tmp:  .byte "tmp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -172,8 +173,12 @@ mount_dev:
         bne @bad
         dey
         bpl @m
+        ldy #5
+        lda (bp),y
+        cmp #C64FS_VERSION
+        bne @bad
         ldx tmp3
-        ldy #6
+        iny
         lda (bp),y
         sta sb_nblocks_lo,x
         iny
@@ -203,11 +208,10 @@ mount_dev:
         rts
 
 ; ---------------------------------------------------------------------
-; inode_blk: A = dev, X = ino -> ib_lo/hi = block, Y = offset in block
+; inode_blk: A = dev, X = ino -> ib_lo/hi = block (4 inodes a block)
 inode_blk:
         sta tmp3
         txa
-        lsr a
         lsr a
         lsr a
         ldx tmp3
@@ -237,19 +241,13 @@ iget:
         jsr bread
         bcs @r
         lda ci_ino
-        and #7
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        tay
+        jsr ino_off
         ldx #0
 @l:     lda (bp),y
         sta ci,x
         iny
         inx
-        cpx #INO_SIZE
+        cpx #CI_SIZE
         bne @l
         clc
 @r:     rts
@@ -271,16 +269,13 @@ iput:
         bcs @r
         stx tmp2
         lda ci_ino
-        and #7
-        asl a
-        asl a
-        asl a
-        asl a
-        asl a
-        tay
+        jsr ino_off
         ldx #0
 @l:     lda ci,x
-        sta (bp),y
+        cpx #CI_SIZE
+        bcc @s
+        lda #0              ; the times (upstream's): 0, unknown
+@s:     sta (bp),y
         iny
         inx
         cpx #INO_SIZE
@@ -288,6 +283,15 @@ iput:
         ldx tmp2
         jmp bwrite
 @r:     rts
+
+; ino_off: A = ino -> Y = (ino & 3) * 64, its offset in the inode block (upstream 5f2a9ec)
+ino_off:
+        and #3
+        lsr a
+        ror a
+        ror a
+        tay
+        rts
 
 ci_load_type:
         lda ci+I_TYPE
@@ -313,7 +317,7 @@ ialloc:
         lda #ENOSPC
         sec
 @r:     rts
-@got:   ldx #INO_SIZE-1
+@got:   ldx #CI_SIZE-1
         lda #0
 @z:     sta ci,x
         dex
@@ -329,19 +333,15 @@ ialloc:
         rts
 
 ; ---------------------------------------------------------------------
-; bitmap
+; bitmap: the blocks from sb_bitmap up to sb_istart, one bit per block (block b:
+; bitmap block b >> 11, byte (b >> 3) & 255, bit b & 7; after upstream 2ff35e5)
 ; balloc: allocate a zeroed block on ci_dev -> X/Y = block
 balloc:
         ldx ci_dev
         stx ba_dev
-        lda sb_bitmap_lo,x
-        pha
-        lda sb_bitmap_hi,x
-        tay
-        pla
-        tax
-        lda ba_dev
-        jsr bread
+        lda #0
+        sta bm_i
+@blk:   jsr bm_read         ; ENOSPC past the last bitmap block
         bcs @r
         stx tmp2            ; bitmap buffer index
         ldy #0
@@ -350,6 +350,8 @@ balloc:
         bne @byte
         iny
         bne @l
+        inc bm_i            ; this one is full: the next
+        bne @blk            ; (always)
 @full:  lda #ENOSPC
         sec
 @r:     rts
@@ -363,12 +365,12 @@ balloc:
         asl tmp1
         inx
         bne @bit
-@free:  ; block = y*8 + x
+@free:  ; block = bm_i * 2048 + y * 8 + x
         stx bm_res
         tya
         sta bm_res+1
-        lda #0
-        asl bm_res+1        ; we compute (y << 3) | x in bm_res lo/hi
+        lda bm_i
+        asl bm_res+1        ; (y << 3) | x, plus bm_i << 11, in bm_res lo/hi
         rol a
         asl bm_res+1
         rol a
@@ -406,20 +408,37 @@ balloc:
         clc
         rts
 
+; bm_read: bitmap block bm_i of ba_dev -> bp, X = buffer; carry set and A = ENOSPC
+; if bm_i is past the last one (the block would be sb_istart)
+bm_read:
+        ldx ba_dev
+        ldy sb_bitmap_hi,x
+        lda sb_bitmap_lo,x
+        clc
+        adc bm_i
+        bcc @c
+        iny
+@c:     cmp sb_istart_lo,x
+        beq @end
+        tax
+        lda ba_dev
+        jmp bread
+@end:   lda #ENOSPC
+        sec
+        rts
+
 ; bfree: X/Y = block on ci_dev
 bfree:
         stx bm_res
         sty bm_res+1
         ldx ci_dev
         stx ba_dev
-        lda sb_bitmap_lo,x
-        pha
-        lda sb_bitmap_hi,x
-        tay
-        pla
-        tax
-        lda ba_dev
-        jsr bread
+        tya
+        lsr a
+        lsr a
+        lsr a
+        sta bm_i            ; bitmap block b >> 11
+        jsr bm_read
         bcs @r
         stx tmp2
         lda bm_res
@@ -432,7 +451,7 @@ bfree:
         jmp @s
 @m:     eor #$ff
         sta tmp0
-        ; byte index = block >> 3
+        ; byte index = (block >> 3) & 255
         lda bm_res+1
         sta tmp1
         lda bm_res
@@ -453,19 +472,12 @@ bfree:
 ; fs_count_free: A = dev -> X/Y = free blocks
 fs_count_free:
         sta ba_dev
-        tax
         lda #0
         sta cnt
         sta cnt+1
-        lda sb_bitmap_lo,x
-        pha
-        lda sb_bitmap_hi,x
-        tay
-        pla
-        tax
-        lda ba_dev
-        jsr bread
-        bcs @r
+        sta bm_i
+@blk:   jsr bm_read
+        bcs @e
         ldy #0
 @l:     lda (bp),y
         ldx #8
@@ -478,6 +490,11 @@ fs_count_free:
         bne @b
         iny
         bne @l
+        inc bm_i
+        bne @blk            ; (always)
+@e:     cmp #ENOSPC         ; past the last bitmap block: done
+        sec
+        bne @r
         ldx cnt
         ldy cnt+1
         clc
@@ -1229,7 +1246,10 @@ nameiparent:
 
 .segment "INIT"
 ; ---------------------------------------------------------------------
-; fs_mkfs_reu: format the REU as c64fs (superblock 0, bitmap 1, inodes 2-17)
+; fs_mkfs_reu: format the REU as c64fs format 2 (superblock 0, bitmap 1, inodes 2-33:
+; 128 inodes of 64 bytes). At most 2048 blocks (banks 0-7, one bitmap block): the banks
+; above are the drive 8 block cache (blk.s), so upstream's whole-REU RAM disk is not taken.
+RD_INOBLK = 32
 fs_mkfs_reu:
         lda #1
         sta ci_dev
@@ -1253,7 +1273,7 @@ fs_mkfs_reu:
         dey
         bpl @m
         ldy #5
-        lda #1
+        lda #C64FS_VERSION
         sta (bp),y
         iny
         lda #0
@@ -1277,26 +1297,26 @@ fs_mkfs_reu:
         lda #0
         sta (bp),y
         iny
-        lda #16
+        lda #RD_INOBLK
         sta (bp),y
         iny
         lda #ROOT_INO
         sta (bp),y
         ldx io_w
         jsr bwrite
-        ; bitmap: blocks 0-17 used, bits past nblocks used
+        ; bitmap: blocks 0-33 used, bits past nblocks used
         lda #1
         ldx #1
         ldy #0
         jsr bget_buf
         stx io_w
-        ldy #0
+        ldy #(2+RD_INOBLK)/8-1
         lda #$ff
-        sta (bp),y
-        iny
-        sta (bp),y
-        iny
-        lda #$03
+@b0:    sta (bp),y
+        dey
+        bpl @b0
+        ldy #(2+RD_INOBLK)/8
+        lda #(1 << ((2+RD_INOBLK) .mod 8)) - 1
         sta (bp),y
         ; bytes from nblocks/8 to 255 = $ff
         lda sb_nblocks_hi+1
@@ -1330,7 +1350,7 @@ fs_mkfs_reu:
 @ibw:   jsr bwrite
         inc tr_i
         lda tr_i
-        cmp #18
+        cmp #2+RD_INOBLK
         bne @ib
         ; temporary mount info so the helpers below work
         lda #1
