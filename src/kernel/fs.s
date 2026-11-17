@@ -63,6 +63,9 @@ cnt:     .res 2
 tr_i:    .res 1
 ba_dev:  .res 1
 bm_i:    .res 1         ; bitmap block (of the device's sb_bitmap..sb_istart-1)
+ia_next: .res NDEV      ; ialloc: where the next search starts per dev (0: at 1); after upstream c6190bb
+ia_from: .res 1
+ip_n:    .res 1         ; iput: bytes of the inode slot to write
 
 .export sb_ok, fs_name2, nm_dev, nm_ino, dl_off, dl_ino, f_done, dir_put
 .export bfree, mnt_active, mnt_ino, fs_count_inodes, sb_ninodes, ci_load_type
@@ -203,7 +206,7 @@ mount_dev:
         sta sb_ok,x
         clc
 @r:     rts
-@bad:   lda #EIO
+@bad:   lda #ENOEXEC        ; read fine, not format 2 (a failed read returns bread's own errno)
         sec
         rts
 
@@ -252,8 +255,13 @@ iget:
         clc
 @r:     rts
 
-; iput: write ci back to its inode slot
-iput:
+; iput: write ci back to its inode slot: bytes 0-31 only, so upstream's times (32-63) survive
+; a rewrite. iput_new (ialloc) also zeroes 32-63, so a recycled inode shows no stale time.
+iput:   lda #CI_SIZE
+        .byte $2c           ; (bit: skips the next lda)
+iput_new:
+        lda #INO_SIZE
+        sta ip_n
         ldx ci_dev
         lda dev_type,x
         beq @c64
@@ -274,11 +282,11 @@ iput:
 @l:     lda ci,x
         cpx #CI_SIZE
         bcc @s
-        lda #0              ; the times (upstream's): 0, unknown
+        lda #0
 @s:     sta (bp),y
         iny
         inx
-        cpx #INO_SIZE
+        cpx ip_n
         bne @l
         ldx tmp2
         jmp bwrite
@@ -298,10 +306,18 @@ ci_load_type:
         rts
 
 ; ialloc: A = dev, X = type -> A = new inode number, ci = that inode
+; The search starts after the last inode handed out on that dev (ia_next) and wraps to 1
+; (upstream c6190bb, MIT): a new file reads a block or two of inodes, not all from 1.
 ialloc:
         sta ba_dev
         stx tmp2
-        ldx #1
+        tay
+        ldx ia_next,y
+        txa
+        cmp sb_ninodes,y
+        bcc @from
+        ldx #1              ; (0, or past this disk's table)
+@from:  stx ia_from
 @l:     stx tr_i
         lda ba_dev
         jsr iget
@@ -313,8 +329,11 @@ ialloc:
         txa
         ldy ba_dev
         cmp sb_ninodes,y
-        bcc @l
-        lda #ENOSPC
+        bcc @in
+        ldx #1              ; past the end: on from inode 1
+@in:    cpx ia_from
+        bne @l
+        lda #ENOSPC         ; all the way round: none free
         sec
 @r:     rts
 @got:   ldx #CI_SIZE-1
@@ -326,8 +345,13 @@ ialloc:
         sta ci+I_TYPE
         lda #1
         sta ci+I_NLINK
-        jsr iput
+        jsr iput_new
         bcs @r
+        ldy ci_dev
+        ldx ci_ino
+        inx
+        txa
+        sta ia_next,y       ; the next search starts after this one
         lda ci_ino
         clc
         rts

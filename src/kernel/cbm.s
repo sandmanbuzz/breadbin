@@ -184,15 +184,18 @@ sys_mount:
         lda mo_dev
         jsr binval
         ; a Breadbin disk? (mount_dev checks the magic and the version; upstream 5f2a9ec)
+        ; (@ensfail below: close the drive and return A as it is)
         lda mo_dev
         ldx #<376
         ldy #>376
         jsr mount_dev
-        bcs @cbm
+        bcs @nofs
         ldx mo_dev
         lda #FS_C64
         sta dev_type,x
         jmp @add
+@nofs:  cmp #ENOEXEC        ; only a good read of a block that is not ours may be a CBM disk;
+        bne @ensfail        ; a failed read is an error, not an empty CBM disk
 @cbm:   ; a CBM DOS disk: track 18 sector 0 is a BAM with format 'A'
         lda mo_dev
         ldx #<357

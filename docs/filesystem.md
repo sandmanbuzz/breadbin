@@ -46,7 +46,7 @@ Mount points are ordinary directories (the boot disk has an empty `/mnt` for thi
 
 ## c64fs on disk
 
-The on-disk format is **format 2**, the one upstream Breadbin uses (kpatr1981/breadbin, MIT, Copyright (c) 2026 Konstantinos Patronas; commits 2ff35e5 and 5f2a9ec, and bf712c2 for the 1581): disks made by either side's tools mount under the other's. Format 1 (magic `C64FS`, 32-byte inodes, one bitmap block) is no longer mounted: a format 1 disk in drive 9–11 shows up as a CBM DOS disk (its BAM marks everything used), and on drive 8 or the REU it does not mount. `tools/mkimage.py upgrade` converts one (below).
+The on-disk format is **format 2**, the one upstream Breadbin uses (kpatr1981/breadbin, MIT, Copyright (c) 2026 Konstantinos Patronas; commits 2ff35e5 and 5f2a9ec, and bf712c2 for the 1581): mkimage-level compatibility is shown: each side's image tool reads the other's images with identical trees and free counts. No kernel has yet mounted the other's image (upstream's kernel was not run here). Format 1 (magic `C64FS`, 32-byte inodes, one bitmap block) is no longer mounted: a format 1 disk in drive 9–11 shows up as a CBM DOS disk (its BAM marks everything used), and on drive 8 or the REU it does not mount. `tools/mkimage.py upgrade` converts one (below).
 
 A 1541 disk has 683 sectors of 256 bytes: 35 tracks with 17 to 21 sectors each. c64fs numbers them as **blocks 0 to 682** in the usual `.d64` order: track 1 sector 0 is block 0, track 18 sector 0 is block 357, and track 19 sector 0 is block 376.
 
@@ -85,7 +85,7 @@ There is one bit per block, and a set bit means used: block b is bit b mod 8 of 
 
 An inode is 64 bytes, 4 per block. Inode 0 is reserved and inode 1 is the root directory. Bytes 0–31 are below; 32–35 and 36–39 are upstream's modification and change times, and 40–63 are reserved.
 
-**Times are not kept here (yet).** Breadbin's tools and kernel write 0 where upstream writes times, and the kernel writes bytes 32–63 as 0 whenever it rewrites an inode, so a file changed under Breadbin has "no time" rather than a stale one; inodes it does not change keep what upstream wrote. With a time of 0, upstream's `ls -l` leaves the date blank, and its `mkimage.py ls` prints `70-01-01 00:00`.
+**Times are not kept here (yet).** Breadbin's tools write 0 where upstream writes times. The kernel does not touch bytes 32–63 when it rewrites an inode (so upstream's times survive); it zeroes them only when it allocates an inode, so a recycled inode shows no stale time. With a time of 0, upstream's `ls -l` leaves the date blank, and its `mkimage.py ls` prints `70-01-01 00:00`.
 
 | Offset | Size | Field |
 |---|---|---|
@@ -101,6 +101,13 @@ An inode is 64 bytes, 4 per block. Inode 0 is reserved and inode 1 is the root d
 ### Directories
 
 A directory is a file of 16-byte entries: 1 byte for the inode number (0 = unused slot) and 15 bytes for the name (up to 14 characters, NUL-padded). Every directory starts with `.` (itself) and `..` (its parent). Names are ASCII and case-sensitive; `/`, `.` and `..` are special.
+
+### Known costs and gaps
+
+- **Creating a file.** `ialloc` starts its search after the last inode it handed out on that device (`ia_next`, after upstream's c6190bb, MIT) and wraps, so creating a file reads a block or two of inodes. Without it every create scanned from inode 1, reading one more inode block for every four files already on the disk (up to all 32; format 1 had 16). `fs_count_inodes` still scans all of them. The sim test `test_creating_a_file_reads_few_inode_blocks` shows the 40th create reads at most 3 distinct inode blocks.
+- **A format 1 root image on the REU** is not recognised: the kernel checks the magic and version of the REU's superblock, and with a drive present re-formats the REU as format 2; with no drive it cannot mount a root.
+- **Superblock fields are trusted once the magic and version match.** The bitmap walk (`bm_read`) compares only the end of the bitmap with `sb_istart`; there is no mount-time check that the bitmap, inode and block numbers are consistent. A corrupt format 2 superblock with the right magic can make the kernel read the wrong blocks (known robustness gap, not fixed: the fix costs resident bytes).
+- **A read error on the superblock** (drives 9-11) fails the mount with the I/O error; only a good read of a block that is not format 2 falls back to the CBM probe.
 
 ### How the kernel reaches the disk
 
@@ -151,7 +158,7 @@ python3 tools/mkimage.py upgrade old.d64 new.d64                       # keeps t
 python3 tools/mkimage.py upgrade old.d64 new.d64 --boot build/breadbin.prg
 ```
 
-`ls` and `cat` read format 1 images too. Images built by upstream's `mkimage.py` (format 2) read and mount here, and ours under upstream's; the two differ only in the time fields and the build id. `mkimage.py` is ported from upstream's (MIT, credit above).
+`ls` and `cat` read format 1 images too. Images built by upstream's `mkimage.py` (format 2) read and mount here, and ours under upstream's; the two differ only in the time fields and the build id. `upgrade` without `--boot` copies the old boot file, a format 1 kernel that cannot read the new disk, and says so loudly on stderr: the result will not boot until you pass `--boot` with a format 2 kernel. `mkimage.py` is ported from upstream's (MIT, credit above).
 
 `make` uses the same tool to build `build/breadbin.d64` from `rootfs/` and the compiled programs.
 

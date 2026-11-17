@@ -671,8 +671,9 @@ def main(argv=None):
         img = upgrade(a.src, a.out, a.boot)
         print(f"{a.out}: format 2, {FS(img).free_blocks()} blocks free")
         if not a.boot and img.cbm_files():
-            print("note: the boot file was copied as it is; "
-                  "it must be a kernel that reads format 2", file=sys.stderr)
+            print("WARNING: no --boot given: the old boot file (a format 1 kernel) was copied "
+                  "as it is, and it cannot read this format 2 disk: the result will NOT BOOT. "
+                  "Pass --boot with a format 2 kernel (build/breadbin.prg).", file=sys.stderr)
     elif a.cmd == "reu":
         with open(a.out, "wb") as f:
             f.write(reu_image(load(a.img).data))

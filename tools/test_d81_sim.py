@@ -48,6 +48,7 @@ class Drive:
         self.status = b"00, OK,00,00"
         self.log = []                       # every command, as text
         self.writes = []                    # (track, sector) of every U2 that was carried out
+        self.fail_reads = {}                # (track, sector) -> how many more U1 reads of it fail (74, DRIVE NOT READY)
 
     def offset(self, t, s):
         """Image offset of a track and sector, or None when the drive has no such block."""
@@ -67,6 +68,9 @@ class Drive:
             off = self.offset(t, s)
             if off is None:
                 self.status = b"66,ILLEGAL TRACK OR SECTOR,%02d,%02d" % (t, s)
+            elif text[1] == "1" and self.fail_reads.get((t, s)):
+                self.fail_reads[(t, s)] -= 1
+                self.status = b"74,DRIVE NOT READY,%02d,%02d" % (t, s)
             elif text[1] == "1":
                 self.buf[:] = self.image[off:off + 256]
             else:
@@ -485,7 +489,7 @@ class Mounted(unittest.TestCase):
 @unittest.skipIf(SKIP, SKIP)
 class Format2(unittest.TestCase):
     """c64fs format 2 (upstream's) on a 1541 in drive 10, no module: the version check, and
-    inode bytes 32-63 (upstream's times), which iput writes as zero."""
+    inode bytes 32-63 (upstream's times), which only ialloc zeroes."""
 
     def d64(self, patch=None):
         with open(os.path.join(BUILD, "breadbin.d64"), "rb") as f:
@@ -499,13 +503,13 @@ class Format2(unittest.TestCase):
         off = (378 + n // 4) * 256 + (n % 4) * 64
         return bytes(img[off:off + 64])
 
-    def test_times_kept_where_untouched_zero_where_changed(self):
+    def test_times_survive_a_rewrite_and_a_new_inode_has_none(self):
         img = self.d64()
         fs = mkimage.FS(mkimage.Image(img))
         motd, tmp = fs.lookup("/etc/motd"), fs.lookup("/tmp")
-        for n in (motd, tmp):
+        for n in range(1, 128):         # upstream's times on every inode; the free ones are stale
             off = (378 + n // 4) * 256 + (n % 4) * 64
-            img[off + 32:off + 64] = bytes(range(1, 33))          # as if upstream had set times
+            img[off + 32:off + 64] = bytes(range(1, 33))
         s = BusSim({10: Drive("1541", img)})
         s.check(s.mount(10), "mount")
         self.assertEqual(s.cat("/mnt/etc/motd"), fs.read_file(motd))
@@ -516,8 +520,37 @@ class Format2(unittest.TestCase):
         y = fs2.lookup("/tmp/y")
         self.assertEqual(fs2.read_file(y), pattern(600, 1))
         self.assertEqual(self.ino_raw(out, motd)[32:], bytes(range(1, 33)))   # read only: kept
-        self.assertEqual(self.ino_raw(out, tmp)[32:], bytes(32))             # changed: 0, unknown
-        self.assertEqual(self.ino_raw(out, y)[32:], bytes(32))
+        self.assertEqual(self.ino_raw(out, tmp)[32:], bytes(range(1, 33)))   # rewritten (the new entry): kept
+        self.assertEqual(self.ino_raw(out, y)[32:], bytes(32))              # new: a recycled inode has no time
+
+    def test_a_failed_read_of_the_superblock_never_mounts_as_a_cbm_disk(self):
+        for fails in (1, 99):           # one transient error (retried or not), and a dead block
+            d = Drive("1541", self.d64())
+            d.fail_reads[(19, 0)] = fails
+            s = BusSim({10: d})
+            res = s.mount(10)
+            if res[0]:                  # refused: an I/O error, not "no filesystem here"
+                self.assertEqual(s.errno(res), "EIO", fails)
+            else:                       # a retry got through: it is the c64fs
+                self.assertEqual(s.cat("/mnt/etc/motd")[:1] != b"", True)
+            self.assertEqual(d.writes, [])
+            self.assertNotIn("U1:2 0 18 0", d.log)      # the CBM probe (BAM, block 357) was not tried
+            if res[0]:
+                continue
+            s.check(s.umount(), "umount")
+
+    def test_creating_a_file_reads_few_inode_blocks(self):
+        d = Drive("1541", self.d64())
+        s = BusSim({10: d})
+        s.check(s.mount(10), "mount")
+        for i in range(40):
+            d.log.clear()
+            s.store("/mnt/tmp/n%02d" % i, b"x")
+        inode_reads = [c for c in d.log if c.startswith("U1")
+                       and 378 <= mkimage.ts_to_block(*(int(v) for v in c.split()[-2:])) < 410]
+        self.assertLessEqual(len(set(inode_reads)), 3, d.log)       # the 40th file: root, the new inode's block, ...
+        self.assertLessEqual(len(inode_reads), 6, d.log)            # (a scan from inode 1 reads about 10 more)
+        s.check(s.umount(), "umount")
 
     def _not_c64fs(self, patch):
         s = BusSim({10: Drive("1541", self.d64(patch))})
