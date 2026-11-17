@@ -622,7 +622,7 @@ class IecFault(unittest.TestCase):
         self.assertEqual(rec["cmd"], "U2:2 0 19 0", "the boot's first write is the superblock's")
         self.assertIn("i/o error", rec["out"][0])
         self.assertEqual(rec["out"][1:], ["", "y"])
-        off = 376 * 256 + 15
+        off = 376 * 256 + 252                   # SB_BUILD_ID (blk.s)
         with open(IMAGE, "rb") as f:
             id0 = f.read()[off:off + 4]
         with open(rec["img"], "rb") as f:

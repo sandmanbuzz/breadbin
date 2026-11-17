@@ -46,6 +46,8 @@ Mount points are ordinary directories (the boot disk has an empty `/mnt` for thi
 
 ## c64fs on disk
 
+The on-disk format is **format 2**, the one upstream Breadbin uses (kpatr1981/breadbin, MIT, Copyright (c) 2026 Konstantinos Patronas; commits 2ff35e5 and 5f2a9ec, and bf712c2 for the 1581): disks made by either side's tools mount under the other's. Format 1 (magic `C64FS`, 32-byte inodes, one bitmap block) is no longer mounted: a format 1 disk in drive 9–11 shows up as a CBM DOS disk (its BAM marks everything used), and on drive 8 or the REU it does not mount. `tools/mkimage.py upgrade` converts one (below).
+
 A 1541 disk has 683 sectors of 256 bytes: 35 tracks with 17 to 21 sectors each. c64fs numbers them as **blocks 0 to 682** in the usual `.d64` order: track 1 sector 0 is block 0, track 18 sector 0 is block 357, and track 19 sector 0 is block 376.
 
 | Blocks | Contents |
@@ -53,7 +55,7 @@ A 1541 disk has 683 sectors of 256 bytes: 35 tracks with 17 to 21 sectors each. 
 | 357 – 375 (track 18) | the CBM DOS directory and BAM, left for the drive's DOS |
 | 376 | c64fs superblock |
 | 377 | block bitmap |
-| 378 – 393 | inode table (16 blocks, 128 inodes) |
+| 378 – 409 | inode table (32 blocks, 128 inodes) |
 | everything else | file and directory data |
 
 On the boot disk, the CBM directory on track 18 lists a single file, `BREADBIN`: the kernel, which `LOAD"*",8,1` loads. Its sectors start at block 0. Every sector of the disk is marked used in the CBM BAM, so the drive's own DOS never writes over c64fs. That's why other C64 software sees the disk as full.
@@ -62,22 +64,28 @@ On the boot disk, the CBM directory on track 18 lists a single file, `BREADBIN`:
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 5 | magic `C64FS` |
-| 5 | 1 | version (1) |
-| 6 | 2 | number of blocks (683) |
+| 0 | 5 | magic `C64F2` |
+| 5 | 1 | version (2) |
+| 6 | 2 | number of blocks (683; 3200 on a 1581) |
 | 8 | 1 | number of inodes (128) |
-| 9 | 2 | bitmap block (377) |
-| 11 | 2 | first inode block (378) |
-| 13 | 1 | inode blocks (16) |
+| 9 | 2 | first bitmap block (377) |
+| 11 | 2 | first inode block (378; 379 on a 1581) |
+| 13 | 1 | inode blocks (32) |
 | 14 | 1 | root directory inode (1) |
+| 15 | 4 | upstream's `last_time`: written 0 here |
+| 252 | 4 | the build id the REU block cache keys on (`SB_BUILD_ID`, `src/kernel/blk.s`); 0 on disks without a boot file |
 
-### Bitmap (block 377)
+Everything else is 0. The build id was at 15 before format 2; it moved to 252 because upstream's kernel rewrites bytes 15–18 (its clock) and its `format` writes them.
 
-There is one bit per block, and a set bit means used. A block of 256 bytes covers 2048 blocks, so bits 683 to 2047 are always set. Block 0 is always used too, because block number 0 inside an inode means "no block here".
+### Bitmap (blocks 377 to the first inode block)
 
-### Inodes (blocks 378–393)
+There is one bit per block, and a set bit means used: block b is bit b mod 8 of byte (b / 8) mod 256 of the bitmap's block b / 2048. A 1541 disk needs one bitmap block, so bits 683 to 2047 are always set; a 1581 needs two, with bits 3200 to 4095 set. Block 0 is always used too, because block number 0 inside an inode means "no block here".
 
-An inode is 32 bytes, 8 per block. Inode 0 is reserved and inode 1 is the root directory.
+### Inodes (blocks 378–409)
+
+An inode is 64 bytes, 4 per block. Inode 0 is reserved and inode 1 is the root directory. Bytes 0–31 are below; 32–35 and 36–39 are upstream's modification and change times, and 40–63 are reserved.
+
+**Times are not kept here (yet).** Breadbin's tools and kernel write 0 where upstream writes times, and the kernel writes bytes 32–63 as 0 whenever it rewrites an inode, so a file changed under Breadbin has "no time" rather than a stale one; inodes it does not change keep what upstream wrote. With a time of 0, upstream's `ls -l` leaves the date blank, and its `mkimage.py ls` prints `70-01-01 00:00`.
 
 | Offset | Size | Field |
 |---|---|---|
@@ -102,7 +110,7 @@ While the disk is busy, every other process waits: the kernel's own IEC driver i
 
 ## The REU RAM disk (`/tmp`)
 
-With a RAM Expansion Unit, the kernel formats the REU as c64fs at every boot and mounts it at `/tmp`. The layout is the same idea with different block numbers: superblock at block 0, bitmap at 1, inodes at 2–17. Its size is that of the REU, up to 2048 blocks (512 KB). It is fast, and it is **empty after every reboot**. Without an REU, `/tmp` is an ordinary directory on the boot disk.
+With a RAM Expansion Unit, the kernel formats the REU as c64fs at every boot and mounts it at `/tmp`. The layout is the same idea with different block numbers: superblock at block 0, bitmap at 1, inodes at 2–33 (format 2, 128 inodes). Its size is that of the REU, up to 2048 blocks (512 KB): the banks above hold the boot drive's block cache, so the RAM disk keeps one bitmap block (upstream's grows with the REU). It is fast, and it is **empty after every reboot**. Without an REU, `/tmp` is an ordinary directory on the boot disk.
 
 ## Normal C64 disks (CBM DOS)
 
@@ -122,7 +130,7 @@ format drive [cbm|c64fs] [name]
 `format` erases the disk in drive 9, 10 or 11 and makes a new one. `c64fs` is the default. The name defaults to `breadbin`.
 
 - **`format 9 cbm photos`** sends the drive's own format command (`N0:PHOTOS,BB`). The result is a normal, empty C64 disk.
-- **`format 9 c64fs work`** does the same DOS format first, which lays down the sector headers, and then writes a fresh c64fs on top: it marks every sector used in the CBM BAM, writes the superblock, bitmap and inode table, and creates an empty root directory (inode 1, in block 1).
+- **`format 9 c64fs work`** does the same DOS format first, which lays down the sector headers, and then writes a fresh format 2 c64fs on top: it marks every sector used in the CBM BAM, writes the superblock, bitmap and inode table, and creates an empty root directory (inode 1, in block 1). On a 1581 (with `/lib/km/d81` loaded) it writes the 3200-block layout and marks every block used in the 1581's BAM on track 40. A 1581 without the module is refused after the DOS format ("mod load /lib/km/d81 first"): `format` tells the drives apart by reading block 720, which is track 35 sector 54 in the 1541 numbering (no drive has it) and track 19 sector 0 in the module's, and then block 700 (35/34, there on a 1581 only).
 
 `format` asks `erase everything on drive 9? (y/n)` first. It refuses drive 8 and any drive that is mounted. Formatting takes a while on a real 1541 (about a minute and a half), and the rest of the system pauses meanwhile. Afterwards, `mount 9 /mnt` and the disk is ready to use.
 
@@ -137,7 +145,13 @@ python3 tools/mkimage.py build data.d64 --boot build/breadbin.prg --root myfolde
 # look inside an image
 python3 tools/mkimage.py ls  build/breadbin.d64 /home
 python3 tools/mkimage.py cat build/breadbin.d64 /home/readme
+
+# a format 1 disk (.d64 or .d81) from before format 2, rewritten as format 2
+python3 tools/mkimage.py upgrade old.d64 new.d64                       # keeps the boot file
+python3 tools/mkimage.py upgrade old.d64 new.d64 --boot build/breadbin.prg
 ```
+
+`ls` and `cat` read format 1 images too. Images built by upstream's `mkimage.py` (format 2) read and mount here, and ours under upstream's; the two differ only in the time fields and the build id. `mkimage.py` is ported from upstream's (MIT, credit above).
 
 `make` uses the same tool to build `build/breadbin.d64` from `rootfs/` and the compiled programs.
 
@@ -149,7 +163,7 @@ mod load /lib/km/d81
 mount 9 /mnt
 ```
 
-A 1581 (80 tracks of 40 sectors) holds a c64fs volume to mount on drive 9, 10 or 11, not a disk to boot from. The kernel's block mapping is the 1541's; the module `/lib/km/d81` repoints the four calls that need to know (the track and sector of a block, for reading and for writing, and the drive open in `mount` and in `format`'s raw access) and asks each drive it opens for its geometry: a "U1" of track 1 sector 39 works on a 1581 and fails at once on a 1541. On a 1581, block n is track 1 + n / 40, sector n mod 40, which is its place in the `.d81` file. Load the module before mounting; `mod unload` refuses while a 1581 volume is mounted. The volume is 2048 blocks (512 KB of the disk's 800 KB): c64fs v1 has a one-block bitmap. Track 40 holds the 1581's own header, BAM (every block allocated) and an empty directory, so its DOS lists a full, empty disk and never writes; c64fs keeps out of it. `format` writes the 1541 layout: do not use it on a 1581. Normal 1581 DOS disks are not readable by `mount`.
+A 1581 (80 tracks of 40 sectors) holds a c64fs volume to mount on drive 9, 10 or 11, not a disk to boot from. The kernel's block mapping is the 1541's; the module `/lib/km/d81` repoints the four calls that need to know (the track and sector of a block, for reading and for writing, and the drive open in `mount` and in `format`'s raw access) and asks each drive it opens for its geometry: a "U1" of track 1 sector 39 works on a 1581 and fails at once on a 1541. On a 1581, block n is track 1 + n / 40, sector n mod 40, which is its place in the `.d81` file. Load the module before mounting; `mod unload` refuses while a 1581 volume is mounted. The volume is the whole disk, 3200 blocks (800 KB), in upstream's layout: bitmap 377–378, inodes 379–410. Track 40 holds the 1581's own header, BAM (every block allocated) and an empty directory, so its DOS lists a full, empty disk and never writes; c64fs keeps out of it. `format` makes such a volume when the module is loaded. Upstream finds a 1581 by reading its header (track 40 sector 0); the module keeps its own probe, which costs one command and no block read, and also turns away a 1571. Normal 1581 DOS disks are not readable by `mount`.
 
 For normal C64 disk images, use VICE's `c1541`, for example `c1541 -format "mydisk,md" d64 mydisk.d64`.
 
@@ -159,6 +173,7 @@ For normal C64 disk images, use VICE's `c1541`, for example `c1541 -format "mydi
 |---|---|
 | file size | 35,840 bytes |
 | files and directories per disk | 127 |
+| blocks per disk | 683 (1541), 3200 (1581), 2048 (REU RAM disk) |
 | name length | 14 characters |
 | path length (working directory) | 47 characters |
 | mounts at once | 4 (including `/tmp`) |
