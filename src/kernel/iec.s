@@ -726,9 +726,9 @@ io_flush:
 ; A device says it speaks the protocol during TALK or LISTEN (jif_first). Then
 ; each data byte goes two bits at a time on CLK and DATA, by the clock, in a
 ; window of 63 to 80 cycles that we start: no interrupt (sei), no bad line
-; (jif_safe) and no sprite may fall into it. The kernel shows no sprites; a
-; program that does must turn them off around disk use, as must one that uses
-; the turbo. An NMI (RESTORE) in the window spoils the byte.
+; (jif_safe) and no sprite may fall into it. The kernel shows no sprites; if one is
+; on when a session starts, jif_first stays on the standard protocol for it (a
+; sprite turned on mid-session still spoils it, as does the turbo's use). An NMI (RESTORE) in the window spoils the byte.
 ; Everything here comes after the timed standard code and enters it only by
 ; calls of the same size as before, so that code has not moved.
 
@@ -742,7 +742,12 @@ io_flush:
 ; io_tx's wait for the frame acknowledge (2.2 ms) sees that, or runs out. Then
 ; the eighth bit and the real acknowledge. io_jif is good for this session only.
 jif_first:
-        pha
+        ldx $d015           ; a sprite on would steal cycles from the timed windows:
+        beq @go             ; stay on the standard protocol for this session
+        sec
+        ror io_jif          ; bit 7 set: standard
+        jmp io_first
+@go:    pha
         jsr io_atn_begin
         pla
         bcs @f

@@ -60,6 +60,23 @@ class Jiffy(unittest.TestCase):
         jif = self.v.mem(a, a)[0] & 0x80 == 0
         self.assertEqual(jif, JIFFY_DRIVE, "probe result does not match the drive ROM")
 
+    def test_1b_sprites_on_keep_the_standard_protocol(self):
+        """A sprite steals cycles from the timed windows: with one on at the start of a
+        session the driver stays on the standard protocol, even with a JiffyDOS drive."""
+        a = label("io_jif")
+        if a is None:
+            self.skipTest("kernel built with JIFFY=0")
+        try:
+            self.v._cmd(">d015 01")
+            self.v._cmd("x")
+            self.v.run("ls /bin")
+            self.assertTrue(self.v.mem(a, a)[0] & 0x80, "a sprite was on and the probe still ran")
+        finally:
+            self.v._cmd(">d015 00")
+            self.v._cmd("x")
+        self.v.run("ls /bin")
+        self.assertEqual(self.v.mem(a, a)[0] & 0x80 == 0, JIFFY_DRIVE)
+
     def test_2_copy_is_exact(self):
         rom = "JiffyDOS" if JIFFY_DRIVE else "stock"
         if BENCH:
