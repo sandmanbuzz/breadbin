@@ -782,6 +782,8 @@ run_line:
         lda ttype,x
         cmp #';'
         beq @cmd_semi
+        cmp #'&'            ; a background job's '&' ends it like ';' (run_cmd left cmd_end on it)
+        beq @cmd_semi
         cmp #T_AND
         beq @and_check
         cmp #T_OR
@@ -1088,8 +1090,8 @@ stage:  lda #0
         jsr SYS_SPAWN
         bcc @spok
         ; SYS_SPAWN failed: set nonzero status
-        lda #1
-        sta last_status
+        ldy #1
+        sty last_status     ; (A is the errno, perr's argument)
         ldx av
         ldy av+1
         jsr perr

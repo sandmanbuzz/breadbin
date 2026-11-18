@@ -2,7 +2,7 @@
 .include "../../include/breadbin.inc"
 
 KSTART  = $A300     ; must match KRAM in kernel.cfg: the user pool is $0800-KSTART-1
-MAXPROC = 10
+MAXPROC = 8
 NFD     = 8         ; fds per process
 NFILE   = 24        ; system open-file table
 NPIPE   = 4

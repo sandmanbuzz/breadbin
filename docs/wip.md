@@ -26,7 +26,7 @@ The roster is `fleet/roster.md` on `fleet-store` (the owner's roster, published 
 
 ## Branch `feat/root-eject` (single-drive swap, not landed)
 
-`eject` / `reattach` (docs/filesystem.md): the boot disk is served from the REU cache while drive 8 holds another disk. The cache base follows `/tmp` (`rd_banks`: top 3 banks, so 256 KB and 512 KB REUs have a cache). Resident cost: the writer gate (`rgate`, kind in each syscall record's third byte; a `jsr` in `enter` while `ejected`), a 3-byte `ejv` stub and the mount remap; the ops are `eject.km`. Writers to `/` sleep on `CH_ROOT` until `reattach`. Tests: `Eject`, `Cache`. Known: the shell's `&` loops "operation not permitted" on main (8f9faff) too, independent of this branch.
+`eject` / `reattach` (docs/filesystem.md): the boot disk is served from the REU cache while drive 8 holds another disk. The cache base follows `/tmp` (`rd_banks`: top 3 banks, so 256 KB and 512 KB REUs have a cache). Resident cost: the writer gate (`rgate`, kind in each syscall record's third byte; a `jsr` in `enter` while `ejected`), a 3-byte `ejv` stub and the mount remap; the ops are `eject.km`. Writers to `/` sleep on `CH_ROOT` until `reattach`. Tests: `Eject`, `Cache`.
 
 ## Rules of the road
 

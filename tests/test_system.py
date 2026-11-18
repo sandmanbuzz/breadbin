@@ -92,7 +92,7 @@ class Boot(unittest.TestCase):
         pid = out.strip("[]")
         self.assertTrue(pid.isdigit(), out)
         ps = self.run_("ps")
-        self.assertIn("count", ps)
+        self.assertEqual(ps.count("count"), 1, ps)      # started once: the shell used to run a `&` line again and again
         self.run_("kill " + pid)
         ps = self.run_("ps")
         self.assertNotIn("count", ps)
@@ -150,15 +150,15 @@ class Boot(unittest.TestCase):
         self.assertNotIn("count", self.run_("ps"))
 
     def test_15_too_many_processes(self):
-        # init + sh (login has exec'd into it) + 8 jobs fill the 10-slot process table
+        # init + sh (login has exec'd into it) + 6 jobs fill the 8-slot process table (MAXPROC)
         pids = []
-        for _ in range(8):
+        for _ in range(6):
             pids.append(self.run_("sleep 9999 &").strip("[]"))
         out = self.v.run("sleep 9999 &", clear=False)
         self.assertIn("too many processes", out)
         self.assertTrue(all(p.isdigit() for p in pids), pids)
-        self.v.run("kill " + " ".join(pids[:4]), clear=False)
-        self.v.run("kill " + " ".join(pids[4:]), clear=False)
+        self.v.run("kill " + " ".join(pids[:3]), clear=False)
+        self.v.run("kill " + " ".join(pids[3:]), clear=False)
         self.assertEqual(self.run_("echo alive"), "alive")
         self.assertNotIn("sleep", self.run_("ps"))
 
@@ -194,7 +194,7 @@ class Boot(unittest.TestCase):
             l.endswith(" $") for l in ls[-3:]), 60)
 
     def test_21_many_sleepers_stay_responsive(self):
-        pids = [self.run_("sleep 9999 &").strip("[]") for _ in range(6)]
+        pids = [self.run_("sleep 9999 &").strip("[]") for _ in range(4)]
         import time
         t = time.time()
         self.assertEqual(self.run_("echo quick"), "quick")
