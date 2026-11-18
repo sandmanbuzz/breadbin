@@ -153,6 +153,13 @@ the RAM under I/O by `$01` (`tools/uci_sim.py` `Mem.under`). After S1 a slot pag
 zero page and stack 0-189, cwd at `PCWD` (192), name at `PNAME` (240), all in `k.inc`;
 `$DA00-$DFFF` stays free.
 
+After merging `main`'s eject work (MAXPROC 10 -> 8, 3-byte syscall records and the eject gate in
+`enter`): the `$CF00` page overflowed by 2 bytes; `enter` now sets `in_kernel` with `inc` (it is always 0
+there), and the page is exactly full, so the next syscall needs room found first. Against `main`
+0c060a4 (low 1149, high 687) the merged tree has low 1271, high 1290: 725 bytes, 118 fewer than
+above because MAXPROC 8 already shrank the `p_cwd`/`p_name` arrays S1 removes. The slot pages are
+`$D000-$D7FF`; init takes slot 7 and the shell slot 6.
+
 Read and not pursued:
 
 - Instruction n-gram duplicates over the kernel sources: the most common 4- to 8-instruction

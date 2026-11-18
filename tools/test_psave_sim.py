@@ -38,7 +38,8 @@ BUILD = os.path.join(ROOT, "build")
 BUILT = all(os.path.exists(os.path.join(BUILD, f)) for f in ("breadbin.prg", "kernel.lbl", "breadbin.d64"))
 SKIP = "py65 not installed" if uci_sim is None else ("kernel not built (make)" if not BUILT else None)
 
-MAXPROC, ZPSAVE = 10, 0x3E
+MAXPROC = uci_sim._k_inc("MAXPROC") if uci_sim else 0
+ZPSAVE = 0x3E
 P_SAVE = 0xD000
 P_SAVE_END = P_SAVE + MAXPROC * 256
 # the routines that touch the slot pages: every such access must be with RAM visible

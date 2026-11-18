@@ -28,8 +28,8 @@ enter:
         pla                     ; low byte of the return address: 3*n + 2
         tax
         pla                     ; high byte
-        lda #1
-        sta in_kernel
+        inc in_kernel           ; 0 -> 1: user code always runs with in_kernel 0 (proc_entry,
+                                ; sys_return and the IRQ path clear it) and no kernel code enters here
         lda #>(sys_return-1)
         pha
         lda #<(sys_return-1)
