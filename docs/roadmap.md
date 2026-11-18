@@ -84,7 +84,7 @@ Enabling turbo is a one-line story once M0-4 lands, and it should be a runtime s
 - Per-device geometry stays in the one existing table in `blk.s`.
 - No new abstractions for devices we are not supporting.
 
-For when the decision is revisited: the c64fs bitmap is one block and addresses 2048 blocks, so a 1581 (3200 blocks), a 16 MB REU RAM disk or an IEC hard drive does not fit without a scoped v2 (multi-block bitmap, wider inode numbers, geometry from the superblock). A 1571 (1366 blocks) fits as is. Block commands (`U1`, `U2`, `B-P`) are known to work on the 1541; other drives need checking on real hardware. The file-level paths (CBM DOS backend, UCI DOS) do not have this problem.
+Format 2 (upstream's, `docs/filesystem.md`) has the multi-block bitmap, so a 1581 (3200 blocks) fits and `/lib/km/d81` mounts it; what is still open for a 16 MB REU RAM disk (capped at 2048 blocks by the drive cache's banks) or an IEC hard drive is wider inode numbers and geometry read from the superblock. A 1571 (1366 blocks) fits as is. Block commands (`U1`, `U2`, `B-P`) are known to work on the 1541; other drives need checking on real hardware. The file-level paths (CBM DOS backend, UCI DOS) do not have this problem.
 
 ## Memory budget
 
@@ -98,7 +98,7 @@ Measured 2026-10-31, after M0-1 to M0-4. The takeover cost the kernel 1.9 KB (18
 | Free and unused: `$CF5D–$CFFF` (past the syscall table) | 163 |
 | User process pool: `$0800–$7FFF` | 30,720 (120 pages) |
 
-Where the kernel's bytes go: `proc` 4321 (3315 BSS, of which 2304 are the per-process save areas), `file` 2986, `fs` 2847, `blk` 2682 (1536 BSS is the block cache), `cbm` 1956, `exec` 1373, `con` 1363, `iec` 780, `kbd` 747.
+Where the kernel's bytes go: `proc` 4321 (3315 BSS, of which 2304 are the per-process save areas; on `feat/psave-io` the 1,900-byte save areas move to the RAM under I/O), `file` 2986, `fs` 2847, `blk` 2682 (1536 BSS is the block cache), `cbm` 1956, `exec` 1373, `con` 1363, `iec` 780, `kbd` 747.
 
 **Levers, biggest first** (all are independent):
 
@@ -120,8 +120,8 @@ Options, with what each costs and which machines it helps:
 |---|---|---|
 | **REU-backed block cache**, validated by a build id in the superblock | Anything with an REU (the Ultimate has 2 MB): repeat boots and every repeated command load become near-instant, whatever the drive | Moderate, no bus work, no ROM or protocol dependency. Write-through keeps it consistent; the build id guards against a rebuilt image. First boot after a rebuild is still slow. |
 | **Ultimate file backend (UCI DOS)** (S10, S11) | The Recommended tier, and removes the bus altogether | Larger; needs kernel room (M0-5) and the filesystem interface (S6). The real answer for the Ultimate. |
-| **Fast loader code uploaded to the drive** (M0-8, `fastboot1541`) | Any 1541-class drive, stock or JiffyDOS: faster boot, optionally faster reads | Moderate; the drive routines it calls must be checked against the JiffyDOS ROM; not for the 1581 or Software IEC. |
-| **JiffyDOS host protocol** | Machines and drives that have JiffyDOS, which includes the hardware bench | Proprietary and reverse-engineered; the only reference is the ROM images (kept outside the repo) or third-party drive code, which raises the licensing question we have deferred. Does nothing for stock drives. Under VICE the JiffyDOS ROMs are a working reference to observe at the bus level. |
+| **Fast loader code uploaded to the drive** (M0-8, `fastboot1541`) | Any 1541-class drive, stock or JiffyDOS: faster boot, optionally faster reads | *Built as `fast.km` for a stock 1541 (2026-11, `docs/design/fast-io.md` 17.2); boot-time upload is not done.* Moderate; not for the 1581 or Software IEC. |
+| **JiffyDOS host protocol** | Machines and drives that have JiffyDOS, which includes the hardware bench | *Built in `iec.s` (2026-11, clean room from cbmbus_doc, `docs/design/fast-io.md` 17.1 and 17.3; `make JIFFY=0` builds without it).* Does nothing for stock drives. |
 | Skip the status read after each block read | Every drive: about 10 to 15 percent | Small, but it removes error detection per block. |
 
 **Requirements for the REU cache (from the hardware session, 2026-10-31).** It must never hide bus problems or lock out Classic. So: (1) it is optional at run time and absent without an REU (the core never requires one); (2) it has an off switch that does not need a rebuild of the image: a `cache off|on|stat|flush` command, plus a build-time default (`make CACHE=0` always hits the bus; `make CACHE=2` uses the cache but starts every boot cold, for non-interactive bench boots on an REU that keeps its contents); (3) bus errors are counted and reported even when most reads are cache hits (`cache stat` shows hits, misses, bus errors), and a miss path is exercised on every boot by the first read of each block; (4) the cache is write-through and keyed by the build id, so a stale REU image after a rebuild is discarded. The IEC research uses the cache-off image.
@@ -206,7 +206,7 @@ What this means for the plan:
 - The "NFS without the N" analogy holds, with one consequence: the target keeps one open file per instance while the kernel allows 24. The backend should be stateless in spirit: open, seek, transfer, close per chunk, with at most one cached handle.
 - The UCI is synchronous register I/O at CPU speed, so disk access through it should stop stalling the other processes for seconds, unlike the KERNAL serial path.
 - Load-into-REU plus the existing REU DMA gives a cheap path for program loading, overlays and text paging.
-- **c64fs v2 loses priority.** On a 1541 a 35 KB file limit is fine for a 170 KB disk. Its remaining jobs are the REU RAM disk beyond 512 KB and any future block device, so it shrinks to "make the bitmap and inode widths scale" instead of a full redesign.
+- **c64fs scaling loses priority** (the multi-block bitmap arrived with format 2). On a 1541 a 35 KB file limit is fine for a 170 KB disk. Its remaining jobs are the REU RAM disk beyond 512 KB and any future block device, so it shrinks to "make the bitmap and inode widths scale" instead of a full redesign.
 
 ## Milestones and stories
 
@@ -259,7 +259,7 @@ Programs matter as much as the kernel: `as` is 6.4 KB and `basic` 5.6 KB of the 
 
 - **S5. Block driver table** replacing `cmp #1` in `blk.s`: read, write, block count, type and track mapping per device (1541, REU). REU detection and sizing lifted past 8 MB and the 2048-block cap. *Depends on S1.*
 - **S6. Filesystem interface**, replacing the scattered `dev_type` branches in `file.s`, `fs.s`, `exec.s`, `cbm.s`. Backends: c64fs, CBM DOS. *Depends on S2, S3.*
-- **S7. c64fs scaling** (v1 removed): multi-block bitmap, wider inode numbers, geometry read from the superblock instead of fixed at block 376, a file layout that goes past 35 KB. Image tools updated to match. Nice-to-have; see "Block devices and the filesystem". Keep the scope small. *Depends on S2, S3, S6.*
+- **S7. c64fs scaling** (v1 removed; the multi-block bitmap and 3200-block 1581 volumes are done with format 2): wider inode numbers, geometry read from the superblock instead of fixed at block 376, a file layout that goes past 35 KB. Image tools updated to match. Nice-to-have; see "Block devices and the filesystem". Keep the scope small. *Depends on S2, S3, S6.*
 - **S8. REU-resident `/bin`:** copy commands to the REU RAM disk at boot, so command loads stop costing seconds. `exec.s` appears to run programs from any c64fs device already; confirm. *Depends on S5. Unblocks:* a tolerable dev loop on the Ultimate without further storage work.
 
 ### M3: Ultimate storage (Track A, needs hardware)

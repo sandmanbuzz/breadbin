@@ -4,13 +4,13 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 
 | Level | Command | Time (on the runner, in the container) |
 |---|---|---|
-| Fast gate (host tests) | `tools/ci/run.sh all test-host`, or `make test-host` with cc65 and py65 on the host | about 45 s after `make` (`make test-host` alone skips the tests that need build/): 484 tests, none skipped (image tools, key tables, the Ultimate client against a fake server, the py65 simulators of the real kernel, `as` on the host (`tools/asim.py`), the host compiler `tools/cc.py`, and the shard-list check) |
-| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard (105 tests now) |
+| Fast gate (host tests) | `tools/ci/run.sh all test-host`, or `make test-host` with cc65 and py65 on the host | about 45 s after `make` (`make test-host` alone skips the tests that need build/): none skipped (the run prints the count) (image tools, key tables, the Ultimate client against a fake server, the py65 simulators of the real kernel, `as` on the host (`tools/asim.py`), the host compiler `tools/cc.py`, and the shard-list check) |
+| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard |
 | Smoke | `tools/ci/run.sh test-smoke` | about 2 to 3 minutes: boot, echo, a three-stage pipe, Ctrl-C |
 | Targeted | `tools/ci/run.sh test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `tools/ci/run.sh test-console` | about 2.5 minutes (6 tests, 143 s in the last shard run): screen RAM, colour RAM and VIC registers read back |
 | Keyboard | `tools/ci/run.sh test-keyboard` | about 4 minutes (7 tests, 232 s): real keystrokes through VICE's keyboard matrix |
-| Full suite, sharded | `tools/ci/sharded.sh` | six containers at once under one `with-lock -x`, about 10 to 13 minutes: 74 tests took 605 s on `27fa473` and 628 s on `bb09283` (stock ROMs); the 80-test layout on `3fd8112` took 778 s (80 of 80, shards 601 to 768 s: the shard list is unbalanced again and the runs now take longer per test than before, so a rebalance by cost is due). Fails on any non-zero shard, any skip, or a total that differs from the discovered count |
+| Full suite, sharded | `tools/ci/sharded.sh` | six containers at once under one `with-lock -x`, about 10 to 25 minutes depending on load (147 tests in 1344 s on `ac46aec`, stock ROMs, the last time it was quoted; the run prints the count and the shard times). Fails on any non-zero shard, any skip, or a total that differs from the discovered count. With `BREADBIN_CI_JIFFY` set the skips whose reason is "this drive speaks JiffyDOS" (the IEC fault tests that need the standard byte protocol, 14 of them) are by design and do not fail it |
 | Full suite, JiffyDOS ROMs | `BREADBIN_CI_JIFFY=<dir> tools/ci/sharded.sh` | the same run: 74 of 74 in 562 s on `2048e78`. `BREADBIN_VICE_PRINT_ARGS=1` prints the emulator command line, so `-kernal JiffyDOS-C64.bin -dos1541 JiffyDOS_1541-II.bin` can be seen |
 | Full suite, serial (the reference) | `BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test` | Measured when the suite was 63 VICE tests (now 105, not re-timed serially): 2,804 s on the runner, every slot taken (about 47 minutes). The older 55-test figure, 2,511 s on 4778b1a (the Mac), is not comparable |
 
@@ -36,6 +36,8 @@ make && /path/to/venv/bin/python -m unittest tools.test_uci_sim -v
 ```
 
 `tools/test_exec_sim.py` uses the same harness for `exec` (`SPAWN` with `SP_EXEC`, `docs/design/next/exec.md` section 6): a missing file (`ENOENT`), a text file (`ENOEXEC`) and a full pool (`ENOMEM`) must leave the caller's page table, free count, name, fds and user zero page identical; a success stops on `jmp (k_entry)` of the new image with `SP = $FD`, the relocated image and `argv` in place, pid, fds and uid unchanged and the old image back in the pool; a signal pending at the end of the load kills the new image and leaks nothing. Run: `/path/to/venv/bin/python -m unittest tools.test_exec_sim -v`. Checked by mutation: a build where `exec_commit` does not free the old image fails two of the five.
+
+`tools/test_psave_sim.py` guards p_save (the save areas under the I/O registers, `proc.s`): the real `sched` and `setup_proc` run in py65 with a memory guard that fails on an access to `$D000-$DFFF` outside p_save while `$01` shows RAM, on any p_save access while I/O shows, on I clear while RAM shows, and on `$01` not `$35` or the caller's I flag not restored at return. Mutation tests (a nopped `inc $01`, `dec $01` or `sei`) must trip it. It does not model the real banking or raise interrupts. Run: `python3 -m unittest tools.test_psave_sim -v`.
 
 Faked, so not covered: the IEC bus (`iec_open`/`iec_read`/`iec_write` are trapped and served from `build/breadbin.d64` in memory), the REU (reported absent), interrupts (none are raised: the scheduler, the keyboard and the clock never run, so a spawned program is loaded and checked byte for byte but not started), and the Ultimate itself (the fake shares the documentation's gaps: timing, FAT case-insensitivity, the exact status of untried error cases). Running the whole system in py65 (init, the shell) would need the CIA timer interrupt, the keyboard matrix and a 1541 on the IEC bus; not attempted. The hardware check list is in the spec, section 7.
 
@@ -109,6 +111,7 @@ By test name; refine this as we learn what actually catches what.
 | The compiler (`tools/cc.py`, through slice 3) | `tools/test_cc.py`, `tools/test_cc_run.py` (host; programs run on a 6502 simulator), then `tests.test_compiled.Compiled` on the machine |
 | Image tools, key tables (`tools/`) | `make test-host` |
 | UCI v1 (`src/mod/uci.s` = `/lib/km/uci`, the stubs in `src/kernel/uci.s`, the `bmi` sites in `file.s`, `fs.s`, `exec.s`, `cbm.s`) | `make test-host` with py65 (`tools/test_uci_sim.py`), plus `Drives`, `REU`, `Pool`, `Modules` and a smoke run in VICE |
+| 1581 volumes (`src/mod/d81.s` = `/lib/km/d81`, the hook labels `ts_rd_io`, `ts_wr_io` in `blk.s` and `open_mnt_io`, `open_dio_io` in `cbm.s`, `tools/mkimage.py d81`) | `make test-host` (`tools/test_mkimage.py`, and `tools/test_d81_sim.py` with py65: fake drives at the DOS-command level), plus `tools/ci/run.sh test-only T="tests.test_d81_vice"` (its 1581 test skips without a `dos1581*` ROM, which `tools/setup-vice-roms.sh` does not fetch) and `Drives` |
 | Anything that adds or removes kernel code | `make size`, and quote the numbers in the commit message |
 
 Examples:

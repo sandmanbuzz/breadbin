@@ -716,3 +716,18 @@ Attempts, all after a full machine power cycle unless noted:
 Result: no clean run from the agent's side. The owner's manual boot reached login. Mitigation (bounded `bus_acptr` wait, three `iec_read` tries with UNTALK) is not reliable enough to call solid: the retry budget can be exhausted, and a new `LOAD ERROR` mode has appeared.
 
 Owner decision: accept this state and proceed with a follow-up story for the boot path, backlogged. Not bisected. Not chased further in this session.
+
+## Emulated 1581 (Ultimate drive B, 1581 ROM) and D81 writes
+
+Setup: drive A as device 8 (the physical 1541 renumbered to 9, off the bus), drive B enabled as a 1581 at device 11 (Software IEC disabled), `/lib/km/d81` loaded, a D81 volume from `tools/mkimage.py d81`.
+
+- **Mount the image `readwrite`, not `unlinked`.** With `unlinked` the emulated 1581 stops answering (DATA held low, `$DD00` = `$4F`) at the first command that follows a write once the head has to move to another track, forever; powering drive B off and on frees the bus. Seen from Breadbin as a hang in `io_tx` waiting on the TALK byte of the status read after `U2` (`echo hi > /mnt/x`, `cp`). It is the drive, not the bus code: BASIC reproduces it with no Breadbin running (`U2:2 0 10 17`, then `U1:2 0 1 5`, CR-terminated commands; the same pair on one track does not hang; with `readwrite` it does not hang). Delays before the U2 or the status, EOI or no EOI on the data and the command, and a CR on the command all made no difference to the `unlinked` hang. Do not read this as the `unlinked` mode being safe for 1541 images: it was not tried there.
+- With `readwrite` the unmodified kernel writes, reads back and remounts byte-exact: `cp /etc/help /mnt/help` (414 bytes, 25 s), `cat` equals the source before and after `umount`/`mount`, `ls` shows the files.
+- The Ultimate 1581 accepts the d81 module's U1/U2 traffic as is (EOI-terminated commands); no kernel change was needed.
+
+## Physical 1541 RAM map with the kernel's `#` channel (2026-11-18)
+
+`experiments/iec-stall/drvdump.sh` (read-only, `M-R`, stock-KERNAL host): snapshots of drive RAM `$0000-$07FF` idle, after `OPEN 2,8,2,"#"`, and after `U1:2 0 18 0`, plus the ROM `$C000-$FFFF` (vectors NMI `$FF01`, reset `$EAA0`, IRQ `$FE67`; it carries the stock "BLOCKS FREE." text, no readable "JIFFY" string).
+
+- Buffers `$0300-$06FF` are all zero before use. The `#` channel (secondary 2, channel 0: `$022D` = `$40`, `$A7` = 3) gets **buffer 3, `$0600`**; `U1` fills that page. Opening it also makes the DOS read the BAM into buffer 4 (`$0700`). Buffers 0-2 (`$0300-$05FF`, 768 bytes) were unallocated.
+- So the free, reservable drive RAM is buffers 0-2 with `#0`..`#2`, less whatever the drive-side loader takes (`docs/design/fast-io.md`): 256-768 bytes, reached only by `M-W`/`M-R` (a transfer costs the same as a block, saving only the seek). Not worth building without a concrete candidate.

@@ -340,8 +340,9 @@ class Runner(unittest.TestCase):
         def factory(image):
             return UltimateTarget(image, client=client, clock=sim)
         out = []
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
+        # the runner's console lines (config read-back, RESTORE ...) go to self.console, not the test output
+        self.console = io.StringIO()
+        with contextlib.redirect_stdout(self.console), contextlib.redirect_stderr(self.console):
             status = session5.main(argv + ["--tree", self.tree, "--results", self.res, "--tools-d64", self.tools,
                                            "--reboot-wait", "0", "--rev", "s5test"]
                                    + ([] if prompt else ["--no-prompt"]),
@@ -593,6 +594,8 @@ class Runner(unittest.TestCase):
         st = self.go(["r", "-n", "3"], interrupt_at="ls")
         self.assertEqual(st, session5.EXIT_STOP)
         self.assert_restored()
+        self.assertIn("config after restore", self.console.getvalue())
+        self.assertNotIn("RESTORE FAILED", self.console.getvalue())
 
     def test_refuses_a_non_jiffy_kernal_before_any_change(self):
         self.fake.configs[session.KERNAL_ITEM] = ""

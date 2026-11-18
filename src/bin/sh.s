@@ -789,7 +789,10 @@ run_line:
         cmp #T_OR
         beq @or_check_target
 @skip_or:
-        ; unknown token, just continue
+        ; '&' (background marker; run_cmd left cmd_end on it): step past it.
+        ; Not advancing here re-ran the same command forever.
+        inx
+        stx cur_tok
         jmp @cmd_loop
 @or_check_target:
         jmp @or_check
@@ -1089,9 +1092,9 @@ stage:  lda #0
         ldx pout
         jsr SYS_SPAWN
         bcc @spok
-        ; SYS_SPAWN failed: set nonzero status
-        ldy #1
-        sty last_status     ; (A is the errno, perr's argument)
+        ; SYS_SPAWN failed: set nonzero status (A = errno, keep it for perr)
+        ldx #1
+        stx last_status
         ldx av
         ldy av+1
         jsr perr
@@ -1116,6 +1119,8 @@ stage:  lda #0
         beq @r
         lda bg
         beq @wl
+        lda #0
+        sta last_status     ; a background job started: status 0
         lda #'['
         jsr putc
         ldx npids

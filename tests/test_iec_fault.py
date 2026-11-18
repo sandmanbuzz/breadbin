@@ -57,6 +57,9 @@ STOP = re.compile(r"#(\d+) \(Stop on\s+exec ([0-9a-f]+)\)")
 ST = 0x90
 
 
+JIFFY_DRIVE = "JiffyDOS_1541" in os.environ.get("BREADBIN_VICE_ARGS", "")
+
+
 def labels():
     out = {}
     with open(os.path.join(ROOT, "build", "kernel.lbl")) as f:
@@ -243,6 +246,11 @@ class IecFault(unittest.TestCase):
         $3F byte is not acknowledged: not a lost ATN edge). reu: KB of REU (the block cache is on).
         Returns the record."""
         lbl = self.lbl
+        if kind.endswith(("eoi", "eoil")) and "io_jif" in lbl and JIFFY_DRIVE:
+            # these faults are the standard byte protocol's (io_tx's EOI handshake); with a
+            # JiffyDOS drive the data bytes of a command go through jif_tx, which has no such
+            # handshake. A gap, recorded in docs/testing.md: no byte-level fault test for jif_tx.
+            self.skipTest("a fault of the standard byte protocol; this drive speaks JiffyDOS")
         img = os.path.join(self.tmp, "a.d64")
         shutil.copyfile(IMAGE, img)
         nth = int(os.environ.get("FAULT_N", nth))
@@ -356,7 +364,7 @@ class IecFault(unittest.TestCase):
                         v._raw("disable %d" % st["bk"][st["go"]])
                         st["fired"] += 1
                 elif addr == st.get("go"):
-                    if not st.get("eoil") or rd(lbl["io_eoi"], lbl["io_eoi"])[0] != 1:
+                    if not st.get("eoil") or rd(lbl["io_eoi"], lbl["io_eoi"])[0] == 0:      # 1, or $10 since the JiffyDOS driver
                         return
                     v._raw("r pc = %04x" % st["fail"])
                     v._raw("disable %d" % st["bk"][st["go"]])
@@ -368,7 +376,7 @@ class IecFault(unittest.TestCase):
                         return
                     st["eoi_c"] += 1
                     if st["eoi_c"] == st["eoi_k"]:
-                        v._raw("> %04x 01" % lbl["io_eoi"])
+                        v._raw("> %04x 10" % lbl["io_eoi"])     # any value but 0; jif_tx wants $10
                         v._raw("disable %d" % st["bk"][lbl["io_tx"]])
                         del st["eoi_k"]
                         st["fired"] += 1
@@ -406,7 +414,7 @@ class IecFault(unittest.TestCase):
             st["fail"] = local_label("@fail", lbl["io_tx"])
             v._cmd("bk exec %x" % st["go"])
             st["ago"] = local_label("@go", lbl["bus_acptr"])
-            st["atmo"] = local_label("@tmo", lbl["bus_acptr"])
+            st["atmo"] = lbl.get("acp_tmo") or local_label("@tmo", lbl["bus_acptr"])
             v._cmd("bk exec %x" % st["ago"])
             for _ in range(5):
                 for m in re.finditer(r"BREAK:\s*(\d+)\s+C:\$([0-9a-fA-F]{4})", v._cmd("bk")):
@@ -622,7 +630,7 @@ class IecFault(unittest.TestCase):
         self.assertEqual(rec["cmd"], "U2:2 0 19 0", "the boot's first write is the superblock's")
         self.assertIn("i/o error", rec["out"][0])
         self.assertEqual(rec["out"][1:], ["", "y"])
-        off = 376 * 256 + 15
+        off = 376 * 256 + 252                   # SB_BUILD_ID (blk.s)
         with open(IMAGE, "rb") as f:
             id0 = f.read()[off:off + 4]
         with open(rec["img"], "rb") as f:

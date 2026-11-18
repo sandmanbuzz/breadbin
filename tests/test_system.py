@@ -431,9 +431,9 @@ class REURoot(unittest.TestCase):
             v.wait_for("cannot mount root", timeout=60)
 
     def test_stale_superblock_version_cannot_mount(self):
-        with open(self.reu, "r+b") as f:     # a superblock of another version: not ours to adopt
+        with open(self.reu, "r+b") as f:     # a superblock of another version (format 1): not ours
             f.seek(376 * 256 + 5)
-            f.write(b"\x02")
+            f.write(b"\x01")
         with self.boot() as v:
             v.wait_for("cannot mount root", timeout=60)
 
@@ -543,8 +543,8 @@ class Cache(unittest.TestCase):
 
     def test_new_disk_discards(self):
         self.boot()
-        with open(self.img, "r+b") as f:    # another build: a different id
-            f.seek(376 * 256 + 15)
+        with open(self.img, "r+b") as f:    # another build: a different id (SB_BUILD_ID, blk.s)
+            f.seek(376 * 256 + 252)
             f.write(b"\xde\xad\xbe\xef")
         _, hits, misses, _ = self.boot()[1]
         self.assertGreater(misses, 20)
@@ -1100,7 +1100,8 @@ class ShellOperators(unittest.TestCase):
     def test_and_fail(self):
         """cat /nope && echo no: second command skipped."""
         out = self.v.run("cat /nope && echo no")
-        self.assertNotIn("no", out)
+        # the error text itself contains "no" ("/nope", "no such file")
+        self.assertNotIn("no", out.splitlines())
 
     def test_or_success(self):
         """echo ok || echo no: second command skipped."""
@@ -1115,13 +1116,14 @@ class ShellOperators(unittest.TestCase):
     def test_dollar_question_after_success(self):
         """$? after echo ok is 0."""
         self.v.run("echo ok")
-        out = self.v.run("echo $?")
+        out = self.v.run("echo $?", clear=False)
         self.assertEqual(out.strip(), "0")
 
     def test_dollar_question_after_fail(self):
         """$? after cat /nope is 1."""
         self.v.run("cat /nope")
-        out = self.v.run("echo $?")
+        # clear=False: run() types "clear" first, which would set $? to its own 0
+        out = self.v.run("echo $?", clear=False)
         self.assertEqual(out.strip(), "1")
 
     def test_chained_and_or(self):

@@ -5,6 +5,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import unittest.mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools", "ci"))
@@ -137,6 +138,7 @@ class Verdict(unittest.TestCase):
         "green": "def test_a(self): pass\n    def test_b(self): pass\n",
         "red": "def test_a(self): pass\n    def test_b(self): self.assertEqual(1, 2)\n",
         "skip": "def test_a(self): pass\n    def test_b(self): self.skipTest('no display')\n",
+        "jskip": "def test_a(self): pass\n    def test_b(self): self.skipTest('a fault of the standard byte protocol; this drive speaks JiffyDOS')\n",
     }
 
     def real_log(self, d, name, kind):
@@ -207,6 +209,16 @@ class Verdict(unittest.TestCase):
             self.assertEqual(f.read().strip(), "0")
         self.assertEqual(r.returncode, 1)
         self.assertIn("SKIPS", r.stdout)
+
+    def test_the_by_design_jiffydos_skip_is_green_only_under_jiffydos_roms(self):
+        with unittest.mock.patch.dict(os.environ, {"BREADBIN_CI_JIFFY": "/x"}):
+            r, d = self.judge(["green", "jskip"], 4)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            r, d = self.judge(["green", "skip"], 4)         # any other skip stays red
+            self.assertEqual(r.returncode, 1)
+        with unittest.mock.patch.dict(os.environ, {"BREADBIN_CI_JIFFY": ""}):
+            r, d = self.judge(["green", "jskip"], 4)
+            self.assertEqual(r.returncode, 1)
 
     def test_a_shard_that_never_ran_is_red(self):
         r, d = self.judge(["green", "green"], 4, drop=["s1"])

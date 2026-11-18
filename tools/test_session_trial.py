@@ -2,6 +2,8 @@
 Ultimate only. A small scripted C64 stand-in turns the runner's keystrokes and PRG runs into
 screen text on a virtual clock, so a 90-minute plan runs in a second and no real device is touched.
 """
+import contextlib
+import io
 import os
 import re
 import sys
@@ -189,22 +191,27 @@ class Base(unittest.TestCase):
         d = self.tmp.name
         self.prg = (0x0801).to_bytes(2, "little") + bytes((i * 13 + 1) & 0xFF for i in range(700))
         self.p = lambda n: os.path.join(d, n)
-        open(self.p("b.prg"), "wb").write(self.prg)
+        with open(self.p("b.prg"), "wb") as f:
+            f.write(self.prg)
         img = mkimage.Image()
         img.write_cbm(b"BREADBIN", self.prg)
-        open(self.p("b.d64"), "wb").write(bytes(img.data))
+        with open(self.p("b.d64"), "wb") as f:
+            f.write(bytes(img.data))
         # counters at 4 bytes' spacing so the width guess is 4; one last-event label
-        open(self.p("b.lbl"), "w").write(
-            "al 00C000 .io_nread\nal 00C004 .io_nretry\nal 00C008 .io_nfail\n"
-            "al 00C00C .io_neoi\nal 00C010 .io_ltrk\nal 00C011 .io_lsct\nal 00C012 .io_lidx\n"
-            "al 00C013 .io_ltry\nal 00C014 .io_lst\nal 00C015 .io_lwn\nal 00C016 .zz\n"
-            "al 00C200 .io_last\n"
-            "al 00C100 .io_out\nal 00C103 .io_n\nal 00C10B .ie_dev\n")
+        with open(self.p("b.lbl"), "w") as f:
+            f.write(
+                "al 00C000 .io_nread\nal 00C004 .io_nretry\nal 00C008 .io_nfail\n"
+                "al 00C00C .io_neoi\nal 00C010 .io_ltrk\nal 00C011 .io_lsct\nal 00C012 .io_lidx\n"
+                "al 00C013 .io_ltry\nal 00C014 .io_lst\nal 00C015 .io_lwn\nal 00C016 .zz\n"
+                "al 00C200 .io_last\n"
+                "al 00C100 .io_out\nal 00C103 .io_n\nal 00C10B .ie_dev\n")
         self.labels = session.read_labels(self.p("b.lbl"))
         self.out = self.p("res.tsv")
+        self.console = io.StringIO()
 
     def plan(self, text):
-        open(self.p("plan.txt"), "w").write(text)
+        with open(self.p("plan.txt"), "w") as f:
+            f.write(text)
 
     def run_session(self, sim, extra=(), ask=None, plan=None):
         if plan:
@@ -219,10 +226,15 @@ class Base(unittest.TestCase):
                 "--out", self.out, "--disk-id", "T1", "--control-file", "CTRLFILE",
                 "--commit", "v0-test", "--drive-on-minutes-ago", "30", "--reboot-wait", "0",
                 *extra]
-        self.status = session.main(argv, client=self.u, clock=sim, ask=ask_fn)
+        # The runner's own console lines ("RESTORE FAILED ...", "config read-back: ...") go to
+        # self.console, not to the test output. Tests that expect one of them assert on it.
+        self.console = io.StringIO()
+        with contextlib.redirect_stdout(self.console), contextlib.redirect_stderr(self.console):
+            self.status = session.main(argv, client=self.u, clock=sim, ask=ask_fn)
 
     def rows(self):
-        lines = [l for l in open(self.out).read().splitlines() if not l.startswith("#")]
+        with open(self.out) as f:
+            lines = [l for l in f.read().splitlines() if not l.startswith("#")]
         hdr = lines[0].split("\t")
         self.assertEqual(hdr, session.COLUMNS)
         out = []
@@ -233,7 +245,8 @@ class Base(unittest.TestCase):
         return out
 
     def comments(self):
-        return [l for l in open(self.out).read().splitlines() if l.startswith("#")]
+        with open(self.out) as f:
+            return [l for l in f.read().splitlines() if l.startswith("#")]
 
     def assertConfigRestored(self):
         self.assertEqual(self.fake.configs[("SoftIEC Drive Settings", "IEC Drive")], "Enabled")
@@ -905,6 +918,9 @@ class Session3(Base):
         self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
         self.assertConfigRestored()
         self.assertEqual(self.status, 0)
+        # the second Ctrl-C is reported as a failed restore step, not raised out of the restore
+        self.assertIn("RESTORE FAILED", self.console.getvalue())
+        self.assertIn("KeyboardInterrupt()", self.console.getvalue())
 
     def test_real_sigint_sigterm_sighup_in_restore_are_blocked(self):
         import signal
@@ -940,6 +956,7 @@ class Session3(Base):
         reboots = [p for m, p in self.fake.requests if p.endswith("reboot")]
         self.assertGreaterEqual(len(reboots), 3)                       # apply, Kernal in, restore
         self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin")
+        self.assertIn("RESTORE resume failed: RuntimeError('resume failed')", self.console.getvalue())
 
     def test_kernal_not_restored_is_loud_and_exits_4(self):
         def hook(orig):
@@ -954,6 +971,9 @@ class Session3(Base):
         self.assertEqual(self.status, session.EXIT_KERNAL_NOT_RESTORED)
         self.assertEqual(self.fake.configs[self.KERNAL], "")
         self.assertTrue(any("KERNAL NOT RESTORED" in c for c in self.comments()))
+        self.assertIn("RESTORE FAILED C64 and Cartridge Settings/Kernal ROM: RuntimeError('PUT failed')",
+                      self.console.getvalue())
+        self.assertIn("KERNAL NOT RESTORED", self.console.getvalue())
 
     def test_kernal_read_back_mismatch_stops_the_run(self):
         # the firmware ignores the Kernal PUT: nothing changes, the run stops at the first attempt
@@ -1133,13 +1153,9 @@ class Session3(Base):
         self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)
 
     def test_restore_announces_itself(self):
-        import contextlib
-        import io
-        buf = io.StringIO()
         sim = Sim(self.fake, self.prg, loads=["ok"], labels=self.labels)
-        with contextlib.redirect_stdout(buf):
-            self.run_session(sim, plan="1 C 1\n")
-        self.assertIn("restoring the Ultimate config; Ctrl-C is ignored until done", buf.getvalue())
+        self.run_session(sim, plan="1 C 1\n")
+        self.assertIn("restoring the Ultimate config; Ctrl-C is ignored until done", self.console.getvalue())
 
     def test_one_flaky_kernal_read_back_after_restore_is_not_a_failed_restore(self):
         orig = session.ConfigGuard.get

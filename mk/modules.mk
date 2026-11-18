@@ -4,6 +4,10 @@
 # The kernel carries the API hash as one word (src/kernel/khash.s). The hash depends on the final
 # link, so a changed hash relinks the kernel once; the word moves no address, which is checked.
 KMOD    := $(patsubst src/mod/%.s,%,$(wildcard src/mod/*.s))
+# fast.km uses the kernel's JiffyDOS byte routines
+ifeq ($(JIFFY),0)
+KMOD    := $(filter-out fast,$(KMOD))
+endif
 KMODCX  := $(patsubst %,$(BUILD)/root/lib/km/%,$(KMOD))
 
 $(BUILD)/khash.inc:
@@ -24,7 +28,7 @@ $(BUILD)/kexp.o: $(BUILD)/kapi.stamp
 
 $(BUILD)/mod/%.o: src/mod/%.s $(BUILD)/kapi.stamp include/breadbin.inc
 	@mkdir -p $(dir $@)
-	ca65 -g -I $(BUILD) $< -o $@
+	ca65 -g -I $(BUILD) $(MODFLAGS) $< -o $@
 
 # link twice (origin $0000 and $0100) and diff into a relocatable CX file, as for programs
 $(BUILD)/root/lib/km/%: $(BUILD)/mod/%.o $(BUILD)/kexp.o src/mod/module.cfg tools/cx.py

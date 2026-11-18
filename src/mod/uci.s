@@ -31,7 +31,7 @@
         jmp init
         jmp fini
         .word KAPI_HASH
-        .byte $21               ; class 1: filesystem; high nibble = name id for `mod ls` (1 cbm, 2 uci)
+        .byte $21               ; class 1: filesystem; high nibble = name id for `mod ls` (the table is in src/bin/mod.s)
 
 UCI_CTL = $DF1C         ; write: 1 push, 2 data accepted, 4 abort, 8 clear error
 UCI_CMD = $DF1D         ; write: command FIFO; read: identification ($C9)
@@ -711,7 +711,7 @@ uci_probe:
 
 ; uci_iget: ci_ino 1/3 -> a directory, 2 -> the probed file
 uci_iget:
-        ldx #INO_SIZE-1
+        ldx #CI_SIZE-1
         lda #0
 @z:     sta ci,x
         dex

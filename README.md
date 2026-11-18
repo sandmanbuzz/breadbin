@@ -13,15 +13,16 @@ It is a real kernel, not a shell that prints canned output:
 - **Preemptive multitasking.** A timer interrupt drives a round-robin scheduler, so `cmd &` keeps running in the background while you type. Up to 8 processes (`MAXPROC` in `src/kernel/k.inc`).
 - **Real programs.** `ls`, `cat`, `grep` and the rest are separate relocatable executables in `/bin`. The shell asks the kernel to `spawn` them and `wait`s for them.
 - **Pipes and redirection.** `cat readme | grep unix | wc`, plus `>`, `>>` and `<`. A pipe is a kernel buffer: readers block when it is empty, writers block when it is full, and writing to a closed pipe raises `SIGPIPE`.
-- **A Unix filesystem on the 1541.** c64fs has inodes, real directories (`mkdir`, `cd`, `..`), files up to 35 KB, and `/dev/console` and `/dev/null` device nodes.
+- **A Unix filesystem on the 1541.** c64fs has inodes, real directories (`mkdir`, `cd`, `..`), files up to 35 KB, and `/dev/console` and `/dev/null` device nodes. The on-disk format is c64fs format 2 (upstream's: `docs/filesystem.md`); a 1581 volume mounts with the `d81` module.
 - **Signals.** RUN/STOP sends `SIGINT` to the foreground job. `kill` sends any signal.
 - **REU support.** If a RAM Expansion Unit is present, it is detected at boot, formatted, and mounted at `/tmp` as a fast RAM disk.
 - **REU block cache.** With enough REU banks free, the boot drive's blocks are cached in the REU (write-through, discarded when the disk or the build changes). The `cache` command shows its state (`cache stat|on|off|flush`); `make CACHE=0|1|2` sets the default.
 - **No KERNAL ROM.** This fork has its own interrupt entry, keyboard, screen driver and serial bus (IEC) driver; no Commodore ROM is used at run time.
-- **Kernel modules.** `mod` loads and unloads kernel modules (root only). The CBM DOS filesystem (`/lib/km/cbm`) and UCI v1 (`/lib/km/uci`) are modules; `mount uci /u` mounts an Ultimate's file storage through its Command Interface.
+- **Kernel modules.** `mod` loads and unloads kernel modules (root only). The CBM DOS filesystem (`/lib/km/cbm`) UCI v1 (`/lib/km/uci`), the 1581 volume driver (`/lib/km/d81`) and the block-transfer module for a stock 1541 (`/lib/km/fast`) are modules (`mod ls` lists the loaded ones); `mount uci /u` mounts an Ultimate's file storage through its Command Interface.
 - **`exec`.** `exec PATH` replaces the current process with another program (same pid and descriptors); `login` execs into the shell.
 - **More drives.** `mount 9 /mnt` attaches drive 9, 10 or 11. A Breadbin disk shows up with its directories. A normal C64 disk shows up as one flat directory that you can read, write (`cp`), `rm` and `mv`; the writes go through the drive's own DOS, so other C64 software can read the results.
 - **Users and screen.** There's a `login` with passwords (`passwd`, `whoami`), a full-screen editor (`edit`), colour `theme`s, shell wildcards (`*.bas`) and `jobs`.
+- **JiffyDOS.** The serial driver speaks the JiffyDOS byte protocol with a JiffyDOS drive (it probes at the start of each session, and stays on the standard protocol with any other drive, or with a sprite on); `make JIFFY=0` builds without it. Details and caveats: `docs/design/fast-io.md`.
 - **Stock hardware.** It runs on a stock C64 with a 1541, and the same disk boots with or without an REU or an Ultimate (see Platform tiers).
 - **BASIC and an assembler.** Both run *on* the C64: `basic` is an integer BASIC, and `as` is a 6502 assembler that produces new Breadbin commands (a trailing `.res` is the program's BSS, so big buffers cost no disk space). A small C-subset compiler, `tools/cc.py`, runs on the host and emits `as` source that the C64 assembles and runs; it is a host-side reference for now.
 
@@ -69,7 +70,7 @@ This assembles the kernel and every program in `src/bin/`, and packs them with t
 | `build/breadbin.prg` | the kernel alone (the disk's boot file) |
 | `build/root/bin/*` | the programs, as relocatable CX executables |
 
-`make clean` removes `build/`. To add a program, drop a new `src/bin/name.s` in and run `make`: it is built automatically and lands in `/bin`.
+`make clean` removes `build/`. To add a program, drop a new `src/bin/NAME.s` in and run `make`: it is built automatically and lands in `/bin`.
 
 ### Run
 
@@ -166,8 +167,8 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 ## Tests
 
 ```sh
-tools/ci/run.sh all test-host   # the fast gate: image tools, simulators, the assembler and compiler on the host (484 tests, none skipped)
-tools/ci/sharded.sh             # the whole VICE suite in six containers at once (105 tests)
+tools/ci/run.sh all test-host   # the fast gate: image tools, simulators, the assembler and compiler on the host
+tools/ci/sharded.sh             # the whole VICE suite in six containers at once
 tools/ci/shards.py check 6      # host only: every VICE test is in exactly one of at most six shards
 make && make test-host          # the same host tests directly (build first: without build/ the tests that need the kernel skip), with cc65 and py65 installed
 make test                       # boots VICE one test after another (slow)

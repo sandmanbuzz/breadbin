@@ -892,6 +892,9 @@ not_cbm:
 @ok:    clc
         rts
 
+; cold path (rarely run): mkdir, rmdir, unlink and rename park above the BSS in CODEHI,
+; out of the user pool
+.segment "CODEHI"
 ; mkdir(r0 = path)
 sys_mkdir:
         jsr set_pp_r0
@@ -1000,8 +1003,7 @@ sys_rmdir:
         dec ci+I_NLINK
         jmp iput
 
-; cold path (rarely run): unlink and rename park above the BSS in CODEHI, out of the user pool
-.segment "CODEHI"
+; unlink and rename (cold, like mkdir and rmdir above)
 ; unlink(r0 = path)
 sys_unlink:
         jsr set_pp_r0
@@ -1174,7 +1176,7 @@ sys_rename:
         jmp iput
 @done:  clc
         rts
-.segment "CODE"
+.segment "CODEHI"            ; cold: chdir, getcwd, stat, fsinfo
 
 ; ---------------------------------------------------------------------
 ; chdir(r0 = path)

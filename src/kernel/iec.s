@@ -6,10 +6,14 @@
 ; number and a secondary address on top of it. One thing is remembered between
 ; calls: io_dirty, per drive, says a send to it failed part way, so the drive may
 ; hold half a command; io_flush clears that before the next LISTEN to it.
-; Standard protocol only: no fast-loader or JiffyDOS handshakes.
+; Data bytes to and from a device that answers the JiffyDOS probe go by the
+; JiffyDOS byte protocol (the end of this file; `make JIFFY=0` leaves it out);
+; everything under ATN, and every other device, uses the standard protocol.
 ;
 ; Written from the published protocol and timing table (the CBM IEC bus
-; description in MAME's cbmiec.cpp), not from the KERNAL.
+; description in MAME's cbmiec.cpp), not from the KERNAL; the JiffyDOS part from
+; Michael Steil's "Commodore Peripheral Bus, Part 7: JiffyDOS" (mist64/cbmbus_doc),
+; not from any ROM (docs/design/fast-io.md).
 ;
 ; Port bits ($DD00): 3 ATN out, 4 CLK out, 5 DATA out, 6 CLK in, 7 DATA in. On
 ; the output side a 1 pulls the line low (asserts it); the input bits are the
@@ -63,6 +67,9 @@ ie_dev:  .res 1
 ie_sa:   .res 1
 ie_len:  .res 1
 ie_len2: .res 1
+.if JIFDOS
+io_jif:  .res 1     ; bit 7 clear: the device addressed in this session answered the JiffyDOS probe
+.endif
 io_dirty: .res 4    ; per drive (number & 3): a send to it failed part way, or none yet this boot (io_flush).
                     ; Every caller talks to dev_drive's 8-11 only; device 4-7 or 12-15 would share
                     ; a mark with 8-11 (a send to a printer is not supported here)
@@ -78,6 +85,13 @@ io_dirty: .res 4    ; per drive (number & 3): a send to it failed part way, or n
 IO_AT = $a5        ; main has io_set at $a7; $a5-$a7 give the same crossings (lower fails the link)
 iec_seg:
 .assert <iec_seg = 0, error, "iec.s: IECBUS must start a page (first in KRAM)"
+
+.if JIFDOS
+IO_TXD = io_txd
+.else
+IO_TXD = io_tx
+.endif
+io_tx_n = io_tx_bit - 4     ; the operand of io_tx's lda #8
 
 ; tb: a timed branch that must not cross a page; tx: one that crossed a page in the validated
 ; layout and must keep doing so (one cycle more when taken).
@@ -114,20 +128,19 @@ iec_ch_open:
 ; iec_out_begin: A = drive, X = secondary address. Then iec_out_byte per byte
 ; and iec_out_end. Carry set if the drive does not answer (A = ENODEV), or an
 ; earlier send to it that failed could not be flushed (io_flush).
-iec_out_begin:
-        stx ie_sa
-        jmp out_sa_data
-
+;
 ; out_sa_open / out_sa_data: LISTEN the drive and send secondary $F0 | sa
 ; (open) or $60 | sa (data). A = drive. A LISTEN or secondary not taken (ST bit 7)
 ; is tried three times before it is ENODEV: a present drive that missed one frame
 ; ack is not "no drive" (at boot that would adopt the REU root). The flush's own
 ; LISTEN counts the same way (io_flush: ENODEV, the mark kept).
-out_sa_open:
-        ldy #$f0
-        bne out_sa
+iec_out_begin:
+        stx ie_sa
 out_sa_data:
         ldy #$60
+        bne out_sa
+out_sa_open:
+        ldy #$f0
 out_sa: sty ie_len2
         sta ie_dev
         lda #3              ; tries, on the stack
@@ -170,24 +183,20 @@ io_nodev:
 iec_in_begin:
         sta ie_dev
         stx ie_sa
-        lda #0
-        sta ST
-        lda ie_dev
+        ldx #0
+        stx ST
         jsr bus_talk
         lda ST
-        bmi @bad
+        bmi io_nodev
         lda ie_sa
         ora #$60
         jsr bus_tksa
         lda ST
-        bmi @bad
+        bmi io_nodev
         and #$02            ; the turnaround timed out: the drive is there,
         beq @ok             ; so free it (UNTALK) and say so
         jsr bus_untlk
         lda #EIO
-        sec
-        rts
-@bad:   lda #ENODEV
         sec
         rts
 @ok:    clc
@@ -197,6 +206,28 @@ iec_in_begin:
 iec_in_byte = bus_acptr
 
 iec_in_end  = bus_untlk
+
+.if JIFDOS
+; (a JiffyDOS routine that fits here, in front of the timed code; the rest is at the end)
+; jif_safe: return when the next 100 cycles are free of bad lines: not on the
+; two raster lines before one, nor on one. Uses A only. (Bad lines come where
+; the low three bits of the raster equal the vertical scroll; outside the
+; display there are none, and this then waits for nothing, 3 lines in 8.)
+jif_safe:
+        sec
+        lda $d011
+        sbc $d012
+        and #7
+        cmp #3
+        bcc jif_safe
+jif_rts:
+        rts
+
+.endif
+io_drv: lda ie_dev
+        and #3
+        tax
+        rts
 
         .res IO_AT - (* - iec_seg)      ; a few bytes: io_set at IO_AT
 .assert * - iec_seg = IO_AT, error, "iec.s: the channel level outgrew IO_AT"
@@ -287,7 +318,8 @@ io_tx:  sta io_b
         jsr io_set
         lda #8
         sta io_n
-@bit:   lsr io_b
+io_tx_bit:                  ; (jif_first enters here for one bit, and patches the count above)
+        lsr io_b
         lda io_out
         tb bcs, @one
         ora #A_DAT          ; a 0 is DATA low
@@ -305,7 +337,7 @@ io_tx:  sta io_b
         ora #A_CLK
         jsr io_set
         dec io_n
-        tb bne, @bit
+        tb bne, io_tx_bit
         lda io_out
         and #<~A_DAT        ; let the listener acknowledge the frame
         jsr io_set
@@ -366,7 +398,11 @@ bus_talk:
 bus_first:
         php
         sei
+.if JIFDOS
+        jsr jif_first       ; (same size as the plain call: the timed code does not move)
+.else
         jsr io_first
+.endif
         plp
         rts
 
@@ -400,7 +436,7 @@ bus_ciout:
         ldx #0
         stx io_eoi
         stx io_inf
-        jsr io_tx
+        jsr IO_TXD
         bcc @hold
         lda ST
         ora #$01
@@ -423,12 +459,12 @@ bus_unlsn:
         lda ST
         and #$83
         bne @u
-        lda #1
+        lda #$10            ; (any value but 0; jif_tx wants this one)
         sta io_eoi
         lda #0
         sta io_inf
         lda io_held
-        jsr io_tx
+        jsr IO_TXD
         bcc @u
         lda ST
         ora #$01
@@ -482,9 +518,13 @@ bus_acptr:
         dec io_n
         tb bne, @rdy
         sei
-        jmp @tmo
+        jmp acp_tmo
 @go:    sei
+.if JIFDOS
+        jsr acp_go          ; lda io_out, or leaves for jif_rx (same size)
+.else
         lda io_out
+.endif
         and #<~A_DAT        ; ready for data
         jsr io_set
         ldy #90             ; the talker answers within 200 us unless this is EOI; wait ~1 ms to be sure
@@ -511,7 +551,7 @@ bus_acptr:
         tb bne, @b
         dex
         tb bne, @b
-        beq @tmo
+        beq acp_tmo
 @st:    lda #8
         sta io_n
 @bit:   ldy #0
@@ -519,7 +559,7 @@ bus_acptr:
         tb bvs, @v
         dey
         tb bne, @c
-        beq @tmo
+        beq acp_tmo
 @v:     tb bpl, @zero       ; DATA low is a 0
         sec
         tb bcs, @in
@@ -530,19 +570,19 @@ bus_acptr:
         tb bvc, @nx
         dey
         tb bne, @d
-        beq @tmo
+        beq acp_tmo
 @nx:    dec io_n
         tb bne, @bit
         lda io_out
         ora #A_DAT          ; byte accepted
         jsr io_set
         lda io_b
-        jmp @out
-@tmo:   lda ST
+        jmp acp_out
+acp_tmo:   lda ST
         ora #$02
         sta ST
         lda #0
-@out:   sta io_b
+acp_out:   sta io_b
         pla
         tay
         pla
@@ -629,9 +669,8 @@ iec_out_end:
 iec_ch_close:
         stx ie_sa
         sta ie_dev
-        lda #0
-        sta ST
-        lda ie_dev
+        ldx #0
+        stx ST
         jsr bus_listen
         lda ie_sa
         ora #$e0
@@ -673,9 +712,174 @@ io_flush:
 @r:     rts
 @nd:    jmp io_nodev
 
-io_drv: lda ie_dev
-        and #3
+
+.if JIFDOS
+; ---------------------------------------------------------------------
+; JiffyDOS byte protocol (host side)
+;
+; Clean room: written from Michael Steil's public description of the protocol,
+; "Commodore Peripheral Bus, Part 7: JiffyDOS" (github.com/mist64/cbmbus_doc),
+; its state machines and its cycle tables, and checked against the behaviour of a
+; JiffyDOS drive on the bus. No JiffyDOS ROM code and no other implementation was
+; read or copied (docs/design/fast-io.md).
+;
+; A device says it speaks the protocol during TALK or LISTEN (jif_first). Then
+; each data byte goes two bits at a time on CLK and DATA, by the clock, in a
+; window of 63 to 80 cycles that we start: no interrupt (sei), no bad line
+; (jif_safe) and no sprite may fall into it. The kernel shows no sprites; if one is
+; on when a session starts, jif_first stays on the standard protocol for it (a
+; sprite turned on mid-session still spoils it, as does the turbo's use). An NMI (RESTORE) in the window spoils the byte.
+; Everything here comes after the timed standard code and enters it only by
+; calls of the same size as before, so that code has not moved.
+
+.macro sax_port             ; SAX $DD00 (stable undocumented opcode $8F): store A AND X
+        .byte $8f, <PORT, >PORT
+.endmacro
+
+; jif_first: A = TALK or LISTEN byte. As io_first, but the device is given the
+; chance to answer the JiffyDOS probe: seven bits, then CLK stays low and DATA is
+; released. A JiffyDOS device that is addressed pulls DATA after about 220 us;
+; io_tx's wait for the frame acknowledge (2.2 ms) sees that, or runs out. Then
+; the eighth bit and the real acknowledge. io_jif is good for this session only.
+jif_first:
+        ldx $d015           ; a sprite on would steal cycles from the timed windows:
+        beq @go             ; stay on the standard protocol for this session
+        sec
+        ror io_jif          ; bit 7 set: standard
+        jmp io_first
+@go:    pha
+        jsr io_atn_begin
+        pla
+        bcs @f
+        ldx #0
+        stx io_eoi
+        inx
+        stx io_inf
+        dec io_tx_n         ; seven bits
+        jsr io_tx
+        inc io_tx_n
+        ror io_jif          ; carry clear: DATA was pulled
+        lda #1
+        sta io_n
+        jsr io_tx_bit       ; the last bit (a 0) and the acknowledge
+        bcs @f
+        rts
+@f:     jmp io_fail
+
+; acp_go: bus_acptr has seen the talker release CLK. Standard: A = io_out.
+; JiffyDOS: receive the byte here instead and leave through bus_acptr's exit.
+acp_go: bit io_jif
+        bpl jif_rx
+        lda io_out
+        rts
+jif_rx: pla
+        pla
+        lda io_base
+        tax                 ; X: every line released (go)
+        lsr
+        lsr
+        eor io_base
+        sta io_b            ; what bits 0-2 of the port leave in the byte below
+        txa
+        ora #A_DAT
+        tay                 ; Y: DATA held (busy)
+        jsr jif_safe
+jif_rx_go:                  ; (tools/test_jiffy_timing.py counts the cycles from here)
+        stx PORT            ; go.                         cycle  0
+        jsr jif_rts         ; 12
+        lda PORT            ; CLK, DATA = bits 0, 1             16
+        lsr
+        lsr
+        nop
+        eor PORT            ; bits 2, 3                         26
+        lsr
+        lsr
+        bit ST
+        eor PORT            ; bits 4, 5                         37
+        lsr
+        lsr
+        bit ST
+        eor PORT            ; bits 6, 7                         48
+        eor io_b
+        bit ST
+        bit PORT            ; status                            59
+        sty PORT            ; busy                              63
+        bvc @ok             ; CLK low: no EOI
+        bmi @err            ; both released: error
         tax
+        lda ST
+        ora #$40
+        sta ST
+        txa
+@ok:    jmp acp_out
+@err:   jmp acp_tmo
+
+; io_txd: io_tx for a data byte, by the session's protocol
+io_txd: bit io_jif
+        bpl jif_tx
+        jmp io_tx
+; jif_tx: A = byte, io_eoi. Carry set if the device did not take it.
+jif_tx: sta io_b
+        ldx #0
+        ldy #0
+@w:     bit PORT            ; the device releases DATA when it is ready (a few
+        bmi @rdy            ; seconds at most: it may be writing a block)
+        jsr jif_safe
+        dex
+        bne @w
+        dey
+        bne @w
+        sec
+        rts
+@rdy:   lda io_eoi          ; the last write: CLK low again ($1F), or released
+        eor #$1f            ; for EOI ($0F: io_eoi is $10)
+        pha
+        lda io_b
+        and #$0f
+        tax
+        lda jif_tab,x
+        pha
+        lda io_base
+        tay                 ; Y: every line released (go)
+        ora #$f0
+        tax                 ; X: the mask that keeps port bits 0-3 (SAX)
+        jsr jif_safe
+        lda io_b
+        ora #$0f
+jif_tx_go:
+        sty PORT            ; go.                         cycle  0
+        pha
+        pla
+        sax_port            ; CLK, DATA = bits 4, 5             11
+        lsr
+        lsr
+        ora #$0f
+        bit ST
+        sax_port            ; bits 6, 7                         24
+        pla
+        bit ST
+        sax_port            ; bits 3, 1                         35
+        lsr
+        lsr
+        ora #$0f
+        bit ST
+        sax_port            ; bits 2, 0                         48
+        pla
+        nop
+        bit ST
+        sax_port            ; EOI or not                        61
+        jsr jif_rts
+        bit ST
+        lda PORT            ; the device holds DATA: taken      80
+        asl
+        lda #$1f
+        sax_port            ; CLK low: busy
         rts
 
-
+; jif_tab: for a low nibble, bit 3 at CLK and bit 1 at DATA (out bits 4, 5), and
+; bits 2 and 0 two places above them; a 1 pulls the line. Bits 0-3 pass the mask.
+jif_tab:
+.repeat 16, n
+        .byte $0f | ((n & 8) << 1) | ((n & 2) << 4) | ((n & 4) << 4) | ((n & 1) << 7)
+.endrepeat
+.endif

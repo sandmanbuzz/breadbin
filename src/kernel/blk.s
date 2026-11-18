@@ -40,7 +40,8 @@ SB_BLOCK    = 376
 CH_LEN      = 24        ; cache header: magic(4) build id(4) disk label(16)
 BAM_BLOCK   = 357       ; track 18 sector 0: the CBM disk label is at offset $90
 BAM_LABEL   = $90
-SB_BUILD_ID = 15        ; superblock offset of the 4-byte build id (tools/mkimage.py)
+SB_BUILD_ID = 252       ; superblock offset of the 4-byte build id (tools/mkimage.py): clear of
+                        ; upstream's fields (0-18; 15-18 is its last_time)
 
 .segment "ZEROPAGE"
 bp:      .res 2         ; pointer to the buffer returned by bread
@@ -202,7 +203,7 @@ reu_rd: lda reu_banks
 @set:   sta rd_banks
         rts
 
-; reu_sb: A = 1 the REU holds a root image (c64fs superblock at block SB_BLOCK, version 1,
+; reu_sb: A = 1 the REU holds a root image (c64fs superblock at block SB_BLOCK, version 2,
 ; nblocks within the REU), 2 it has the magic but does not fit, 0 none.
 reu_sb: lda reu_banks
         cmp #3                  ; the superblock is in bank 1; the disk reaches into bank 2
@@ -223,7 +224,7 @@ reu_sb: lda reu_banks
         dey
         bpl @m
         lda bufs+5              ; version: another one is not ours to mount
-        cmp #1
+        cmp #C64FS_VERSION
         bne @no
         lda bufs+7              ; nblocks (16 bit) <= reu_banks * 256
         cmp reu_banks
@@ -295,6 +296,7 @@ iec_close:
         ldx tmp2
         lda dev_drive,x
         ldx #15
+iclose_io := *
         jmp iec_ch_close
 
 ; cur_dev_set: A = dev -> the drive number the IEC routines below talk to
@@ -360,6 +362,7 @@ bread:
         ldx ejected         ; the boot disk is out: never ask the bus for its blocks
         bne @ej
 @bus:   jsr cur_dev_set
+@io:                   ; (fast.km points this call, bwrite_io and iclose_io at itself)
         jsr iec_read
         bcs @e
         jsr cache_put
@@ -380,6 +383,8 @@ bread:
         jsr buf_idx_ptr
         clc
         rts
+
+bread_io := @io
 
 ; bget_buf: like bread, but the block's old contents are not needed:
 ; returns a zeroed buffer assigned to that block (not written yet).
@@ -429,6 +434,7 @@ bwrite:
         beq @reu
         sta cur_drv
         jsr cache_inval     ; not valid while the disk is being changed (a reset in between)
+@io:
         jsr iec_write
         bcs @we
         jsr cache_wr        ; write-through: the REU copy follows the disk
@@ -445,6 +451,7 @@ bwrite:
         sta b_valid,x
         lda #EIO
 @ok:    rts
+bwrite_io := @io
 bdirty = bwrite
 
 bflush_all:
@@ -675,6 +682,7 @@ iec_read:
         jmp @try
 
 iec_read1:
+ts_rd_io:                   ; a geometry module repoints this call (src/mod/d81.s)
         jsr blk_to_ts
         lda #'1'
         jsr cmd_us
@@ -733,6 +741,7 @@ iec_write:
 @r:     rts
 
 iec_write1:
+ts_wr_io:                   ; and this one
         jsr blk_to_ts
         ldx #6
 @c:     lda s_bp,x
@@ -1153,7 +1162,7 @@ cache_attach:
         sta cache_on
         jmp cache_wr            ; the superblock (bp) goes in
 
-.segment "CODE"
+.segment "CODEHI"            ; cold: cache epoch and the cache syscall
 ; cache_epoch: the first write to the boot drive in a boot. Gives the disk a new build id
 ; (and the cache header the same), so a copy of the disk that was not written by this
 ; boot, such as the pristine image mounted again, no longer matches the cache.
@@ -1385,6 +1394,7 @@ iec_read_i:
         jmp @try
 
 iec_read1_i:
+ts_rd_io:                   ; a geometry module repoints this call (src/mod/d81.s)
         jsr blk_to_ts
         lda #'1'
         jsr cmd_us
