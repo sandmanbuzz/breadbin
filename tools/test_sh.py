@@ -43,6 +43,26 @@ class Commands(unittest.TestCase):
         r = sh(b"\n\n")
         self.assertEqual(r.spawns, [])
 
+    def test_full_line_comment_is_ignored(self):
+        r = sh(b"  # just a comment\necho after\n")
+        self.assertEqual(argvs(r), [["echo", "after"]])
+
+    def test_trailing_comment_discards_the_rest_of_the_line(self):
+        r = sh(b"echo before # ignored; echo after\n")
+        self.assertEqual(argvs(r), [["echo", "before"]])
+
+    def test_comment_after_command_separator_is_ignored(self):
+        r = sh(b"echo before; # ignored\n")
+        self.assertEqual(argvs(r), [["echo", "before"]])
+
+    def test_hash_inside_unquoted_word_is_literal(self):
+        r = sh(b"echo foo#bar\n")
+        self.assertEqual(argvs(r), [["echo", "foo#bar"]])
+
+    def test_hash_inside_quoted_words_is_literal(self):
+        r = sh(b'echo "two # words" \'three # words\'\n')
+        self.assertEqual(argvs(r), [["echo", "two # words", "three # words"]])
+
     def test_semicolon_runs_two_commands(self):
         r = sh(b"echo a ; echo b\n")
         self.assertEqual(argvs(r), [["echo", "a"], ["echo", "b"]])
