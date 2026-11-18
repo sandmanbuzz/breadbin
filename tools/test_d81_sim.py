@@ -465,6 +465,18 @@ class Mounted(unittest.TestCase):
         self.assertIsNotNone(s.errno(s.mount(9)))                   # and the volume is a stranger again
         self.assertEqual(s.drives[9].writes, [])
 
+    def test_cbm_module_is_never_unloaded(self):
+        """cbm.km's fini refuses (EBUSY) mounted or not: once a CBM disk loaded it, it stays."""
+        img = mkimage.Image()
+        img.write_cbm(b"BREADBIN", b"\x01\x08" + bytes(16))
+        s = BusSim({10: Drive("1541", bytes(img.data))})
+        s.check(s.mount(10), "mount a CBM disk")                  # cbm_ensure loads cbm.km
+        slot = [i for i in range(4) if s.mem.b[s.lbl["mod_base"] + i]][0]
+        self.assertEqual(s.errno(s.sys("CACHE", a=5, x=slot)), "EBUSY")     # mounted
+        s.check(s.umount(), "umount")
+        self.assertEqual(s.errno(s.sys("CACHE", a=5, x=slot)), "EBUSY")     # and after the umount
+        self.assertTrue(s.mem.b[s.lbl["mod_base"] + slot])                    # still resident
+
     def test_swapped_drive_is_asked_again(self):
         """The same device, first a 1581 volume, then a 1541 one: the answer is not remembered."""
         with open(os.path.join(BUILD, "breadbin.d64"), "rb") as f:

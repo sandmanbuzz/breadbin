@@ -562,7 +562,7 @@ mr:     stx cmdbuf+3
 rname:  .byte "#1"
 
 ; ---------------------------------------------------------------------
-; The drive code. Assembled for $0400 in the drive; it is data here.
+; The drive code. Assembled for DRV ($0300) in the drive; it is data here.
 ;
 ; The cycle counts in the two timed routines are from the read of PB that sees the host's
 ; "go" (the last cycle of the cmp). That read comes 0 to 7 cycles after the line moved,
