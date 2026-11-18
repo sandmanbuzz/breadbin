@@ -17,3 +17,11 @@ To run on the Ultimate: load `illegal.prg` (for instance with `tools/ultimate.py
 `runners:run_prg`, or by DMA and `RUN`), then read the screen or `$C000`. Wanted: the
 result on the C64 Ultimate, per core / firmware, and on any real 6510 you have. A FAIL
 names the opcode family: it decides whether the kernel may use that opcode.
+
+## Sweep (all modes)
+
+`gen_sweep.py` writes `sweep.s` (646 cases: every stable illegal opcode in every addressing
+mode, several inputs each, against a software model); build with `sweep.cfg`, run under VICE
+with `run_sweep_vice.py` (in the CI container, under `xvfb-run`). Result: `$C000` failures,
+`$C001`=`$5A` when finished, `$C002/3` cases run, `$C010..` failing ids. PASS on VICE and
+on the Ultimate, 2026-11-18. `ca65 sweep.s && ld65 -C sweep.cfg -o sweep.prg sweep.o`.

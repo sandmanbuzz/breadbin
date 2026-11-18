@@ -71,11 +71,14 @@ first time `mkdir`, `mv`, `rm` or a pipe is used in a session.
 
 ## What I would not do
 
-- Undocumented opcodes: `experiments/illegal-ops` passes under VICE only; the Ultimate result
-  is the gate. `LAX`/`DCP`/`ISC` would save a few dozen bytes at most.
+- Banning undocumented opcodes: they are allowed. `experiments/illegal-ops` passes on the
+  Ultimate (21 checks, 2026-10-31), and `sweep.s` (every stable op, every addressing mode,
+  646 cases against a model) passes on VICE and on the Ultimate (2026-11-18). The saving is
+  still small per site (`LAX`/`DCP`/`ISC`/`SAX`: a few bytes each), but it is free.
 - Zero page (owner's rule: [`docs/roadmap.md`](../roadmap.md), "Zero page policy").
-- Reading the KERNAL ROM tables at boot to avoid shipping `keytab`: it moves 256 bytes from
-  the low region to BSS, saves nothing, and the ROM may be JiffyDOS or custom.
+- (Struck: "reading ROM tables at boot saves nothing". Once `p_save` leaves the high region
+  the high region has room, so a table copied into BSS at INIT frees low-region bytes, a page
+  per 256. It needs a checksum guard for JiffyDOS and custom ROMs.)
 
 ## Reading of the result
 
@@ -91,6 +94,29 @@ Speculative, not measured: a small byte-coded interpreter for the repetitive val
 sequences in `fs`/`file`/`cbm` (the same four-step check opens most syscalls) could beat shared
 tails by another 5-10% of those three modules. It trades speed and debuggability; try it on one
 syscall family before believing it.
+
+## Small wins count
+
+Features have landed for less than 100-200 bytes; a hundred here and fifty there is how two
+pages come free. Judge each rewrite by bytes per hour of review, not by whether it moves the
+total on its own. P1 (-39 B) is the unit of account.
+
+## Transient ROM paging (not measured, constraints only)
+
+Idea: bytes that cost no permanent address space. With IRQ masked and NMI safe, bank in a ROM,
+copy or run a short sequence, bank it out.
+
+- KERNAL ROM (needs HIRAM) hides `$E000-$FFFF`: the high region, BSS, CODEHI and the vectors.
+  BASIC ROM (LORAM+HIRAM) hides `$A000-$BFFF`: the kernel low region. So the code doing the
+  paging must live outside what the ROM hides (the `$CF00` page or the user pool), and NMI
+  needs a stub reachable while the vectors are hidden (the ROM's own path goes through `$0318`).
+- Cleanest use: read ROM data **at INIT** (keytab, the charset for `con`) into BSS and
+  release the code; no run-time paging.
+- Run-time use (executing ROM snippets) costs a trampoline plus a call-site cost that eats
+  short-sequence wins; ROM revisions and JiffyDOS differ, so each use needs a checksum guard
+  and a fallback copy, which cancels the gain unless the Classic tier keeps a fallback.
+- The Ultimate/REU variant is a different design (overlay store) and breaks "core never
+  requires an REU or an Ultimate".
 
 ## If it goes ahead
 
