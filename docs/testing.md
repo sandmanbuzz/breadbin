@@ -4,13 +4,13 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 
 | Level | Command | Time (on the runner, in the container) |
 |---|---|---|
-| Fast gate (host tests) | `tools/ci/run.sh all test-host`, or `make test-host` with cc65 and py65 on the host | about 45 s after `make` (`make test-host` alone skips the tests that need build/): 484 tests, none skipped (image tools, key tables, the Ultimate client against a fake server, the py65 simulators of the real kernel, `as` on the host (`tools/asim.py`), the host compiler `tools/cc.py`, and the shard-list check) |
-| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard (105 tests now) |
+| Fast gate (host tests) | `tools/ci/run.sh all test-host`, or `make test-host` with cc65 and py65 on the host | about 45 s after `make` (`make test-host` alone skips the tests that need build/): none skipped (the run prints the count) (image tools, key tables, the Ultimate client against a fake server, the py65 simulators of the real kernel, `as` on the host (`tools/asim.py`), the host compiler `tools/cc.py`, and the shard-list check) |
+| Shard list | `bash tools/ci/sharded.sh --check` | seconds, host only: every VICE test is in exactly one shard |
 | Smoke | `tools/ci/run.sh test-smoke` | about 2 to 3 minutes: boot, echo, a three-stage pipe, Ctrl-C |
 | Targeted | `tools/ci/run.sh test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `tools/ci/run.sh test-console` | about 2.5 minutes (6 tests, 143 s in the last shard run): screen RAM, colour RAM and VIC registers read back |
 | Keyboard | `tools/ci/run.sh test-keyboard` | about 4 minutes (7 tests, 232 s): real keystrokes through VICE's keyboard matrix |
-| Full suite, sharded | `tools/ci/sharded.sh` | six containers at once under one `with-lock -x`, about 10 to 13 minutes: 74 tests took 605 s on `27fa473` and 628 s on `bb09283` (stock ROMs); the 80-test layout on `3fd8112` took 778 s (80 of 80, shards 601 to 768 s: the shard list is unbalanced again and the runs now take longer per test than before, so a rebalance by cost is due). Fails on any non-zero shard, any skip, or a total that differs from the discovered count |
+| Full suite, sharded | `tools/ci/sharded.sh` | six containers at once under one `with-lock -x`, about 10 to 25 minutes depending on load (147 tests in 1344 s on `ac46aec`, stock ROMs, the last time it was quoted; the run prints the count and the shard times). Fails on any non-zero shard, any skip, or a total that differs from the discovered count. With `BREADBIN_CI_JIFFY` set the skips whose reason is "this drive speaks JiffyDOS" (the IEC fault tests that need the standard byte protocol, 14 of them) are by design and do not fail it |
 | Full suite, JiffyDOS ROMs | `BREADBIN_CI_JIFFY=<dir> tools/ci/sharded.sh` | the same run: 74 of 74 in 562 s on `2048e78`. `BREADBIN_VICE_PRINT_ARGS=1` prints the emulator command line, so `-kernal JiffyDOS-C64.bin -dos1541 JiffyDOS_1541-II.bin` can be seen |
 | Full suite, serial (the reference) | `BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test` | Measured when the suite was 63 VICE tests (now 105, not re-timed serially): 2,804 s on the runner, every slot taken (about 47 minutes). The older 55-test figure, 2,511 s on 4778b1a (the Mac), is not comparable |
 

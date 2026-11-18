@@ -62,7 +62,7 @@ CHUNK   = 32            ; drive code bytes per M-W
         jmp init
         jmp fini
         .word KAPI_HASH
-        .byte $30               ; class 0: generic; high nibble = name id for `mod ls` (3 fast)
+        .byte $30               ; class 0: generic; high nibble = name id for `mod ls` (the table is in src/bin/mod.s)
 
 .segment "BSS"
 state:  .res 4          ; per drive (number & 3): 0 not tried, 1-3 active (fails in a row + 1), $80 not usable

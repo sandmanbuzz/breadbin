@@ -36,7 +36,7 @@ SPT     = 40            ; sectors on every track of a 1581
         jmp init
         jmp fini
         .word KAPI_HASH
-        .byte $43               ; class 3: block driver; high nibble = name id for `mod ls` (4 d81)
+        .byte $43               ; class 3: block driver; high nibble = name id for `mod ls` (the table is in src/bin/mod.s)
 
 .segment "BSS"
 dtype:  .res NDEV       ; per device: 0 = the kernel's (1541) mapping, 1 = 40 sectors a track

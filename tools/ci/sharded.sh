@@ -48,7 +48,14 @@ verdict() {
         [ "$rc" = 0 ] || { note="rc=$rc"; fail=1; }
         case $rc in 124|137) note="$note timeout" ;; esac
         [ -n "$ran" ] || { note="$note no-Ran-line"; fail=1; cnt=0; secs=-; }
-        if grep -qE ' \.\.\. skipped|skipped=' "$log" 2>/dev/null; then note="$note SKIPS"; fail=1; fi
+        # Any skip is red, except under JiffyDOS drive ROMs (BREADBIN_CI_JIFFY): the IEC fault tests that
+        # need the standard byte protocol skip by design there, saying so in their reason.
+        if [ -n "${BREADBIN_CI_JIFFY:-}" ]; then
+            nskip=$(grep -E ' \.\.\. skipped' "$log" 2>/dev/null | grep -vc 'this drive speaks JiffyDOS' || true)
+        else
+            nskip=$(grep -cE ' \.\.\. skipped|skipped=' "$log" 2>/dev/null || true)
+        fi
+        if [ "${nskip:-0}" != 0 ]; then note="$note SKIPS"; fail=1; fi
         # H1 fail-closed: check per-shard expected count against actual
         local expected
         expected=$(awk -v shard="$n" '$1 == shard { print $2 }' "$out/expected_counts" 2>/dev/null)
