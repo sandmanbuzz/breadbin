@@ -6,8 +6,17 @@ single boot file (the kernel), and whose remaining blocks hold a c64fs
 filesystem. Every block is marked allocated in the CBM BAM so the drive's
 own DOS never writes over c64fs.
 
+`d81` builds a c64fs volume for a 1581 (80 tracks of 40 sectors, 3200 blocks): a disk
+to mount, not to boot from (the kernel needs /lib/km/d81 loaded for the geometry). Block
+n is track 1 + n // 40, sector n % 40, so the layout numbers are the 1541's (superblock
+376). c64fs v1 has a one-block bitmap, so the volume is the first 2048 blocks (512 KB of
+the disk's 800 KB); the 1581's own header, BAM and directory on track 40 are written
+valid, with every block allocated, and are reserved in the c64fs bitmap. Sources for the
+1581 layout: the Commodore 1581 User's Guide and the D81 notes in the VICE manual.
+
 Usage:
   mkimage.py build OUT.d64 --boot BOOT.prg --root DIR [--dev NAME:MAJOR ...] [--rev REV]
+  mkimage.py d81 OUT.d81 [--root DIR] [--name NAME]
   mkimage.py reu IMG.d64 OUT.reu
   mkimage.py ls IMG PATH
   mkimage.py cat IMG PATH
@@ -53,6 +62,18 @@ def block_to_ts(b):
 
 DIR_TRACK = 18
 
+# ---- d81 geometry -------------------------------------------------------
+
+D81_SPT = 40
+D81_BLOCKS = 80 * D81_SPT            # 3200
+D81_SIZE = D81_BLOCKS * 256
+D81_DIR_TRACK = 40
+D81_VOLUME = 2048                    # c64fs v1: one bitmap block
+
+
+def d81_block(t, s):
+    return (t - 1) * D81_SPT + s
+
 # ---- c64fs layout -------------------------------------------------------
 
 MAGIC = b"C64FS"
@@ -84,9 +105,10 @@ def stamp_build_id(img):
 
 
 class Image:
-    def __init__(self, data=None):
-        self.data = bytearray(data) if data is not None else bytearray(D64_SIZE)
-        assert len(self.data) == D64_SIZE
+    def __init__(self, data=None, size=D64_SIZE):
+        self.data = bytearray(data) if data is not None else bytearray(size)
+        if len(self.data) not in (D64_SIZE, D81_SIZE):
+            raise ValueError(f"not a .d64 or .d81 image: {len(self.data)} bytes")
 
     # raw blocks
     def block(self, b):
@@ -143,6 +165,32 @@ class Image:
         self.put_block(ts_to_block(18, 1), d)
         return used
 
+    def write_cbm_d81(self, disk_name=b"BREADBIN", disk_id=b"BB"):
+        """The 1581's own side of a c64fs volume: header, BAM and an empty directory on
+        track 40, every block allocated, so the drive's DOS lists an empty, full disk and
+        never writes. Returns the blocks c64fs must not use."""
+        assert len(self.data) == D81_SIZE
+        hdr = bytearray(256)
+        hdr[0], hdr[1], hdr[2] = D81_DIR_TRACK, 3, 0x44      # first directory block; 'D'
+        hdr[0x04:0x14] = disk_name.upper()[:16].ljust(16, b"\xa0")
+        hdr[0x14:0x16] = b"\xa0\xa0"
+        hdr[0x16:0x18] = disk_id[:2]
+        hdr[0x18] = 0xa0
+        hdr[0x19:0x1b] = b"3D"
+        hdr[0x1b:0x1d] = b"\xa0\xa0"
+        self.put_block(d81_block(D81_DIR_TRACK, 0), hdr)
+        for sec, link in ((1, (D81_DIR_TRACK, 2)), (2, (0, 0xff))):
+            bam = bytearray(256)                             # 6 bytes a track from $10, all 0: nothing free
+            bam[0], bam[1] = link
+            bam[2], bam[3] = 0x44, 0xbb
+            bam[4:6] = disk_id[:2]
+            bam[6] = 0xc0                                    # verify on, header CRC check on
+            self.put_block(d81_block(D81_DIR_TRACK, sec), bam)
+        d = bytearray(256)
+        d[1] = 0xff
+        self.put_block(d81_block(D81_DIR_TRACK, 3), d)
+        return set(range(d81_block(D81_DIR_TRACK, 0), d81_block(D81_DIR_TRACK + 1, 0)))
+
     def cbm_files(self):
         out = []
         t, s = 18, 1
@@ -194,13 +242,16 @@ class FS:
 
     def __init__(self, img):
         self.img = img
+        sb = img.block(SUPER_BLOCK)
+        self.nblocks = sb[6] | sb[7] << 8 if sb[0:5] == MAGIC else NBLOCKS
 
     # ---- format ----
-    def format(self, reserved):
+    def format(self, reserved, nblocks=NBLOCKS):
         sb = bytearray(256)
         sb[0:5] = MAGIC
         sb[5] = VERSION
-        sb[6], sb[7] = NBLOCKS & 0xff, NBLOCKS >> 8
+        self.nblocks = nblocks
+        sb[6], sb[7] = nblocks & 0xff, nblocks >> 8
         sb[8] = NINODES
         sb[9], sb[10] = BITMAP_BLOCK & 0xff, BITMAP_BLOCK >> 8
         sb[11], sb[12] = INODE_START & 0xff, INODE_START >> 8
@@ -212,7 +263,7 @@ class FS:
             self.img.put_block(INODE_START + i, bytearray(256))
         for b in set(reserved) | set(range(SUPER_BLOCK, INODE_START + INODE_BLOCKS)):
             self.set_used(b, True)
-        for b in range(NBLOCKS, 2048):   # bitmap bits past the end of the disk
+        for b in range(nblocks, 2048):   # bitmap bits past the end of the volume
             self.set_used(b, True)
         # inode 0 is never allocated
         ino0 = self.read_inode(0)
@@ -240,7 +291,7 @@ class FS:
         self.img.put_block(BITMAP_BLOCK, bm)
 
     def alloc_block(self):
-        for b in range(NBLOCKS):
+        for b in range(self.nblocks):
             if not self.is_used(b):
                 self.set_used(b, True)
                 self.img.put_block(b, bytearray(256))
@@ -412,6 +463,20 @@ def build(out, boot, root, devs, rev=None):
     return img
 
 
+def build_d81(out, root=None, name=b"BREADBIN"):
+    """A c64fs volume on a .d81: no boot file, no build id (the REU block cache is the
+    boot drive's). Block 0 is never a file block (0 is a hole in an inode)."""
+    img = Image(size=D81_SIZE)
+    reserved = img.write_cbm_d81(name)
+    fs = FS(img)
+    fs.format(reserved | {0}, D81_VOLUME)
+    if root:
+        fs.add_tree(root, ROOT_INO)
+    with open(out, "wb") as f:
+        f.write(img.data)
+    return img
+
+
 REU_SIZE = 256 * 1024     # the smallest REU image VICE takes (-reusize 256); 4 banks
 
 
@@ -436,6 +501,10 @@ def main(argv=None):
     b.add_argument("--root", required=True)
     b.add_argument("--dev", action="append", default=[])
     b.add_argument("--rev", default=None, help="source revision stamped on the disk (directory entry and /etc/build)")
+    d = sub.add_parser("d81", help="a c64fs volume for a 1581 (mount it; /lib/km/d81)")
+    d.add_argument("out")
+    d.add_argument("--root", default=None)
+    d.add_argument("--name", default="BREADBIN")
     r = sub.add_parser("reu")
     r.add_argument("img")
     r.add_argument("out")
@@ -449,6 +518,9 @@ def main(argv=None):
     if a.cmd == "build":
         img = build(a.out, a.boot, a.root, a.dev, a.rev)
         print(f"{a.out}: {FS(img).free_blocks()} blocks free")
+    elif a.cmd == "d81":
+        img = build_d81(a.out, a.root, a.name.encode("ascii"))
+        print(f"{a.out}: {FS(img).free_blocks()} blocks free of {D81_VOLUME} (c64fs v1; the disk has {D81_BLOCKS})")
     elif a.cmd == "reu":
         with open(a.out, "wb") as f:
             f.write(reu_image(load(a.img).data))

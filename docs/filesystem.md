@@ -139,7 +139,19 @@ python3 tools/mkimage.py ls  build/breadbin.d64 /home
 python3 tools/mkimage.py cat build/breadbin.d64 /home/readme
 ```
 
-`make` uses the same tool to build `build/breadbin.d64` from `rootfs/` and the compiled programs. For normal C64 disk images, use VICE's `c1541`, for example `c1541 -format "mydisk,md" d64 mydisk.d64`.
+`make` uses the same tool to build `build/breadbin.d64` from `rootfs/` and the compiled programs.
+
+### A 1581 volume (`.d81`)
+
+```sh
+python3 tools/mkimage.py d81 data.d81 --root myfolder      # then, on the C64:
+mod load /lib/km/d81
+mount 9 /mnt
+```
+
+A 1581 (80 tracks of 40 sectors) holds a c64fs volume to mount on drive 9, 10 or 11, not a disk to boot from. The kernel's block mapping is the 1541's; the module `/lib/km/d81` repoints the four calls that need to know (the track and sector of a block, for reading and for writing, and the drive open in `mount` and in `format`'s raw access) and asks each drive it opens for its geometry: a "U1" of track 1 sector 39 works on a 1581 and fails at once on a 1541. On a 1581, block n is track 1 + n / 40, sector n mod 40, which is its place in the `.d81` file. Load the module before mounting; `mod unload` refuses while a 1581 volume is mounted. The volume is 2048 blocks (512 KB of the disk's 800 KB): c64fs v1 has a one-block bitmap. Track 40 holds the 1581's own header, BAM (every block allocated) and an empty directory, so its DOS lists a full, empty disk and never writes; c64fs keeps out of it. `format` writes the 1541 layout: do not use it on a 1581. Normal 1581 DOS disks are not readable by `mount`.
+
+For normal C64 disk images, use VICE's `c1541`, for example `c1541 -format "mydisk,md" d64 mydisk.d64`.
 
 ## Limits
 

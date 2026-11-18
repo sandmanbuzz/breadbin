@@ -657,6 +657,7 @@ iec_read:
         jmp @try
 
 iec_read1:
+ts_rd_io:                   ; a geometry module repoints this call (src/mod/d81.s)
         jsr blk_to_ts
         lda #'1'
         jsr cmd_us
@@ -715,6 +716,7 @@ iec_write:
 @r:     rts
 
 iec_write1:
+ts_wr_io:                   ; and this one
         jsr blk_to_ts
         ldx #6
 @c:     lda s_bp,x
@@ -1298,6 +1300,7 @@ iec_read_i:
         jmp @try
 
 iec_read1_i:
+ts_rd_io:                   ; a geometry module repoints this call (src/mod/d81.s)
         jsr blk_to_ts
         lda #'1'
         jsr cmd_us
