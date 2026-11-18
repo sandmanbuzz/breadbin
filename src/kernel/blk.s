@@ -276,6 +276,7 @@ iec_close:
         ldx tmp2
         lda dev_drive,x
         ldx #15
+iclose_io := *
         jmp iec_ch_close
 
 ; cur_dev_set: A = dev -> the drive number the IEC routines below talk to
@@ -338,6 +339,7 @@ bread:
         bcc @chk
         lda rq_dev
         jsr cur_dev_set
+@io:                   ; (fast.km points this call, bwrite_io and iclose_io at itself)
         jsr iec_read
         bcs @e
         jsr cache_put
@@ -358,6 +360,8 @@ bread:
         jsr buf_idx_ptr
         clc
         rts
+
+bread_io := @io
 
 ; bget_buf: like bread, but the block's old contents are not needed:
 ; returns a zeroed buffer assigned to that block (not written yet).
@@ -405,6 +409,7 @@ bwrite:
         beq @reu
         sta cur_drv
         jsr cache_inval     ; not valid while the disk is being changed (a reset in between)
+@io:
         jsr iec_write
         bcs @we
         jsr cache_wr        ; write-through: the REU copy follows the disk
@@ -421,6 +426,7 @@ bwrite:
         sta b_valid,x
         lda #EIO
 @ok:    rts
+bwrite_io := @io
 bdirty = bwrite
 
 bflush_all:
@@ -651,6 +657,7 @@ iec_read:
         jmp @try
 
 iec_read1:
+ts_rd_io:                   ; a geometry module repoints this call (src/mod/d81.s)
         jsr blk_to_ts
         lda #'1'
         jsr cmd_us
@@ -709,6 +716,7 @@ iec_write:
 @r:     rts
 
 iec_write1:
+ts_wr_io:                   ; and this one
         jsr blk_to_ts
         ldx #6
 @c:     lda s_bp,x
@@ -1127,7 +1135,7 @@ cache_attach:
         sta cache_on
         jmp cache_wr            ; the superblock (bp) goes in
 
-.segment "CODE"
+.segment "CODEHI"            ; cold: cache epoch and the cache syscall
 ; cache_epoch: the first write to the boot drive in a boot. Gives the disk a new build id
 ; (and the cache header the same), so a copy of the disk that was not written by this
 ; boot, such as the pristine image mounted again, no longer matches the cache.
@@ -1292,6 +1300,7 @@ iec_read_i:
         jmp @try
 
 iec_read1_i:
+ts_rd_io:                   ; a geometry module repoints this call (src/mod/d81.s)
         jsr blk_to_ts
         lda #'1'
         jsr cmd_us
