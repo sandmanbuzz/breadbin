@@ -25,15 +25,16 @@ REU_LENLO  = $df07
 REU_LENHI  = $df08
 REU_CTRL   = $df0a
 
-; The REU block cache holds the boot drive's blocks (dev 0) in REU banks above the
-; /tmp RAM disk (banks 0-7): page 0 = header (magic, build id), pages 1-3 = one valid
-; byte per block, then block b at page 4+b. It is write-through, and keyed by the build
-; id in the c64fs superblock: a different id on the disk discards it. Needs 11 banks.
+; The REU block cache holds the boot drive's blocks (dev 0) in 3 REU banks above the
+; /tmp RAM disk (banks 0 to rd_banks-1): page 0 = header (magic, build id), pages 1-3 = one
+; valid byte per block, then block b at page 4+b. It is write-through, and keyed by the
+; build id in the c64fs superblock: a different id on the disk discards it. rd_banks is
+; min(8, reu_banks-3), so the cache sits at bank 8 on an REU of 11 banks or more (where it
+; always was) and at the top of a smaller one; with fewer than 4 banks there is no cache.
 .ifndef CACHE_DEFAULT
 CACHE_DEFAULT = 1       ; make CACHE=0: reads always use the bus; 1: the cache; 2: the cache, but
                         ; every boot starts cold (nothing a previous boot left is trusted)
 .endif
-CACHE_BANK  = 8
 CACHE_NBLK  = 683       ; a 35-track 1541
 SB_BLOCK    = 376
 CH_LEN      = 24        ; cache header: magic(4) build id(4) disk label(16)
@@ -60,6 +61,7 @@ rq_hi:   .res 1
 trk:     .res 1
 sct:     .res 1
 reu_banks: .res 1
+rd_banks: .res 1        ; banks of the /tmp RAM disk; the block cache starts right above them
 dev_present: .res NDEV+1  ; +1: DEV_UCI (uci.inc)
 dev_type: .res NDEV+1
 cur_drv: .res 1          ; drive number the IEC routines below talk to
@@ -84,6 +86,7 @@ io_nwretry: .res 2       ; iec_write retries taken (block writes are not in the 
 io_nwfail: .res 1        ; iec_write gave up (one byte: counts modulo 256)
 .endif
 reu_tmp: .res 1
+ejected: .res 1          ; the boot disk is out of its drive: dev 0 is served from the cache alone
 cache_ok: .res 1         ; attached to a valid REU cache
 cache_on: .res 1         ; reads consult it
 c_hit:   .res 2
@@ -96,8 +99,9 @@ cd_ctl:  .res 1
 ep_done: .res 1          ; this boot has given the disk a new build id (it is being written)
 ep_x:    .res 1
 
-.export bwrite, buf_idx_ptr, cache_attach, sys_cache
-.import mod_load, mod_unload, mod_list, p_uid, magic, con_puts_ax
+.export bwrite, buf_idx_ptr, cache_attach, sys_cache, ejv, ejected, rgate
+.import records, fd_get, f_type, f_dev, set_pp_r0, nameiparent, nm_dev, block_on
+.import mod_load, mod_unload, mod_list, p_uid, magic, con_puts_ax, cbm_none
 
 .segment "RODATA"
 ; first linear block of each track (tracks 1..36), 16-bit
@@ -153,6 +157,7 @@ blk_init:
         sta dev_drive+5         ; DEV_UCI is no drive, and 0 would read as the REU
         php                     ; carry: no drive answered
         jsr reu_detect
+        jsr reu_rd
         jsr reu_sb
         plp
         bcc @drv
@@ -182,6 +187,20 @@ blk_init:
         ldx #>s_keep
         jmp con_puts_ax
 @r:     rts
+
+; reu_rd: size the RAM disk: all the banks up to 8, but 3 are left for the block cache
+; when there are 4 or more (and the build has a cache).
+reu_rd: lda reu_banks
+.if CACHE_DEFAULT <> 0
+        cmp #4
+        bcc @set
+        sbc #3                  ; (carry set: banks - 3)
+.endif
+        cmp #8
+        bcc @set
+        lda #8
+@set:   sta rd_banks
+        rts
 
 ; reu_sb: A = 1 the REU holds a root image (c64fs superblock at block SB_BLOCK, version 1,
 ; nblocks within the REU), 2 it has the magic but does not fit, 0 none.
@@ -337,14 +356,17 @@ bread:
         jsr cache_get       ; carry clear: served from the REU
         bcc @chk
         lda rq_dev
-        jsr cur_dev_set
+        bne @bus
+        ldx ejected         ; the boot disk is out: never ask the bus for its blocks
+        bne @ej
+@bus:   jsr cur_dev_set
         jsr iec_read
         bcs @e
         jsr cache_put
         clc
         jmp @chk
 @e:     jsr cache_err
-        sec
+@ej:    sec
         jmp @chk
 @reu:   jsr reu_read
 @chk:   ldx b_idx
@@ -382,6 +404,8 @@ bwrite:
         stx b_idx
         lda b_dev,x
         bne @go
+        lda ejected             ; the boot disk is out: nothing may reach the drive as its block
+        bne @ej
         lda cache_ok
         beq @go
         lda ep_done
@@ -412,7 +436,7 @@ bwrite:
         jmp @r
 @we:    jsr cache_err
         jsr cache_inval
-        sec
+@ej:    sec
         jmp @r
 @reu:   jsr reu_write
 @r:     ldx b_idx
@@ -890,7 +914,7 @@ cache_chk:
 @no:    sec
         rts
 
-; the block's valid byte is in the REU at bank CACHE_BANK, offset $0100+block
+; the block's valid byte is in the REU at bank rd_banks, offset $0100+block
 cache_vaddr:
         lda #<reu_tmp
         sta cd_regs
@@ -902,7 +926,7 @@ cache_vaddr:
         clc
         adc #1
         sta cd_regs+3
-        lda #CACHE_BANK
+        lda rd_banks
         sta cd_regs+4
         lda #1
         sta cd_regs+5
@@ -936,7 +960,7 @@ cache_page:
         adc #4
         sta cd_regs+3
         lda rq_hi
-        adc #CACHE_BANK
+        adc rd_banks
         sta cd_regs+4
         lda #0
         sta cd_regs+5
@@ -1017,7 +1041,7 @@ cache_clear:
         sta cd_regs
         lda #>reu_tmp
         sta cd_regs+1
-        lda #CACHE_BANK
+        lda rd_banks
         sta cd_regs+4
         lda #4              ; header page + three map pages
         sta cd_regs+6
@@ -1037,7 +1061,7 @@ cache_hdr_put:
         lda #0
         sta cd_regs+2
         sta cd_regs+3
-        lda #CACHE_BANK
+        lda rd_banks
         sta cd_regs+4
         lda #CH_LEN
         sta cd_regs+5
@@ -1062,7 +1086,9 @@ cache_attach:
         lda dev_drive           ; the REU is the root device: nothing to cache
         beq ca_r
         lda reu_banks
-        cmp #CACHE_BANK+3
+        sec
+        sbc rd_banks
+        cmp #3                  ; the cache's 3 banks sit above the RAM disk
         bcc ca_r
         lda #0
         ldx #<BAM_BLOCK
@@ -1106,7 +1132,7 @@ cache_attach:
         sta cd_regs+2
         sta cd_regs+3
         sta cd_regs+6
-        lda #CACHE_BANK
+        lda rd_banks
         sta cd_regs+4
         lda #CH_LEN
         sta cd_regs+5
@@ -1198,7 +1224,7 @@ sys_cache:
         beq @mload              ; 4: load the module at r0 (root only)
         cmp #6
         beq @mlist              ; 6: list the modules into r0 (12 bytes)
-        bcs @inval
+        bcs @ej
         jsr su_check            ; 5: unload the module in slot X (root only)
         bcs @su
         txa
@@ -1209,8 +1235,16 @@ sys_cache:
 @su:    rts
 
 @mlist: jmp mod_list
+; 7, 8, 9 (root only): the eject module's (src/mod/eject.s); ejv is its entry, cbm_none until it is loaded
+@ej:    cmp #10
+        bcs @inval
+        jsr su_check
+        bcs @su
+        jmp ejv
 @cache: cmp #0
         beq @stat
+        ldx ejected             ; the cache is the root while the disk is out: no off, no flush
+        bne @busy
         ldx cache_ok
         beq @nodev
         cmp #3
@@ -1221,6 +1255,9 @@ sys_cache:
         clc
         rts
 @flush: jmp cache_clear_c
+@busy:  lda #EBUSY
+        sec
+        rts
 @stat:  ldx #0
         lda cache_ok
         beq @st
@@ -1246,6 +1283,62 @@ sys_cache:
 @nodev: lda #ENODEV
         sec
         rts
+; rgate: from `enter` while the boot disk is out. A call that would write it sleeps here until
+; the disk is back (cache op 8 wakes CH_ROOT), then the check is redone from the top: nothing is
+; held across the sleep but the call's own arguments (r0 and r1 are saved with the process; k_a
+; and k_x go on the stack). Gate kind in the call's record (jtab.s): 1 write(fd), 2 open(flags),
+; 3 a path call. The target is where the path's parent directory is (a mount point cannot be
+; unlinked, renamed or made again), so a write to /tmp or a data disk goes straight through.
+rgate:  lda records,x
+        beq @r
+        pha                     ; kind
+        txa
+        pha                     ; the call's slot, for enter
+        cli
+@t:     lda ejected
+        beq @d
+        tsx
+        lda $0102,x             ; kind
+        cmp #1
+        bne @o
+        lda k_a
+        jsr fd_get
+        bcs @d
+        lda f_type,x
+        cmp #FT_FILE
+        bne @d
+        lda f_dev,x
+        bne @d
+        beq @w
+@o:     cmp #2
+        bne @p
+        lda k_a
+        and #(O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)
+        beq @d
+@p:     jsr set_pp_r0
+        jsr nameiparent
+        bcs @d
+        lda nm_dev
+        bne @d
+@w:     lda k_a
+        pha
+        lda k_x
+        pha
+        lda #CH_ROOT
+        jsr block_on
+        pla
+        sta k_x
+        pla
+        sta k_a
+        jmp @t
+@d:     pla
+        tax
+        pla
+@r:     rts
+
+.segment "DATA"
+ejv:    jmp cbm_none
+.segment "CODE"
 cache_clear_c:
         jsr cache_clear
         clc

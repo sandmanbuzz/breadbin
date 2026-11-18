@@ -24,6 +24,10 @@ The roster is `fleet/roster.md` on `fleet-store` (the owner's roster, published 
 - **Physical 1541:** boots the tip image to login in 22 s (5 of 5 on 2026-11-02, after the nibbler copy of the image). The disk is not compared sector by sector: the whole-disk reader stalled four times at sector 0 (`docs/hardware-notes.md`, "four stalls").
 - **Write-back:** a block written by the drive through U2 does not reach the mounted image file, in the 45 s, 300 s and drive-reset variants on a RAM-disk image (Q6, closed under those conditions).
 
+## Branch `feat/root-eject` (single-drive swap, not landed)
+
+`eject` / `reattach` (docs/filesystem.md): the boot disk is served from the REU cache while drive 8 holds another disk. The cache base follows `/tmp` (`rd_banks`: top 3 banks, so 256 KB and 512 KB REUs have a cache). Resident cost: the writer gate (`rgate`, kind in each syscall record's third byte; a `jsr` in `enter` while `ejected`), a 3-byte `ejv` stub and the mount remap; the ops are `eject.km`. Writers to `/` sleep on `CH_ROOT` until `reattach`. Tests: `Eject`, `Cache`. Known: the shell's `&` loops "operation not permitted" on main (8f9faff) too, independent of this branch.
+
 ## Rules of the road
 
 - Local `main` in the primary clone is the shared truth. Origin is a mirror and out of scope for now; a push waits for the user's go (`docs/process.md`).

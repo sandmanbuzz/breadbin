@@ -65,3 +65,18 @@ namei
 nameiparent
 mod_busy
 cbm_up
+# eject.km (src/mod/eject.s)
+ejv
+ejected
+cache_on
+c_hdr
+cur_drv
+rq_lo
+rq_hi
+dev_present
+iec_open
+iec_close
+iec_read
+wakeup
+ep_done
+cache_epoch

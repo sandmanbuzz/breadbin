@@ -9,12 +9,21 @@ This explains how Breadbin stores files, how to use more than one disk, and how 
 | Use the boot disk | It is mounted at `/` automatically. |
 | Use a second disk | Put it in drive 9 (or 10, 11), then `mount 9 /mnt`. |
 | Stop using it | `umount /mnt`. Close files and `cd` off it first. |
+| Use a second disk with only one drive | `eject`, swap the disk in drive 8, `mount 8 /mnt`; to go back: `umount /mnt`, put the boot disk back, `reattach` (needs an REU, see below). |
 | Make a new Breadbin disk | `format 9 c64fs mydisk`, then `mount 9 /mnt`. |
 | Make a normal C64 disk | `format 9 cbm mydisk`, then `mount 9 /mnt`. |
 | See free space | `df` |
 | See what is mounted | `mount` |
 
 `format` erases the whole disk and asks first. It only works on drives 9, 10 and 11: drive 8 holds the running system.
+
+## One drive: `eject` and `reattach`
+
+With an REU the boot disk's blocks are kept in the REU block cache. `eject` reads every block the filesystem uses into that cache and then lets the disk go: `/` is served from the REU, so drive 8 is free for another disk (`mount 8 /mnt`, as for drive 9). While the disk is out, `/` is read-only in effect: a program that tries to write there (create, write, remove, rename, make a directory) **waits** instead of failing, and carries on when the disk is back; Ctrl-C ends it as usual. `/tmp` and other mounts are unaffected.
+
+`umount` the disk you mounted from drive 8, put the boot disk back, and run `reattach`. It refuses (no such device) unless the disk in the drive is the one that went out: same CBM label and build id as the cache's. It also refuses while a mount still uses drive 8.
+
+Needs an REU with room for the cache: 4 banks or more (256 KB gives a 64 KB `/tmp` and the cache; the cache takes the top 3 banks, `/tmp` the rest, at most 8). With a smaller REU, or none, there is no cache and `eject` says so: a single drive with no REU cannot give up its disk. `eject` loads `/lib/km/eject` (root only; it stays loaded).
 
 ## Two kinds of disk
 
