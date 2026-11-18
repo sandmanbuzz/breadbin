@@ -8,6 +8,7 @@ experiments/illegal-ops/*.o
 experiments/illegal-ops/*.lst
 experiments/illegal-ops/*.prg
 /build[0-9a-z]*/
+prefixwise*
 
 # build artifacts of the experiment scripts
 experiments/**/*.bin
