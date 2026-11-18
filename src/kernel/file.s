@@ -229,11 +229,7 @@ fd_install:
 ; open(r0 = path, A = flags) -> A = fd
 sys_open:
         sta of_flags
-        lda r0
-        sta pp
-        lda r0+1
-        sta pp+1
-        jsr namei
+        jsr namei_r0
         bcc @exists
         cmp #ENOENT
         bne @err
@@ -822,7 +818,13 @@ sys_pipe:
         rts
 
 ; ---------------------------------------------------------------------
-; path helpers
+; path helpers: namei and nameiparent on the path at r0 (the syscalls' first argument)
+nameiparent_r0:
+        jsr set_pp_r0
+        jmp nameiparent
+namei_r0:
+        jsr set_pp_r0
+        jmp namei
 set_pp_r0:
         lda r0
         sta pp
@@ -896,8 +898,7 @@ not_cbm:
 .segment "CODEHI"
 ; mkdir(r0 = path)
 sys_mkdir:
-        jsr set_pp_r0
-        jsr nameiparent
+        jsr nameiparent_r0
         bcs @r
         jsr not_cbm
         bcs @r
@@ -941,8 +942,7 @@ sys_mkdir:
 
 ; rmdir(r0 = path)
 sys_rmdir:
-        jsr set_pp_r0
-        jsr nameiparent
+        jsr nameiparent_r0
         bcs @r
         jsr not_cbm
         bcs @r
@@ -1005,8 +1005,7 @@ sys_rmdir:
 ; unlink and rename (cold, like mkdir and rmdir above)
 ; unlink(r0 = path)
 sys_unlink:
-        jsr set_pp_r0
-        jsr nameiparent
+        jsr nameiparent_r0
         bcs @r
         jsr is_uci
         bpl @c64l
@@ -1058,8 +1057,7 @@ drop_link:
 
 ; rename(r0 = old, r1 = new)
 sys_rename:
-        jsr set_pp_r0
-        jsr nameiparent
+        jsr nameiparent_r0
         bcs @r
         jsr is_dot
         bne @nd
@@ -1180,8 +1178,7 @@ sys_rename:
 ; ---------------------------------------------------------------------
 ; chdir(r0 = path)
 sys_chdir:
-        jsr set_pp_r0
-        jsr namei
+        jsr namei_r0
         bcs @r
         lda nm_dev
         ldx nm_ino
@@ -1200,49 +1197,7 @@ sys_chdir:
         sta p_cwddev,x
         lda nm_ino
         sta p_cwdino,x
-        ; copy pbuf into p_cwd[cur]
-        jsr cwd_ptr
-        ldy #0
-@c:     lda pbuf,y
-        sta (p1),y
-        beq @e
-        iny
-        bne @c
-@e:     clc
-        rts
-
-; cwd_ptr: p1 = &p_cwd[cur*48]
-cwd_ptr:
-        lda cur
-        asl a
-        asl a
-        asl a
-        asl a               ; *16
-        sta p1
-        lda #0
-        sta p1+1
-        lda p1
-        asl a
-        sta tmp0
-        lda #0
-        rol a
-        sta tmp1            ; *32
-        lda p1
-        clc
-        adc tmp0
-        sta p1
-        lda tmp1
-        adc #0
-        sta p1+1            ; *48
-        lda p1
-        clc
-        adc #<p_cwd
-        sta p1
-        lda p1+1
-        adc #>p_cwd
-        sta p1+1
-        rts
-.export cwd_ptr
+        jmp cwd_put         ; pbuf into cur's slot page; carry clear
 
 ; build_path: normalize (pp) relative to cwd into pbuf
 build_path:
@@ -1250,10 +1205,10 @@ build_path:
         lda (pp),y
         cmp #'/'
         beq @abs
-        jsr cwd_ptr
+        ldx cur
+        jsr cwd_get
         ldy #0
-@cc:    lda (p1),y
-        sta pbuf,y
+@cc:    lda pbuf,y
         beq @ce
         iny
         bne @cc
@@ -1340,11 +1295,12 @@ build_path:
 ; getcwd(r0 = buf, A = size)
 sys_getcwd:
         sta tmp2
-        jsr cwd_ptr
+        ldx cur
+        jsr cwd_get
         ldy #0
 @l:     cpy tmp2
         bcs @big
-        lda (p1),y
+        lda pbuf,y
         sta (r0),y
         beq @d
         iny
@@ -1357,8 +1313,7 @@ sys_getcwd:
 
 ; stat(r0 = path, r1 = buf[8]): type nlink size(3) ino dev major
 sys_stat:
-        jsr set_pp_r0
-        jsr namei
+        jsr namei_r0
         bcs @r
         lda nm_dev
         ldx nm_ino
@@ -1394,8 +1349,7 @@ sys_stat:
 ; fsinfo(r0 = path, r1 = buf[8]): free blocks(2) total blocks(2)
 ;                                  free inodes, total inodes, dev
 sys_fsinfo:
-        jsr set_pp_r0
-        jsr namei
+        jsr namei_r0
         bcs @r
         jsr is_uci
         beq @c64

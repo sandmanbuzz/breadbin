@@ -109,7 +109,10 @@ records:
         .word sys_cache-1
         .byte 0
 
-.segment "CODE"
+
+; sys_return shares the page with `enter` (it fills the rest of it). need_resched and
+; in_kernel only ever hold 0 or 1, so `lsr` tests and clears each in one instruction; the
+; carry it leaves is thrown away by the plp.
 sys_return:
         php
         sei
@@ -117,14 +120,11 @@ sys_return:
         txa
         pha
         jsr check_signal
-        lda need_resched
-        beq @out
-        lda #0
-        sta need_resched
+        lsr need_resched
+        bcc @out
         jsr sched
         jsr check_signal
-@out:   lda #0
-        sta in_kernel
+@out:   lsr in_kernel
         pla
         tax
         pla

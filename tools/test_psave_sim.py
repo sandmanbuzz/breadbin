@@ -1,19 +1,24 @@
-"""Guard for p_save, the per-process save areas that live in the RAM under the I/O registers
-(src/kernel/proc.s: p_save = $D040, 10 * SAVESZ bytes; sched and setup_proc switch $01 from $35 to
-$34 around the copies). Runs the real kernel image in py65 (tools/uci_sim.py) with a memory guard
-that fails on:
-  (a) any read or write in $D000-$DFFF outside p_save while $01 & 7 == 4 (RAM visible: the access
-      would hit RAM that is not ours instead of a VIC/SID/CIA register);
-  (b) any read or write of p_save while I/O is visible ($01 & 7 >= 5: the access would hit a chip);
+"""Guard for p_save, the per-process slot pages that live in the RAM under the I/O registers
+(src/kernel/proc.s: p_save = $D000, a page per slot: saved zero page and stack, cwd, name). The
+kernel switches $01 from $35 to $34 around every access: sched, setup_proc, and the windows in
+cwd_get, cwd_put, set_name and procinfo. Runs the real kernel image in py65 (tools/uci_sim.py,
+which banks the RAM under I/O by $01) with a memory guard that fails on:
+  (a) any read or write in $D000-$DFFF outside the slot pages while $01 & 7 == 4 (RAM visible:
+      the access would hit RAM that is not ours instead of a VIC/SID/CIA register);
+  (b) a read or write of the slot pages with I/O visible ($01 & 7 >= 5) from inside one of the
+      routines that own them (the access would hit a chip: colour RAM and the VIC registers share
+      these addresses, so the rule is by routine, not by address alone);
   (c) $01 anything but $35 on return, or the caller's interrupt flag not restored;
   (d) I clear while RAM is visible in $D000-$DFFF (an IRQ would run with I/O off).
 Paths driven, from the built kernel: `sched` (save the running process, restore the next one; a
 switch to a fresh process and a switch back to the same one, with I clear and I set in the caller)
-and `setup_proc` (through SPAWN of /bin/echo).
+`setup_proc` (through SPAWN of /bin/echo, which also runs set_name and copy_cwd), and CHDIR,
+GETCWD and PROCINFO.
 Mutation tests patch the loaded image (nop an `inc $01`, a `dec $01`, the `sei`) and require the
 guard to fire, so a guard that cannot fail is caught.
-Limits: the simulator maps $D000-$DFFF flat apart from $D012 and the UCI registers, so this proves
-the banking discipline (who touches what, with which $01 and I), not the hardware banking itself;
+Limits: the simulator banks only RAM against one flat I/O image (apart from $D012 and the UCI
+registers), so this proves the banking discipline (who touches what, with which $01 and I), not
+the hardware banking itself;
 interrupts are not raised: instead the guard requires I set whenever RAM is visible under $D000 and
 the flag restored on return. Skips without py65 or a built kernel (`make`).
 """
@@ -33,10 +38,12 @@ BUILD = os.path.join(ROOT, "build")
 BUILT = all(os.path.exists(os.path.join(BUILD, f)) for f in ("breadbin.prg", "kernel.lbl", "breadbin.d64"))
 SKIP = "py65 not installed" if uci_sim is None else ("kernel not built (make)" if not BUILT else None)
 
-MAXPROC, ZPSAVE, STKSAVE = 10, 0x3E, 128
-SAVESZ = ZPSAVE + STKSAVE
-P_SAVE = 0xD040
-P_SAVE_END = P_SAVE + MAXPROC * SAVESZ
+MAXPROC, ZPSAVE = 10, 0x3E
+P_SAVE = 0xD000
+P_SAVE_END = P_SAVE + MAXPROC * 256
+# the routines that touch the slot pages: every such access must be with RAM visible
+OWNERS = ("sched", "setup_proc", "init_ctx", "setup_stack", "cwd_get", "cwd_put", "set_name",
+          "sys_procinfo")
 SP_NONE = 0
 FLAG_I = 0x04
 
@@ -51,6 +58,10 @@ class GuardMem(Mem):
     pc = 0
     mpu = None
     in_psave_ram = 0                    # p_save accesses seen with RAM visible (the legal ones)
+    owned = ()                          # (start, end) pc ranges of OWNERS
+
+    def owner(self):
+        return any(a <= self.pc < b for a, b in self.owned)
 
     def _check(self, kind, a):
         if not self.guard or not 0xD000 <= a <= 0xDFFF:
@@ -66,7 +77,7 @@ class GuardMem(Mem):
                                      % (kind, a, self.b[1], self.pc))
             self.in_psave_ram += 1
         elif mode >= 5:                 # I/O visible
-            if in_save:
+            if in_save and self.owner():
                 raise GuardViolation("%s p_save $%04X with $01=$%02X: hits a chip, not RAM (pc ~$%04X)"
                                      % (kind, a, self.b[1], self.pc))
         else:
@@ -90,6 +101,8 @@ class PSaveGuard(unittest.TestCase):
         s.mem.__class__ = GuardMem
         s.mem.guard, s.mem.in_psave_ram, s.mem.mpu = False, 0, s.mpu
         self.m, self.L = s.mem.b, s.lbl
+        addrs = sorted({a for n, a in s.lbl.items() if "@" not in n})
+        s.mem.owned = tuple((s.lbl[n], next(a for a in addrs if a > s.lbl[n])) for n in OWNERS)
         self.assertEqual(self.m[1], 0x35, "the kernel boots with I/O visible")
 
     # ---- harness
@@ -190,6 +203,34 @@ class PSaveGuard(unittest.TestCase):
         self.run_to(L["sched"], self.s.TRAMP + 3, p=0)
         self.assertEqual(bytes(m[0x30:0x3E]), bytes(range(0x90, 0x9E)))
 
+    def sys(self, name, r0=0, a=0, x=0):
+        m = self.m
+        m[2], m[3] = r0 & 0xFF, r0 >> 8
+        self.run_to(self.s.sysno[name], self.s.TRAMP + 3, p=0, a=a, x=x)
+        self.assertEqual(m[1], 0x35)
+        return not self.s.mpu.p & 1
+
+    def test_cwd_and_name_live_in_the_slot_pages(self):
+        s, mem = self.s, self.s.mem
+        slot = self.spawn_echo()
+        self.assertEqual(bytes(mem.slot(slot, uci_sim.PNAME, 5)), b"echo\0", "set_name")
+        self.assertEqual(bytes(mem.slot(slot, uci_sim.PCWD, 2)), b"/\0", "copy_cwd from the parent")
+        mem.in_psave_ram = 0
+        self.assertTrue(self.sys("CHDIR", r0=s.cstr("/bin")))
+        self.assertGreaterEqual(mem.in_psave_ram, 48, "cwd_put went through the window")
+        self.assertEqual(bytes(mem.slot(0, uci_sim.PCWD, 5)), b"/bin\0")
+        self.assertEqual(bytes(mem.slot(slot, uci_sim.PCWD, 2)), b"/\0", "the child's cwd is its own")
+        buf = s.SCRATCH
+        self.m[buf:buf + 48] = bytes(48)
+        self.assertTrue(self.sys("GETCWD", r0=buf, a=48))
+        self.assertEqual(bytes(self.m[buf:buf + 5]), b"/bin\0")
+        self.assertFalse(self.sys("GETCWD", r0=buf, a=4), "a buffer too small for /bin")
+        self.assertTrue(self.sys("PROCINFO", r0=buf, a=slot))
+        self.assertEqual(bytes(self.m[buf + 5:buf + 10]), b"echo\0")
+        self.assertTrue(self.sys("CHDIR", r0=s.cstr("..")))
+        self.assertTrue(self.sys("GETCWD", r0=buf, a=48))
+        self.assertEqual(bytes(self.m[buf:buf + 2]), b"/\0", "build_path read the cwd back")
+
     # ---- the guard itself: a broken kernel must fail it
     def patch_window(self, fn, opcode, nth, replacement=(0xEA, 0xEA)):
         """Overwrite the nth `opcode $01` pair (dec $01 = C6 01, inc $01 = E6 01) in fn's body."""
@@ -258,6 +299,19 @@ class PSaveGuard(unittest.TestCase):
         msg = self.expect_guard_failure(lambda: self.run_to(self.L["sched"], self.L["proc_entry"], p=0))
         self.assertIn("interrupts enabled", msg)
 
+
+    def test_mutation_missing_dec_in_cwd_put_is_caught(self):
+        self.patch_window("cwd_put", 0xC6, 0)
+        msg = self.expect_guard_failure(lambda: self.sys("CHDIR", r0=self.s.cstr("/bin")))
+        self.assertIn("p_save", msg)
+
+    def test_mutation_set_name_without_sei_is_caught(self):
+        a = self.L["set_name"]
+        while self.m[a:a + 3] != bytes([0x78, 0xC6, 0x01]):     # sei; dec $01
+            a += 1
+        self.m[a] = 0xEA
+        msg = self.expect_guard_failure(self.spawn_echo)
+        self.assertIn("interrupts enabled", msg)
 
 if __name__ == "__main__":
     unittest.main()

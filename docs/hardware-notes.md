@@ -731,3 +731,17 @@ Setup: drive A as device 8 (the physical 1541 renumbered to 9, off the bus), dri
 
 - Buffers `$0300-$06FF` are all zero before use. The `#` channel (secondary 2, channel 0: `$022D` = `$40`, `$A7` = 3) gets **buffer 3, `$0600`**; `U1` fills that page. Opening it also makes the DOS read the BAM into buffer 4 (`$0700`). Buffers 0-2 (`$0300-$05FF`, 768 bytes) were unallocated.
 - So the free, reservable drive RAM is buffers 0-2 with `#0`..`#2`, less whatever the drive-side loader takes (`docs/design/fast-io.md`): 256-768 bytes, reached only by `M-W`/`M-R` (a transfer costs the same as a block, saving only the seek). Not worth building without a concrete candidate.
+
+### 2026-11-18, `size/research` at 85b5f17 and ef69485, `main` at 8688a63 (cloud session)
+
+Setup as read from `/v1/drives` after the fact: Drive A = device **9** (emulated 1541, JiffyDOS 1541-II ROM, the test image), Software IEC = 11, JiffyDOS KERNAL; the physical 1541 at 8; the physical 1581 was on the bus as device 10 for the first runs (per the owner).
+
+- First runs, steps 1 and 2: every boot failed before Breadbin ran. The machine's `LOAD"*",8,1` printed `SEARCHING FOR *`, `LOADING`, `?LOAD  ERROR`, with the end pointer still at `$0801`. This happened 3 of 3 times on 85b5f17 and 1 of 1 on `main` 8688a63.
+- **Cause: the harness, not the bus.** `BREADBIN_ULTIMATE_BUS` was not set, so `ultimatetest` loaded from device 8. That is the physical 1541 and its floppy, not drive A. These runs first blamed the 1581, wrongly.
+  - With the 1581 removed and the machine power-cycled, the same unset variable gave a different failure: a short load ending at `$440C`, the same each time (another file, from the 1541's floppy).
+  - The 1581 is therefore not shown to affect booting from drive A. It was never tested with the right bus.
+- `size/research` at ef69485, `BREADBIN_ULTIMATE_BUS=9`, 1581 off the bus:
+  - Step 1: boots; the end pointer is `$4471` as expected.
+  - Step 2: Boot `test_02_echo`, `test_13_ctrl_c_blocked_reader`, `test_07_directories`, `test_10_mv_cp` and `tests.test_console` all pass (11 tests, 319 s).
+  - Not run: steps 3 to 5 (step 3 needs the physical 1541 at 8 with the Breadbin image).
+- Lesson: read `/v1/drives` before a run, and set `BREADBIN_ULTIMATE_BUS` to drive A's `bus_id`.

@@ -18,9 +18,11 @@ FS_CBM  = 1
 FT_CBMW = 7         ; open-file type: write to a CBM DOS file
 ZPSAVE  = $3E       ; bytes $02-$3F saved per process
 STKSAVE = 128        ; max saved stack bytes per process (the owner sets this)
-SAVESZ  = ZPSAVE + STKSAVE   ; bytes per process in p_save
+SAVESZ  = ZPSAVE + STKSAVE   ; bytes of a slot page that hold the saved zero page and stack
 CWDLEN  = 48
 NAMELEN = 11
+PCWD    = 192       ; offset of the cwd in a slot page (proc.s: p_save)
+PNAME   = 240       ; offset of the name in a slot page
 SLICE   = 3         ; ticks per time slice
 
 ; process states
@@ -104,8 +106,9 @@ ST     = $90
 .global irq, sched, block_on, wakeup, proc_exit, sys_exit, sys_wait, sys_kill
 .global sys_getpid, sys_yield, sys_sleep, sys_procinfo, sys_time
 .global p_state, p_pid, p_ppid, p_flags, p_chan, p_sp, p_mpage, p_mlen
-.global p_sig, p_exit, p_name, p_fd, p_cwd, p_cwdino, p_cwddev, p_save
+.global p_sig, p_exit, p_fd, p_cwdino, p_cwddev, p_save
 .global next_pid, proc_init, slot_save_ptr, check_signal
+.global slot_ptr, cwd_get, cwd_put, io_on
 ; mem.s
 .global page_alloc, page_alloc_hi, page_free, mem_init, sys_meminfo, free_pages, total_pages
 ; blk.s
@@ -113,7 +116,7 @@ ST     = $90
 .global iec_open, iec_close, ts_block, iec_command, cur_dev_set, dev_drive, dev_type
 .global bget_buf, binval
 ; fs.s
-.global fs_mount, iget, iput, ci, ci_dev, ci_ino, bmap, namei, nameiparent
+.global fs_mount, iget, iput, ci, ci_dev, ci_ino, bmap, namei, nameiparent, namei_r0
 .global fs_name, dir_lookup, dir_add, dir_remove, ialloc, itrunc, balloc
 .global fs_read, fs_write, f_off, f_cnt, f_buf, dir_empty, fs_mkfs_reu
 .global mnt_active, mnt_ino, sb_nblocks, sb_ninodes, fs_count_free

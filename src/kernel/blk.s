@@ -101,9 +101,6 @@ ep_x:    .res 1
 .import mod_load, mod_unload, mod_list, p_uid, magic, con_puts_ax
 
 .segment "RODATA"
-; first linear block of each track (tracks 1..36), 16-bit
-trk_lo: .lobytes 0,21,42,63,84,105,126,147,168,189,210,231,252,273,294,315,336,357,376,395,414,433,452,471,490,508,526,544,562,580,598,615,632,649,666,683
-trk_hi: .hibytes 0,21,42,63,84,105,126,147,168,189,210,231,252,273,294,315,336,357,376,395,414,433,452,471,490,508,526,544,562,580,598,615,632,649,666,683
 s_hash: .byte "#"
 s_init: .byte "i0"
 cmagic: .byte "BBCH"
@@ -302,18 +299,38 @@ iec_status:
         jsr cur_dev_set
         jmp cmd_status
 
-; ts_block: A = track, X = sector -> X/Y = linear block number
+; 1541 geometry, computed instead of tabled (experiments/size-spike/p1.s; -35 bytes):
+; spt: Y = track - 1 -> A = sectors on that track. Keeps X and Y.
+spt:    lda #21
+        cpy #17
+        bcc @r
+        lda #19
+        cpy #24
+        bcc @r
+        lda #18
+        cpy #30
+        bcc @r
+        lda #17
+@r:     rts
+
+; ts_block: A = track, X = sector -> X/Y = linear block number. Uses tmp0.
 ts_block:
         stx tmp0
+        ldx #0              ; the high byte
         tay
-        dey
-        lda trk_lo,y
+        dey                 ; Y = track - 1: that many tracks come before it
+@l:     dey
+        bmi @d
+        jsr spt
         clc
         adc tmp0
-        tax
-        lda trk_hi,y
-        adc #0
+        sta tmp0
+        bcc @l
+        inx
+        bcs @l              ; (always)
+@d:     txa
         tay
+        ldx tmp0
         rts
 
 ; buf_idx_ptr: X = buffer index -> bp. Preserves X.
@@ -512,25 +529,34 @@ cache_victim:
         jmp buf_idx_ptr
 
 ; ---- IEC (1541) ----
-; rq_lo/hi -> trk/sec
+; blk_to_ts: rq_lo/hi -> trk/sct. Uses tmp0/tmp1 (a block read or write already does,
+; in cmd_status) and A/X/Y. Blocks past the 683 of a 1541 stay on track 35 with a sector
+; of 17 or more (block 700 is 35/34, 720 is 35/54), which no drive has: format's probe
+; (src/bin/format.s) relies on that to tell a 1541 from a 1581.
 blk_to_ts:
-        ldx #34
-@l:     lda rq_hi
-        cmp trk_hi,x
-        bcc @n
-        bne @f
         lda rq_lo
-        cmp trk_lo,x
-        bcs @f
-@n:     dex
-        bpl @l
-        ldx #0
-@f:     lda rq_lo
+        sta tmp0
+        lda rq_hi
+        sta tmp1
+        ldy #0              ; whole tracks taken so far
+@l:     cpy #34
+        bcs @d              ; track 35 takes the rest
+        jsr spt
+        eor #$ff            ; tmp0/1 - spt: ~spt + tmp0 + 1
         sec
-        sbc trk_lo,x
+        adc tmp0
+        tax
+        lda tmp1
+        sbc #0
+        bcc @d              ; less than a track left: this one
+        stx tmp0
+        sta tmp1
+        iny
+        bne @l              ; (always)
+@d:     iny
+        sty trk
+        lda tmp0
         sta sct
-        inx
-        stx trk
         rts
 
 ; append decimal A (0-99) to cmdbuf

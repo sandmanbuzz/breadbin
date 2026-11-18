@@ -28,74 +28,46 @@ mem_init:
         rts
 
 ; page_alloc: Y = number of pages -> A = first page (carry clear),
-; or carry set (A = ENOMEM). First fit.
+; or carry set (A = ENOMEM). First fit from the bottom of the pool.
+; page_alloc_hi: the same, first fit from the TOP of the pool (kernel modules live there,
+; out of the way of processes).
+; One scan serves both: the step instruction at pa_step is patched to inx or dex (not
+; reentrant; nothing allocates from an interrupt). Out of range is X >= NPOOL either way:
+; up, X reaches NPOOL; down, it wraps from 0 to $FF. Y = 0 never fits (ENOMEM).
+; On return X = first page index + count and Y = 0, as callers may expect.
 .segment "CODE"
 page_alloc:
+        ldx #$ff            ; the first step takes it to 0
+        lda #$e8            ; inx
+        bne pa_go           ; (always)
+page_alloc_hi:
+        ldx #NPOOL
+        lda #$ca            ; dex
+pa_go:  sta pa_step
         sty pa_n
-        cpy #0
-        beq @fail
-        ldx #0
-        stx pa_run
-@l:     cpx #NPOOL
+        lda #0
+        sta pa_run
+pa_step:
+        inx                 ; patched: inx or dex
+        cpx #NPOOL
         bcs @fail
         lda pg_used,x
         beq @free
         lda #0
         sta pa_run
-        inx
-        bne @l
-@free:  lda pa_run
-        bne @cont
-        stx pa_start
-@cont:  inc pa_run
-        inx
-        lda pa_run
-        cmp pa_n
-        bne @l
-        ; mark pa_start .. pa_start+n-1
-        ldx pa_start
-        ldy pa_n
-        lda #1
-@m:     sta pg_used,x
-        inx
-        dey
-        bne @m
-        lda free_pages
-        sec
-        sbc pa_n
-        sta free_pages
-        lda pa_start
-        clc
-        adc #POOL_FIRST
-        clc
-        rts
-@fail:  lda #ENOMEM
-        sec
-        rts
-
-; page_alloc_hi: like page_alloc, but first fit from the TOP of the pool (kernel modules
-; live there, out of the way of processes). Y = pages -> A = first page, carry clear.
-page_alloc_hi:
-        sty pa_n
-        cpy #0
-        beq @fail
-        ldx #NPOOL-1
-        lda #0
-        sta pa_run
-@l:     lda pg_used,x
-        beq @free
-        lda #0
-        sta pa_run
-        beq @next
+        beq pa_step         ; (always)
 @free:  inc pa_run
         lda pa_run
         cmp pa_n
-        beq @got
-@next:  cpx #0
-        beq @fail
-        dex
-        jmp @l
-@got:   stx pa_start        ; X is the lowest page of the run
+        bne pa_step
+        lda pa_step         ; carry is set (cmp equal); lda/and keep it
+        and #$20            ; inx is $E8, dex is $CA: bit 5 tells them apart
+        beq @low            ; dex: X is the lowest page of the run
+        txa                 ; inx: X is the highest; lowest = X - n + 1
+        sbc pa_n
+        tax
+        inx
+@low:   stx pa_start
         ldy pa_n
         lda #1
 @m:     sta pg_used,x

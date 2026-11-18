@@ -5,8 +5,8 @@
 .include "k.inc"
 
 .importzp fb, pp
-.import f_done, p_pslot, new_slot, proc_entry, name_off, con_file
-.import cwd_ptr, nm_dev, nm_ino, p_uid
+.import f_done, p_pslot, new_slot, proc_entry, con_file
+.import nm_dev, nm_ino, p_uid, pbuf
 .export mod_load, mod_unload, mod_list, mod_busy
 .import check_signal, con_release
 .import kapi_hash
@@ -134,11 +134,7 @@ spawn_common:
 ; (processes), 1 from the top (kernel modules). Loads and relocates the CX image: base,
 ; npages, img_sz, bss_sz. Carry set on error (A = errno), nothing left allocated.
 cx_load:
-        lda r0
-        sta pp
-        lda r0+1
-        sta pp+1
-        jsr namei
+        jsr namei_r0
         bcs @r
         ldx nm_dev
         lda dev_type,x      ; programs run from c64fs and UCI, not CBM disks
@@ -621,11 +617,8 @@ give_fd:
 @n:     iny
         rts
 
+; set_name: the basename of (pp), at most NAMELEN-1 characters, into sp_slot's page. Carry clear.
 set_name:
-        lda sp_slot
-        jsr name_off
-        sta tmp2
-        ; find last '/'
         ldy #0
         sty tmp0
 @f:     lda (pp),y
@@ -635,61 +628,50 @@ set_name:
         bne @f
         sty tmp0
         jmp @f
-@fe:    ldy tmp0
-        ldx tmp2
+@fe:    ldx sp_slot         ; p1 = name - tmp0, so (pp),y and (p1),y move together
+        lda #PNAME
+        jsr slot_ptr
+        lda p1
+        sec
+        sbc tmp0
+        sta p1
+        bcs @nb
+        dec p1+1
+@nb:    ldy tmp0
         lda #NAMELEN-1
         sta tmp1
+        php
+        sei
+        dec $01
 @c:     lda (pp),y
         beq @ce
-        sta p_name,x
-        inx
+        sta (p1),y
         iny
         dec tmp1
         bne @c
 @ce:    lda #0
-        sta p_name,x
-        rts
+        sta (p1),y
+        jmp io_on
 
+; copy_cwd: the new process's cwd is its parent's, or "/" for the first.
 copy_cwd:
-        lda cur
-        cmp #$ff
-        bne @par
-        ; root: "/"
-        lda sp_slot
-        sta cur
-        jsr cwd_ptr
-        lda #$ff
-        sta cur
-        ldy #0
-        lda #'/'
-        sta (p1),y
-        iny
+        ldx cur
+        cpx #$ff
+        beq @root
+        jsr cwd_get
+        bcc @put            ; always
+@root:  lda #'/'
+        sta pbuf
         lda #0
-        sta (p1),y
-        rts
-@par:   jsr cwd_ptr
-        lda p1
-        sta p2
-        lda p1+1
-        sta p2+1
-        lda cur
-        pha
-        lda sp_slot
-        sta cur
-        jsr cwd_ptr
-        pla
-        sta cur
-        ldy #CWDLEN-1
-@l:     lda (p2),y
-        sta (p1),y
-        dey
-        bpl @l
-        rts
+        sta pbuf+1
+@put:   ldx sp_slot
+        jmp cwd_put
 
 ; exec_commit: spawn_common's tail for SP_EXEC. Everything that can fail has happened: the
 ; new image is loaded, relocated, and its argv copied, while the caller's own image is still
 ; intact. From here nothing may fail (a fallible step added below would leave a half-replaced
-; process). The caller is `cur`; its zero page and stack are live, so p_save is not touched.
+; process). The caller is `cur`; its zero page and stack are live, so its saved image in p_save
+; is not touched (set_name writes only its name, at PNAME).
 .segment "CODEHI"            ; cold: exec_commit and the module syscalls
 exec_commit:
         jsr set_name            ; pp still points at the path, in the old image

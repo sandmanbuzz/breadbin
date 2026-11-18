@@ -311,16 +311,37 @@ class FakeUCI:
         return OK
 
 
+def _k_inc(name):
+    m = re.search(r"^%s\s*=\s*(\d+)" % name, open(os.path.join(ROOT, "src", "kernel", "k.inc")).read(), re.M)
+    return int(m.group(1))
+
+
+PCWD, PNAME = _k_inc("PCWD"), _k_inc("PNAME")      # offsets in a slot page (proc.s: p_save)
+
+
 class Mem:
-    """64 KB of RAM; $DF1B-$DF1F go to the UCI (or count as open bus if there is none)."""
+    """64 KB as the CPU sees it with I/O in: `b`, flat, where $D000-$DFFF stand for the chips.
+    The RAM under I/O is `under`, used while the 6510 port at $01 banks I/O out (the kernel's
+    slot pages, proc.s p_save). $DF1B-$DF1F go to the UCI (or count as open bus if there is none)."""
 
     def __init__(self, uci):
         self.b = bytearray(65536)
+        self.under = bytearray(4096)
         self.uci = uci
         self.touch = []                     # (r/w, address) of every access to $DF1B-$DF1F
         self.raster = 0                     # $D012 counts up on every read, so a wait for a line ends
 
+    def io_out(self):
+        p = self.b[1]
+        return not (p & 3 and p & 4)        # LORAM|HIRAM zero, or CHAREN zero: no I/O
+
+    def slot(self, n, off=0, size=1):
+        """Bytes of slot n's page under I/O."""
+        return self.under[n * 256 + off:n * 256 + off + size]
+
     def __getitem__(self, a):
+        if 0xD000 <= a <= 0xDFFF and self.io_out():
+            return self.under[a - 0xD000]
         if 0xDF1B <= a <= 0xDF1F:
             self.touch.append(("r", a))
             if self.uci:
@@ -332,6 +353,9 @@ class Mem:
         return self.b[a]
 
     def __setitem__(self, a, v):
+        if 0xD000 <= a <= 0xDFFF and self.io_out():
+            self.under[a - 0xD000] = v
+            return
         if 0xDF1B <= a <= 0xDF1F:
             self.touch.append(("w", a))
             if self.uci:
@@ -443,7 +467,7 @@ class Sim:
         con = m[L["con_file"]]
         for i in range(8):
             m[L["p_fd"] + i] = con if i < 3 else 0xFF
-        m[L["p_cwd"]:L["p_cwd"] + 2] = b"/\0"
+        self.mem.under[PCWD:PCWD + 2] = b"/\0"            # slot 0's page
         for p in range(0x80, 0x88):
             m[L["pg_used"] + p - 8] = 1
         self.mpu.p &= ~0x04                         # (no interrupt will come anyway)
@@ -459,6 +483,15 @@ class Sim:
         mpu.pc, mpu.sp, mpu.a, mpu.x, mpu.y = self.TRAMP, 0xFF, a, x, y
         self.run(self.TRAMP + 3, limit)
         return bool(mpu.p & 1), mpu.a, mpu.x
+
+    def call(self, label, a=0, x=0, y=0, limit=200_000):
+        """jsr to a kernel routine by label -> (carry, A, X, Y)."""
+        m, mpu = self.mem.b, self.mpu
+        addr = self.lbl[label]
+        m[self.TRAMP:self.TRAMP + 3] = bytes([0x20, addr & 0xFF, addr >> 8])
+        mpu.pc, mpu.sp, mpu.a, mpu.x, mpu.y = self.TRAMP, 0xFF, a, x, y
+        self.run(self.TRAMP + 3, limit)
+        return bool(mpu.p & 1), mpu.a, mpu.x, mpu.y
 
     def r1(self):
         return self.mem.b[4] | self.mem.b[5] << 8

@@ -125,11 +125,7 @@ sys_mount:
         sec
         rts
 @got:   stx mo_ent
-        lda r0
-        sta pp
-        lda r0+1
-        sta pp+1
-        jsr namei
+        jsr namei_r0
         bcs @r
         lda nm_dev
         sta mo_pdev
@@ -356,11 +352,7 @@ ent_path:
 
 ; umount(r0 = mounted directory)
 sys_umount:
-        lda r0
-        sta pp
-        lda r0+1
-        sta pp+1
-        jsr namei
+        jsr namei_r0
         bcs @r
         lda nm_ino
         cmp #ROOT_INO

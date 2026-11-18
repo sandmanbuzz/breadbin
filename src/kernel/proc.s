@@ -6,6 +6,7 @@
 ; the process's save area, then restores another process the same way and
 ; returns (plp/rts) into *that* process's call to sched.
 .include "k.inc"
+.import pbuf
 
 .segment "BSS"
 p_state:  .res MAXPROC
@@ -25,9 +26,7 @@ p_uid:    .res MAXPROC
 p_wk0:    .res MAXPROC      ; sleep deadline (jiffies)
 p_wk1:    .res MAXPROC
 p_wk2:    .res MAXPROC
-p_name:   .res MAXPROC*NAMELEN
 p_fd:     .res MAXPROC*NFD
-p_cwd:    .res MAXPROC*CWDLEN
 next_pid: .res 1
 .ifdef STKWATCH
 stk_hwm:      .res 1        ; max stack bytes saved at a switch
@@ -55,37 +54,59 @@ proc_init:
         sta next_pid
         rts
 
-; p_save: the saved zero page and stack of every process, in the RAM under I/O (nothing else
-; uses $D000-$DFFF). It is read and written only with interrupts off and $01 one lower
-; ($35 -> $34, all RAM): sched's two loops and setup_proc in exec.s. $D040 leaves the
-; VIC registers and colour RAM alone, which the simulators in tools/ map flat.
-p_save = $D040
-.assert p_save + MAXPROC*SAVESZ <= $D800, error, "p_save runs into colour RAM"
-; slot_save_ptr: X = slot -> p3 = &p_save[slot*SAVESZ]. Preserves X.
+; p_save: one page per process slot in the RAM under I/O (nothing else uses $D000-$DFFF),
+; slot N at $D000 + N*256: the saved zero page ($02-$3F) and stack at 0, the cwd at PCWD and
+; the name at PNAME. It is read and written only with interrupts off and $01 one lower
+; ($35 -> $34, all RAM): sched's two loops, setup_proc in exec.s, and the windows below.
+; Colour RAM and the VIC registers are chips in front of this RAM, not in it.
+p_save = $D000
+.assert SAVESZ <= PCWD && PCWD + CWDLEN <= PNAME && PNAME + NAMELEN <= 256, error, "slot page layout"
+.assert MAXPROC <= 10, error, "slot pages past $D9FF: kernel.cfg says $DA00-$DFFF is free"
 .segment "CODE"
+; slot_save_ptr: X = slot -> p3 = its page. Preserves X.
 slot_save_ptr:
+        txa
+        ora #>p_save
+        sta p3+1
         lda #0
         sta p3
-        sta p3+1
-        stx tmp0            ; the loop counts down in tmp0; X is kept
-@m:     lda tmp0
-        beq @add
-        dec tmp0
-        lda p3
+        rts
+; slot_ptr: X = slot, A = offset in its page -> p1. Preserves X and Y.
+cwd_ptr:
+        lda #PCWD
+slot_ptr:
+        sta p1
+        txa
+        ora #>p_save
+        sta p1+1
+        rts
+; cwd_get: X = slot -> pbuf = its cwd; cwd_put: X = slot -> its cwd = pbuf. Both return carry
+; clear. A window under I/O: interrupts off, all RAM, the caller's I flag back after.
+cwd_get:
+        jsr cwd_ptr
+        php
+        sei
+        dec $01
+        ldy #CWDLEN-1
+@g:     lda (p1),y
+        sta pbuf,y
+        dey
+        bpl @g
+        bmi io_on
+cwd_put:
+        jsr cwd_ptr
+        php
+        sei
+        dec $01
+        ldy #CWDLEN-1
+@p:     lda pbuf,y
+        sta (p1),y
+        dey
+        bpl @p
+; io_on: the end of a window, jumped to (not called) with the php still on the stack.
+io_on:  inc $01
+        plp
         clc
-        adc #<SAVESZ
-        sta p3
-        lda p3+1
-        adc #>SAVESZ
-        sta p3+1
-        jmp @m
-@add:   lda p3
-        clc
-        adc #<p_save
-        sta p3
-        lda p3+1
-        adc #>p_save
-        sta p3+1
         rts
 
 ; sched: switch to the next ready process. Called with in_kernel set.
@@ -110,17 +131,17 @@ sched:
         cmp stk_hwm
         bcc @nohwm
         sta stk_hwm
-        lda cur
-        sta stk_hwm_slot
-        jsr name_off
-        tax
-        ldy #0
-@hn:    lda p_name,x
-        sta stk_hwm_name,y
-        inx
+        ldx cur
+        stx stk_hwm_slot
+        jsr slot_save_ptr   ; interrupts are off (sei above)
+        dec $01
+        ldy #PNAME
+@hn:    lda (p3),y
+        sta stk_hwm_name-PNAME,y
         iny
-        cpy #NAMELEN
+        cpy #PNAME+NAMELEN
         bne @hn
+        inc $01
         ldx tmp2
 @nohwm:
 .endif
@@ -649,32 +670,21 @@ sys_procinfo:
         iny
         lda p_mlen,x
         sta (r0),y
-        ; name
-        txa
-        jsr name_off
-        tax
+        ; name: (p1),y with p1 = name - 5 lines up with buf+5..15
+        lda #PNAME-5
+        jsr slot_ptr
         ldy #5
-@nl:    lda p_name,x
+        php
+        sei
+        dec $01
+@nl:    lda (p1),y
         sta (r0),y
-        inx
         iny
         cpy #16
         bne @nl
-        clc
-        rts
+        jmp io_on
 @no:    sec
         lda #ESRCH
         rts
 
-; name_off: A = slot -> A = slot * NAMELEN (11)
-name_off:
-        sta tmp0
-        asl a
-        asl a
-        clc
-        adc tmp0            ; *5
-        asl a               ; *10
-        clc
-        adc tmp0            ; *11
-        rts
-.export name_off, find_init
+.export find_init
