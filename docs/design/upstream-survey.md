@@ -140,3 +140,55 @@ P2:
 P3:
 - Jiffy clock across disk I/O (measure drift first).
 - Fast 1541 reads under M0-8 (check licence and origin first).
+
+
+## Status and triage, 2026-11-18 (upstream 0b3f621)
+
+A lighter pass than the first two: 52 upstream `main` commits since `712cc60`, read from commit messages, stats and the serial-terminal design doc, **not** from full diffs and not by subagents. Kernel byte figures are upstream's own claims. Nothing was built or run. All upstream branch tips are already on `main`. The edit fixes, touch, tee, tail (including the ring fix, upstream `08fcf81`) and TAB completion from the earlier backlog are already ported, so this section covers only what is new.
+
+### Serial terminal (`ec53bd4`, 2026-11-14; `docs/design-tty.md` upstream)
+
+`/dev/ttyS0` on a SwiftLink or Turbo232 (6551 ACIA at `$DE00`, NMI-driven), a login on the line, `/dev/tty`. Verdict: **SHAPE-OF, design spike first.** Recommended-tier, probe-gated, near-zero cost without the card. Ideas worth taking:
+
+- A process's terminal is derived from its stdin (serial = 1, console = 0, otherwise ask the parent up to `init`); no per-process table. Only live processes are followed, because a free slot's parent number is stale.
+- Signals act on a foreground terminal (`fg_tty`); Ctrl-C and Ctrl-Z typed on the line become NMI flags and never enter the receive ring, so they work with no reader.
+- The NMI only raises flags; the IRQ tick acts on them (an NMI can land mid-`wakeup`). Two 128-byte single-producer, single-consumer rings.
+- Disk holds: the cycle-timed bus code calls `tty_hold` before each step, which turns the receive interrupt and RTS off for 3 jiffies (renewed per call) so an ACIA NMI cannot corrupt a transfer. A far end without RTS/CTS can lose bytes during disk work.
+- Probe by writing the ACIA control and command registers, reading them back and doing a programmed reset; GeoRAM shares `$DE00`, so it is excluded first. DTR stays off until the end.
+- Cooked and raw line discipline; ANSI output translation (LF to CR LF, `ESC =` to cursor addressing, reverse video); full-screen programs refuse to run on the line.
+
+Upstream's cost is about 33 kernel bytes of `jsr` hooks, with the rest in the cassette buffer (`$0334-$03FF`), unused KERNAL RAM (`$02A7-$02FF`), the end of the `$CF00` page and RAM under the ROM. We replaced the KERNAL, so we do not inherit those assumptions: check what we use in those ranges, and port the mechanism against our own NMI, IRQ and IEC code. Upstream notes that DCD hangup is untested and that multi-user safety is absent (no owners or permissions).
+
+### Other new commits
+
+| commit | what | verdict | note |
+|---|---|---|---|
+| `2374af2` | bounded waits (17-21 s) in the bus send, talk turnaround and talker-ready paths; format gets about 10 minutes | SHAPE-OF, read first | overlaps our stall mitigation; compare timeout structure and the "drive left in fast-read code ignores ATN" case |
+| `6aca717` | a drive that was reset answers "70 no channel"; the kernel reopens and retries once, fast reads return | SHAPE-OF | check our retry path against a drive reset |
+| `3ad7236` | with an REU, idle processes swap to a 32 KB REU area (`docs/design-swap.md` upstream, 64 resident bytes) | INSPO now, SHAPE-OF with Expanded work | read the design when swapping is scheduled |
+| `5112865` | `SYS_SEEK`, 24-bit offset, SET or END, 115 bytes | SHAPE-OF | upstream returns EINVAL off c64fs; decide what it means on our filesystem modules |
+| `3c346f8`, `b9b1ffc` | `tail` and `fsck` use seek / one-block reads | REJECT for now | depend on `SYS_SEEK` and c64fs |
+| `7321cb4` | hot kernel variables moved to zero page, 405 bytes of code saved | REJECT | contrary to our zero-page rule; noted as a measure of what a ZP pass would buy |
+| `36bb840` | `edit`: Ctrl-L or CLR redraws the whole screen | ACCEPT | user program, useful with job control |
+| `dc452fb`, `cd860e8` | boot message when drive 8 has no Breadbin disk; `ps` shows 0 pages for an unreaped job | ACCEPT if they apply | check against our boot and `ps` |
+| `520e889` | each VICE takes a free port and runs without a window | INSPO | test infrastructure |
+| `61f006d`, `32e5faf`, `3ad7236` page-count work, `4b3ff28`, `f896ed2`, `2ff35e5`-style c64fs fixes | pool at 125 pages; inode and `/tmp` fixes | skip | our pool is 155 pages; c64fs v1 is dropped |
+| `htop` (`ec53bd4`) | CPU and memory per process, measured from jiffy lateness | SHAPE-OF | a neat way to get CPU shares with no kernel accounting |
+| `talk`, `talkw`, `who` (`9d1a0ab`, `a9cc36d`, `fa949b6`) | chat between the two terminals; list users by terminal | INSPO | only meaningful with a second terminal |
+| `mail` (`cd8e6bb`) | 781-line local mail | skip | low value |
+| `chess`, `tetris` (`f87a46b`, `c5b8b93`, `246ec88`) | demo programs | INSPO | files carry a "vibed by" line, not a licence header; settle provenance before any port. `src/bin/.source.txt` and `src/kernel/.source.txt` were not opened |
+| `docs/memorymap.md` | address map table | INSPO | format to crib for ours |
+
+Docs, `CLAUDE.md` sync hooks and version bumps (0.6 to 0.9) are skipped by the earlier rule.
+
+### Backlog additions
+
+P1:
+- Compare upstream `iec.s` timeouts and reset recovery (`2374af2`, `6aca717`) with our `bus_acptr` retries. Read-only.
+- Serial-terminal spike: find out what the Ultimate offers at `$DE00` (SwiftLink emulation or not), check our use of `$02A7-$02FF` and `$0334-$03FF`, and sketch `tty_of`, `fg_tty` and the hold mechanism against our IRQ, NMI and IEC paths.
+
+P2:
+- `edit` Ctrl-L redraw; the missing-disk boot message and the `ps` unreaped-job fix, if they apply.
+
+P3:
+- Read `docs/design-swap.md` when Expanded-tier swapping is scheduled. Decide `SYS_SEEK` semantics on our filesystem modules.
