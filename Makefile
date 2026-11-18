@@ -34,6 +34,11 @@ IOSTAT  ?= 1
 $(BUILD)/iostat.stamp: FORCE
 	@mkdir -p $(BUILD)
 	@echo "$(IOSTAT)" | cmp -s - $@ || echo "$(IOSTAT)" > $@
+# make JIFFY=0 builds a kernel without the JiffyDOS byte protocol (standard serial only; default 1)
+JIFFY   ?= 1
+$(BUILD)/jiffy.stamp: FORCE
+	@mkdir -p $(BUILD)
+	@echo "$(JIFFY)" | cmp -s - $@ || echo "$(JIFFY)" > $@
 # The source revision stamped on the disk (directory entry "BUILD <rev>" and /etc/build): the short
 # commit, with + when tracked files outside build/ differ. make BUILDREV=xyz overrides it.
 BUILDREV ?= $(shell r=$$(git rev-parse --short=7 HEAD 2>/dev/null) || r=unknown; \
@@ -43,9 +48,9 @@ print-buildrev:
 $(BUILD)/rev.txt: FORCE
 	@mkdir -p $(BUILD)
 	@echo "$(BUILDREV)" | cmp -s - $@ || echo "$(BUILDREV)" > $@
-$(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc $(BUILD)/nbuf.stamp $(BUILD)/stkwatch.stamp $(BUILD)/iostat.stamp
+$(BUILD)/k/%.o: src/kernel/%.s src/kernel/k.inc src/kernel/uci.inc include/breadbin.inc $(BUILD)/nbuf.stamp $(BUILD)/stkwatch.stamp $(BUILD)/iostat.stamp $(BUILD)/jiffy.stamp
 	@mkdir -p $(dir $@)
-	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) -D IOSTAT=$(IOSTAT) $(if $(STKWATCH),-D STKWATCH=1) $< -o $@
+	ca65 -g -I src/kernel -D CACHE_DEFAULT=$(CACHE) -D NBUF_VALUE=$(NBUF) -D IOSTAT=$(IOSTAT) -D JIFDOS=$(JIFFY) $(if $(STKWATCH),-D STKWATCH=1) $< -o $@
 
 $(BUILD)/breadbin.prg: $(KOBJ) src/kernel.cfg
 	@# ld65 warns when a jmp (abs) pointer sits at $$xxFF (6502 page wrap): that is a bug, not a warning

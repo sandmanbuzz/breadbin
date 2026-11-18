@@ -109,7 +109,13 @@ class Driver(unittest.TestCase):
         self.assertEqual(subprocess.run(["bash", "-n", script]).returncode, 0)
         r = subprocess.run([script, "--check"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(r.stdout, r"^count \d+\n$")
+        self.assertRegex(r.stdout, r"^count \d+\n")
+        # per-shard expected counts are also emitted (H1 hardening)
+        for line in r.stdout.strip().splitlines():
+            if line.startswith("per_shard "):
+                parts = line.split()
+                self.assertEqual(len(parts), 3)
+                self.assertGreaterEqual(int(parts[2]), 0)
 
     def test_check_mode_fails_when_slots_are_fewer_than_shards(self):
         script = os.path.join(ROOT, "tools", "ci", "sharded.sh")
@@ -164,6 +170,17 @@ class Verdict(unittest.TestCase):
                 p = os.path.join(d, n + "." + ext)
                 if os.path.exists(p):
                     os.remove(p)
+        # Write expected_counts with per-shard expected counts (from the actual Ran N in each log)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            for n in names:
+                log = os.path.join(d, n + ".log")
+                if os.path.exists(log):
+                    with open(log) as lf:
+                        for line in lf:
+                            m = __import__("re").search(r'Ran (\d+) tests?', line)
+                            if m:
+                                f.write("%s %s\n" % (n, m.group(1)))
+                                break
         r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", str(expect)],
                            capture_output=True, text=True)
         return r, d
@@ -202,9 +219,84 @@ class Verdict(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("test count mismatch", r.stderr)
 
+    def test_compensating_per_shard_counts_are_red(self):
+        """H1 regression: one shard under by N, another over by N, aggregate equal -> red."""
+        r, d = self.judge(["green", "green"], 4)
+        # Write expected_counts: shard s0 expects 2, shard s1 expects 2
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\ns1 2\n")
+        # Now make s0 report 1 (under by 1) and s1 report 3 (over by 1)
+        # The aggregate is still 4 = expect, but per-shard counts don't match
+        with open(os.path.join(d, "s0.log")) as f:
+            content = f.read()
+        content = content.replace("Ran 2 tests", "Ran 1 tests")
+        with open(os.path.join(d, "s0.log"), "w") as f:
+            f.write(content)
+        with open(os.path.join(d, "s1.log")) as f:
+            content = f.read()
+        content = content.replace("Ran 2 tests", "Ran 3 tests")
+        with open(os.path.join(d, "s1.log"), "w") as f:
+            f.write(content)
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "4"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("per-shard", r.stdout)
+        self.assertIn("1/2", r.stdout)
+        self.assertIn("3/2", r.stdout)
+
     def test_verdict_needs_expect(self):
         r = subprocess.run([self.SCRIPT, "--verdict", "/nonexistent"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
+
+    def test_per_shard_missing_file_is_red(self):
+        """H1 fail-closed: if expected_counts is missing, per-shard check should fail."""
+        r, d = self.judge(["green", "green"], 4)
+        # Remove expected_counts — verdict should flag missing
+        os.remove(os.path.join(d, "expected_counts"))
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "4"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("per-shard:missing", r.stdout)
+
+    def test_per_shard_missing_entry_is_red(self):
+        """H1 fail-closed: if expected_counts is missing an entry for a shard, that shard fails."""
+        r, d = self.judge(["green", "green"], 4)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\n")  # missing s1 entry
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "4"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("per-shard:missing", r.stdout)
+
+    def test_per_shard_extra_entry_is_red(self):
+        """H1 fail-closed: if expected_counts has an extra shard not in names, red."""
+        r, d = self.judge(["green", "green"], 4)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\ns1 2\ns2 0\n")  # extra s2
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "4"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("extra shard", r.stdout)
+
+    def test_per_shard_duplicate_entry_is_red(self):
+        """H1 fail-closed: if expected_counts has duplicate shard entries, red."""
+        r, d = self.judge(["green", "green"], 4)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\ns0 2\ns1 2\n")  # duplicate s0
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "4"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("duplicate", r.stdout)
+
+    def test_per_shard_malformed_count_is_red(self):
+        """H1 fail-closed: if expected_counts has a non-numeric count, red."""
+        r, d = self.judge(["green", "green"], 4)
+        with open(os.path.join(d, "expected_counts"), "w") as f:
+            f.write("s0 2\ns1 abc\n")  # malformed count
+        r = subprocess.run([self.SCRIPT, "--verdict", d, "--expect", "4"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("malformed", r.stdout)
 
 
 def _git_ok():

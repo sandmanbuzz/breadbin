@@ -8,6 +8,7 @@ experiments/illegal-ops/*.o
 experiments/illegal-ops/*.lst
 experiments/illegal-ops/*.prg
 /build[0-9a-z]*/
+prefixwise*
 
 # build artifacts of the experiment scripts
 experiments/**/*.bin
@@ -29,3 +30,6 @@ experiments/iec-stall/keym.d.nibbler.prg
 
 # session 5: a local copy of the built release tree for tests/test_session5.py (never commit)
 /.s5tree/
+
+# fleet/ is local-only coordination (roster, handoffs, logs); it is never tracked on main
+/fleet/

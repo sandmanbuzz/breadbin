@@ -28,7 +28,6 @@ p_wk2:    .res MAXPROC
 p_name:   .res MAXPROC*NAMELEN
 p_fd:     .res MAXPROC*NFD
 p_cwd:    .res MAXPROC*CWDLEN
-p_save:   .res MAXPROC*SAVESZ
 next_pid: .res 1
 .ifdef STKWATCH
 stk_hwm:      .res 1        ; max stack bytes saved at a switch
@@ -56,6 +55,12 @@ proc_init:
         sta next_pid
         rts
 
+; p_save: the saved zero page and stack of every process, in the RAM under I/O (nothing else
+; uses $D000-$DFFF). It is read and written only with interrupts off and $01 one lower
+; ($35 -> $34, all RAM): sched's two loops and setup_proc in exec.s. $D040 leaves the
+; VIC registers and colour RAM alone, which the simulators in tools/ map flat.
+p_save = $D040
+.assert p_save + MAXPROC*SAVESZ <= $D800, error, "p_save runs into colour RAM"
 ; slot_save_ptr: X = slot -> p3 = &p_save[slot*SAVESZ]. Preserves X.
 .segment "CODE"
 slot_save_ptr:
@@ -135,6 +140,7 @@ sched:
         lda tmp2
         sta p_sp,x
         jsr slot_save_ptr
+        dec $01             ; p_save is under I/O: all RAM for the copy
         ldy #0
 @zs:    lda $02,y
         sta (p3),y
@@ -148,6 +154,7 @@ sched:
         iny
         cpx #$ff
         bne @ss
+        inc $01
 
 @pick:  ldx cur
         cpx #$ff
@@ -181,6 +188,7 @@ sched:
         lda #SLICE
         sta slice
         jsr slot_save_ptr
+        dec $01             ; p_save is under I/O
         ldy #0
 @zr:    lda (p3),y
         sta $0002,y
@@ -196,6 +204,7 @@ sched:
         iny
         cpx #$ff
         bne @sr
+        inc $01
         plp
         rts
 

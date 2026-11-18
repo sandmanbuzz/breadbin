@@ -157,8 +157,9 @@ s_cp:   .byte ")", 0
 n_unk:  .byte "?", 0
 n_cbm:  .byte "cbm", 0
 n_uci:  .byte "uci", 0
+n_fast: .byte "fast", 0
 n_d81:  .byte "d81", 0
-names:  .word n_unk, n_cbm, n_uci, n_unk, n_d81     ; id 3 is not in this tree
+names:  .word n_unk, n_cbm, n_uci, n_fast, n_d81
 s_cls:  .byte ", class ", 0
 .segment "BSS"
 buf: .res 12

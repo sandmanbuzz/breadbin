@@ -553,8 +553,15 @@ setup_proc:
         ; saved context: zero ZP image, then argv/argc/entry
         ldx sp_slot
         jsr slot_save_ptr
+        php                 ; p_save is under I/O (proc.s): interrupts off, all RAM
+        sei
+        dec $01
         jsr init_ctx
-        jmp setup_stack
+        jsr setup_stack
+        inc $01
+        plp
+        clc
+        rts
 ; init_ctx: p3 -> a zero-page image (a process's save area, or $0002 for the live one): zero
 ; it, then set argv, argc and the entry point (k_entry) for the image just loaded.
 init_ctx:
@@ -683,7 +690,7 @@ copy_cwd:
 ; new image is loaded, relocated, and its argv copied, while the caller's own image is still
 ; intact. From here nothing may fail (a fallible step added below would leave a half-replaced
 ; process). The caller is `cur`; its zero page and stack are live, so p_save is not touched.
-.segment "CODE"
+.segment "CODEHI"            ; cold: exec_commit and the module syscalls
 exec_commit:
         jsr set_name            ; pp still points at the path, in the old image
         ldx cur

@@ -98,7 +98,7 @@ Measured 2026-10-31, after M0-1 to M0-4. The takeover cost the kernel 1.9 KB (18
 | Free and unused: `$CF5D–$CFFF` (past the syscall table) | 163 |
 | User process pool: `$0800–$7FFF` | 30,720 (120 pages) |
 
-Where the kernel's bytes go: `proc` 4321 (3315 BSS, of which 2304 are the per-process save areas), `file` 2986, `fs` 2847, `blk` 2682 (1536 BSS is the block cache), `cbm` 1956, `exec` 1373, `con` 1363, `iec` 780, `kbd` 747.
+Where the kernel's bytes go: `proc` 4321 (3315 BSS, of which 2304 are the per-process save areas; on `feat/psave-io` the 1,900-byte save areas move to the RAM under I/O), `file` 2986, `fs` 2847, `blk` 2682 (1536 BSS is the block cache), `cbm` 1956, `exec` 1373, `con` 1363, `iec` 780, `kbd` 747.
 
 **Levers, biggest first** (all are independent):
 

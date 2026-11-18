@@ -78,3 +78,20 @@ rq_hi
 trk
 sct
 dev_present
+# fast.km (src/mod/fast.s). A name with a leading ? may be missing from the kernel (the
+# JiffyDOS byte routines of a JIFFY=0 build, which does not build this module).
+bread_io
+bwrite_io
+iclose_io
+iec_read
+iec_write
+cur_drv
+cmd_send
+cmd_status
+iec_in_begin
+iec_in_byte
+iec_in_end
+io_set
+io_eoi
+?io_txd
+?io_jif
