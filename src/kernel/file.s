@@ -45,6 +45,7 @@ pb_len:  .res 1
 .import uci_read, uci_write, uci_open, uci_create, uci_release, uci_fsinfo
 .import uci_mkdir, uci_rmdir, uci_unlink, uci_rename
 .export of_flags, open_exists, is_dot
+.export set_pp_r0
 
 .segment "INIT"
 file_init:

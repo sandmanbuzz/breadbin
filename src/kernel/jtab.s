@@ -8,10 +8,11 @@
 ; busy and calls the handler. Handlers return carry/A/X/r-registers; `sys_return` acts on
 ; pending signals and deferred reschedules before going back to user code.
 .include "k.inc"
-.import sys_isatty, sys_conmode, sys_getuid, sys_setuid, sys_mount, sys_umount, sys_mntinfo, sys_diskio, sys_cache
+.import sys_isatty, sys_conmode, sys_getuid, sys_setuid, sys_mount, sys_umount, sys_mntinfo, sys_diskio, sys_cache, rgate, ejected
 
 NSYS = 32               ; the page holds 3*NSYS (table) + 3*NSYS (records) + enter (about 36 bytes)
 
+.export records
 .segment "JUMPTAB"
 .repeat NSYS
         jsr enter
@@ -37,12 +38,16 @@ enter:
         pha
         lda records-2,x
         pha
-        ldx k_x
+        lda ejected         ; the boot disk is out: writers to it wait (rgate, blk.s)
+        beq @go
+        jsr rgate
+@go:    ldx k_x
         lda k_a
         cli
         rts
 
-; handler address - 1 (for rts), one 3-byte record per call
+; handler address - 1 (for rts), one 3-byte record per call; the third byte is the call's gate kind
+; (rgate): 0 none, 1 write(fd), 2 open(flags), 3 a path call that changes the directory
 records:
         .word sys_exit-1
         .byte 0
@@ -59,23 +64,23 @@ records:
         .word sys_sleep-1
         .byte 0
         .word sys_open-1
-        .byte 0
+        .byte 2
         .word sys_close-1
         .byte 0
         .word sys_read-1
         .byte 0
         .word sys_write-1
-        .byte 0
+        .byte 1
         .word sys_pipe-1
         .byte 0
         .word sys_mkdir-1
-        .byte 0
+        .byte 3
         .word sys_rmdir-1
-        .byte 0
+        .byte 3
         .word sys_unlink-1
-        .byte 0
+        .byte 3
         .word sys_rename-1
-        .byte 0
+        .byte 3
         .word sys_chdir-1
         .byte 0
         .word sys_getcwd-1

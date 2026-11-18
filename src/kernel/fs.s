@@ -1277,12 +1277,9 @@ RD_INOBLK = 32
 fs_mkfs_reu:
         lda #1
         sta ci_dev
-        ; nblocks = min(banks*256, 2048)
-        lda reu_banks
-        cmp #8
-        bcc @s
-        lda #8
-@s:     sta sb_nblocks_hi+1
+        ; nblocks = rd_banks*256 (blk.s: at most 8 banks, 2048 blocks)
+        lda rd_banks
+        sta sb_nblocks_hi+1
         lda #0
         sta sb_nblocks_lo+1
         ; superblock

@@ -782,6 +782,8 @@ run_line:
         lda ttype,x
         cmp #';'
         beq @cmd_semi
+        cmp #'&'            ; a background job's '&' ends it like ';' (run_cmd left cmd_end on it)
+        beq @cmd_semi
         cmp #T_AND
         beq @and_check
         cmp #T_OR

@@ -14,6 +14,7 @@
 .import binval, cmdbuf, cmdlen, to_ascii, to_petscii, build_path, pbuf
 .import mt_used, mt_pdev, mt_pino, mt_dev, mt_path, mnt_point, mount_dev
 .import nm_dev, nm_ino, f_done
+.import ejv
 
 .export cbm_iget, cbm_lookup, cbm_read, cbm_readdir, cbm_open_write
 .export cbm_write, cbm_wclose, cbm_scratch, cbm_rename, cbm_fsinfo
@@ -49,7 +50,7 @@ cbm_rename:     jmp cbm_none
 cbm_fsinfo:     jmp cbm_none
 .assert * - cbmv = 30, error, "the stubs and vtab in src/mod/cbm.s differ in length"
 
-.segment "CODEHI"            ; runs above the BSS, out of the way of the user pool
+.segment "CODE"              ; (CODEHI is full: these few bytes live in the kernel page range)
 cbm_none:       lda #ENODEV
         sec
         rts
@@ -96,19 +97,37 @@ sys_mount:
         lda #DEV_UCI
         sta mo_dev
         bne @np
-@drv:   sec
+@drv:   tay                 ; Y = the drive number
+        ldx ejected
+        beq @std
+        cpy dev_drive       ; the boot drive with its disk out: on the first free slot
+        bne @std
+        lda #10             ; the eject module: is this the disk that went out? (keeps Y)
+        jsr ejv
+        bcc @onboot
+        ldx #NDEV           ; the top free slot (drive 9's own slot, 2, stays free)
+@fs:    dex
+        cpx #2
+        bcc @onboot
+        lda dev_present,x
+        bne @fs
+        beq @set
+@std:   tya
+        sec
         sbc #7
         cmp #2
         bcc @inval
         cmp #NDEV
         bcs @inval
-        sta mo_dev
         tax
-        lda dev_drive,x
-        cmp dev_drive       ; the boot drive holds the running system
+        cpy dev_drive       ; the boot drive holds the running system
         beq @onboot
         lda dev_present,x
-        beq @np
+        bne @onboot
+@set:   stx mo_dev          ; the slot's drive is set here and in diskio, not at boot
+        tya
+        sta dev_drive,x
+        jmp @np
 @onboot: lda #EBUSY
         sec
 @rr:    rts
@@ -257,6 +276,7 @@ open_mnt_io := :-           ; mount's jsr iec_open (a name here, not there: it w
 ;               op 2: read block r1 into the 256 bytes at r0
 sys_diskio:
         stx mo_ent
+        tay                 ; Y = the drive number
         sec
         sbc #7
         cmp #2
@@ -265,17 +285,18 @@ sys_diskio:
         bcs @inval
         sta mo_dev
         tax
-        lda dev_drive,x
-        cmp dev_drive       ; the boot drive holds the running system
+        cpy dev_drive       ; the boot drive holds the running system
         beq @onboot
         lda dev_present,x
-        beq @free
+        beq @free0
 @onboot: lda #EBUSY
         sec
         rts
 @inval: lda #EINVAL
         sec
         rts
+@free0: tya
+        sta dev_drive,x     ; (the slot may have held the boot drive: set per use)
 @free:  ldx mo_dev
 :                           ; open_dio_io (below)
         jsr iec_open

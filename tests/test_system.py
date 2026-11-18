@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -91,7 +92,7 @@ class Boot(unittest.TestCase):
         pid = out.strip("[]")
         self.assertTrue(pid.isdigit(), out)
         ps = self.run_("ps")
-        self.assertIn("count", ps)
+        self.assertEqual(ps.count("count"), 1, ps)      # started once: the shell used to run a `&` line again and again
         self.run_("kill " + pid)
         ps = self.run_("ps")
         self.assertNotIn("count", ps)
@@ -149,15 +150,15 @@ class Boot(unittest.TestCase):
         self.assertNotIn("count", self.run_("ps"))
 
     def test_15_too_many_processes(self):
-        # init + sh (login has exec'd into it) + 8 jobs fill the 10-slot process table
+        # init + sh (login has exec'd into it) + 6 jobs fill the 8-slot process table (MAXPROC)
         pids = []
-        for _ in range(8):
+        for _ in range(6):
             pids.append(self.run_("sleep 9999 &").strip("[]"))
         out = self.v.run("sleep 9999 &", clear=False)
         self.assertIn("too many processes", out)
         self.assertTrue(all(p.isdigit() for p in pids), pids)
-        self.v.run("kill " + " ".join(pids[:4]), clear=False)
-        self.v.run("kill " + " ".join(pids[4:]), clear=False)
+        self.v.run("kill " + " ".join(pids[:3]), clear=False)
+        self.v.run("kill " + " ".join(pids[3:]), clear=False)
         self.assertEqual(self.run_("echo alive"), "alive")
         self.assertNotIn("sleep", self.run_("ps"))
 
@@ -193,7 +194,7 @@ class Boot(unittest.TestCase):
             l.endswith(" $") for l in ls[-3:]), 60)
 
     def test_21_many_sleepers_stay_responsive(self):
-        pids = [self.run_("sleep 9999 &").strip("[]") for _ in range(6)]
+        pids = [self.run_("sleep 9999 &").strip("[]") for _ in range(4)]
         import time
         t = time.time()
         self.assertEqual(self.run_("echo quick"), "quick")
@@ -464,6 +465,46 @@ class REURoot(unittest.TestCase):
         self.assertEqual(before[376 * 256:377 * 256], after[376 * 256:377 * 256])
 
 
+
+class Eject(unittest.TestCase):
+    """The boot disk leaves drive 8 (`eject`): / is served from the REU cache, a writer to / sleeps
+    until `reattach`, and drive 8 mounts another disk meanwhile."""
+
+    def test_eject_swap_reattach(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            img = os.path.join(tmp, "disk.d64")
+            other = os.path.join(tmp, "other.d64")
+            shutil.copy(IMAGE, img)
+            subprocess.run(["c1541", "-format", "cbmdisk,cb", "d64", other,
+                            "-write", os.path.join(ROOT, "rootfs", "etc", "motd"), "motd,s"],
+                           capture_output=True, check=True)
+            with Vice(img, reu=2048, reu_image=os.path.join(tmp, "reu.img")) as v:
+                v.wait_shell()
+                self.assertEqual(v.run("eject", timeout=900), "")
+                self.assertIn("welcome to breadbin.", v.run("cat /etc/motd"))     # from the cache
+                self.assertEqual(v.run("echo t > /tmp/t; cat /tmp/t"), "t")       # the REU disk is unaffected
+                v.type("touch /late\n")                                          # a writer to / sleeps: no disk under it
+                time.sleep(15)
+                self.assertNotRegex(v.screen().rstrip().splitlines()[-1], r"\$ $")   # no prompt: it is still waiting
+                v.keybuf(b"\x03")                                                 # and it can be killed
+                self.assertEqual(v.run("echo up"), "up")
+                self.assertNotIn("late", v.run("ls /"))                           # nothing was created
+                self.assertNotEqual(v.run("cache flush"), "")                     # the cache is the root now: no flush, no off
+                self.assertNotEqual(v.run("cache off"), "")
+                self.assertNotEqual(v.run("mount 8 /mnt"), "")                    # the boot disk itself would go stale: refused
+                v._cmd("detach 8")
+                v._cmd(f'attach "{other}" 8')
+                self.assertEqual(v.run("mount 8 /mnt"), "")
+                self.assertEqual(v.run("ls /mnt").split(), ["motd"])
+                self.assertEqual(v.run("umount /mnt"), "")
+                self.assertNotEqual(v.run("reattach"), "")                        # the wrong disk does not get in
+                v._cmd("detach 8")
+                v._cmd(f'attach "{img}" 8')
+                v.run("touch /late | reattach")                                   # the writer sleeps until reattach lets it in
+                self.assertIn("late", v.run("ls /"))
+                self.assertEqual(v.run("cat /etc/motd")[:7], "welcome")
+
+
 class Cache(unittest.TestCase):
     """The REU block cache: a second boot on the same REU reads from it, a different
     disk discards it, writes stay in step."""
@@ -477,9 +518,9 @@ class Cache(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def boot(self, *cmds):
-        """Boot once with the shared REU image (2 MB); run cmds, then `cache`: its counters."""
-        with Vice(self.img, reu=2048, reu_image=self.reu) as v:
+    def boot(self, *cmds, reu=2048):
+        """Boot once with the shared REU image (2 MB unless reu says KB); run cmds, then `cache`: its counters."""
+        with Vice(self.img, reu=reu, reu_image=self.reu) as v:
             v.wait_shell()
             outs = [v.run(c) for c in cmds]
             return outs, self.stat(v.run("cache"))
@@ -562,8 +603,24 @@ class Cache(unittest.TestCase):
             self.assertEqual(self.stat(v.run("cache"))[0], "none")
             self.assertIn("usage", v.run("cache bogus"))
 
-    def test_small_reu(self):
-        with Vice(self.img, reu=256) as v:      # 4 banks: /tmp works, no room for the cache
+    def test_smaller_reus_keep_the_cache_above_a_smaller_tmp(self):
+        """The cache takes the top 3 banks of an REU of 4 to 10 banks; /tmp gets the rest."""
+        for kb, tmp_blocks_max in ((256, 256), (512, 1280)):
+            with self.subTest(reu=kb):
+                if os.path.exists(self.reu):
+                    os.remove(self.reu)
+                self.assertEqual(self.boot("echo hi > /tmp/x", "cat /tmp/x", "df", reu=kb)[1][0], "on")   # same programs, so the second boot is all hits
+                outs, (state, hits, misses, errs) = self.boot("echo hi > /tmp/x", "cat /tmp/x", "df", reu=kb)
+                self.assertEqual(outs[1], "hi")
+                self.assertGreater(hits, 20)        # warm: the cache survived the reboot
+                self.assertLess(misses, 5)
+                self.assertEqual(errs, 0)
+                m = re.search(r"(\d+)\s+\d+\s+\d+\s+\d+ /tmp", outs[2])
+                self.assertTrue(m, outs[2])
+                self.assertLessEqual(int(m.group(1)), tmp_blocks_max)
+
+    def test_tiny_reu_has_no_cache(self):
+        with Vice(self.img, reu=128) as v:      # 2 banks: all /tmp, no room for the cache
             v.wait_shell()
             self.assertEqual(self.stat(v.run("cache"))[0], "none")
             v.run("echo hi > /tmp/x")
