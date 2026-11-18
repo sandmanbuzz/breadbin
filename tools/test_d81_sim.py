@@ -6,7 +6,7 @@ iec_in_*): they take the DOS commands the kernel sends ("U1", "U2", "B-P" on a "
 channel), check track and sector against their geometry and answer 66 for an illegal
 pair, as a drive does. So the kernel's own open, block read, block write and mount run,
 and with them the four call sites the module repoints. What this does not show is a real
-1581's DOS or the bus timing: see tests/d81_vice.py.
+1581's DOS or the bus timing: see tests/test_d81_vice.py.
 
 Skips when py65 is not installed or the kernel has not been built (`make`). See docs/testing.md.
 """

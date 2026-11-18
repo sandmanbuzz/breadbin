@@ -1,6 +1,6 @@
 """VICE run of a c64fs volume on a 1581 (drive 9) through /lib/km/d81 (no test_ prefix: not in the shards).
 
-    tools/ci/run.sh test-only T="tests.d81_vice"
+    tools/ci/run.sh test-only T="tests.test_d81_vice"
 
 Needs a 1581 drive ROM (tools/setup-vice-roms.sh fetches dos1581-318045-02.bin; run.sh copies the ROM dir into
 the container's VICE DRIVES directory): the D81 class skips, saying so, unless a dos1581* image is in VICE's
