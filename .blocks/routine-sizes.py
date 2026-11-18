@@ -2,7 +2,7 @@
 # /// block
 # name = "routine-sizes"
 # summary = "Byte span of each global label in an ld65 build, per segment, from the -Ln and -m files."
-# effects = "read; writes --out when given"
+# effects = "write-workspace"
 # example = ["--lbl", "build/kernel.lbl", "--map", "build/kernel.map", "--top", "5"]
 #
 # [returns]
