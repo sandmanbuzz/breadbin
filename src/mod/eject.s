@@ -20,7 +20,7 @@
 BAM_BLOCK   = 357
 SB_BLOCK    = 376
 BAM_LABEL   = $90
-SB_BUILD_ID = 15
+SB_BUILD_ID = 252             ; the same as in blk.s (format 2: clear of the superblock fields)
 
 .segment "CODE"
 init:   lda mod_busy            ; refused unless the kernel is loading us (see cbm.s)
