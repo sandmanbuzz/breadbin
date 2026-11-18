@@ -30,6 +30,23 @@ class TestKexports(unittest.TestCase):
             with self.assertRaisesRegex(k.KapiError, msg):
                 self.pairs(names)
 
+    def test_optional_name_missing_is_left_out_and_not_hashed(self):
+        names = self.pairs(["?nope", "iget"])
+        self.assertEqual(names, [("iget", 0xB10E)])
+        self.assertEqual(k.api_hash(names), k.api_hash(self.pairs(["iget"])))
+
+    def test_optional_name_present_is_exported_under_its_plain_name(self):
+        self.assertEqual(self.pairs(["?iget", "tmp0"]), [("iget", 0xB10E), ("tmp0", 0x58)])
+        s, inc, _, _ = k.render(self.pairs(["?tmp0"]))
+        self.assertIn(".exportzp tmp0 := $58", s)
+        self.assertIn(".importzp tmp0", inc)
+        with self.assertRaisesRegex(k.KapiError, "INIT"):      # still held to the INIT rule
+            self.pairs(["?init_only"])
+
+    def test_required_name_missing_still_raises_beside_optional(self):
+        with self.assertRaisesRegex(k.KapiError, "not in the kernel"):
+            self.pairs(["?nope", "nope2"])
+
     def test_zero_page_uses_exportzp_and_absolute_uses_export(self):
         s, inc, _, _ = k.render(self.pairs(["tmp0", "iget"]))
         self.assertIn(".exportzp tmp0 := $58", s)

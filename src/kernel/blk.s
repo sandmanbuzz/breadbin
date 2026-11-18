@@ -276,6 +276,7 @@ iec_close:
         ldx tmp2
         lda dev_drive,x
         ldx #15
+iclose_io := *
         jmp iec_ch_close
 
 ; cur_dev_set: A = dev -> the drive number the IEC routines below talk to
@@ -338,6 +339,7 @@ bread:
         bcc @chk
         lda rq_dev
         jsr cur_dev_set
+@io:                   ; (fast.km points this call, bwrite_io and iclose_io at itself)
         jsr iec_read
         bcs @e
         jsr cache_put
@@ -358,6 +360,8 @@ bread:
         jsr buf_idx_ptr
         clc
         rts
+
+bread_io := @io
 
 ; bget_buf: like bread, but the block's old contents are not needed:
 ; returns a zeroed buffer assigned to that block (not written yet).
@@ -405,6 +409,7 @@ bwrite:
         beq @reu
         sta cur_drv
         jsr cache_inval     ; not valid while the disk is being changed (a reset in between)
+@io:
         jsr iec_write
         bcs @we
         jsr cache_wr        ; write-through: the REU copy follows the disk
@@ -421,6 +426,7 @@ bwrite:
         sta b_valid,x
         lda #EIO
 @ok:    rts
+bwrite_io := @io
 bdirty = bwrite
 
 bflush_all:
