@@ -731,3 +731,26 @@ Setup: drive A as device 8 (the physical 1541 renumbered to 9, off the bus), dri
 
 - Buffers `$0300-$06FF` are all zero before use. The `#` channel (secondary 2, channel 0: `$022D` = `$40`, `$A7` = 3) gets **buffer 3, `$0600`**; `U1` fills that page. Opening it also makes the DOS read the BAM into buffer 4 (`$0700`). Buffers 0-2 (`$0300-$05FF`, 768 bytes) were unallocated.
 - So the free, reservable drive RAM is buffers 0-2 with `#0`..`#2`, less whatever the drive-side loader takes (`docs/design/fast-io.md`): 256-768 bytes, reached only by `M-W`/`M-R` (a transfer costs the same as a block, saving only the seek). Not worth building without a concrete candidate.
+
+### 2026-11-18, `size/research` at 85b5f17 and ef69485, `main` at 8688a63 (cloud session)
+
+Setup as read from `/v1/drives` after the fact: Drive A = device **9** (emulated 1541, JiffyDOS 1541-II ROM, the test image), Software IEC = 11, JiffyDOS KERNAL; the physical 1541 at 8; the physical 1581 was on the bus as device 10 for the first runs (per the owner).
+
+- First runs, steps 1 and 2: every boot failed before Breadbin ran. The machine's `LOAD"*",8,1` printed `SEARCHING FOR *`, `LOADING`, `?LOAD  ERROR`, with the end pointer still at `$0801`. This happened 3 of 3 times on 85b5f17 and 1 of 1 on `main` 8688a63.
+- **Cause: the harness, not the bus.** `BREADBIN_ULTIMATE_BUS` was not set, so `ultimatetest` loaded from device 8. That is the physical 1541 and its floppy, not drive A. These runs first blamed the 1581, wrongly.
+  - With the 1581 removed and the machine power-cycled, the same unset variable gave a different failure: a short load ending at `$440C`, the same each time (another file, from the 1541's floppy).
+  - The 1581 is therefore not shown to affect booting from drive A. It was never tested with the right bus.
+- `size/research` at ef69485, `BREADBIN_ULTIMATE_BUS=9`, 1581 off the bus:
+  - Step 1: boots; the end pointer is `$4471` as expected.
+  - Step 2: Boot `test_02_echo`, `test_13_ctrl_c_blocked_reader`, `test_07_directories`, `test_10_mv_cp` and `tests.test_console` all pass (11 tests, 319 s).
+  - Not run: steps 3 to 5 (step 3 needs the physical 1541 at 8 with the Breadbin image).
+- Lesson: read `/v1/drives` before a run, and set `BREADBIN_ULTIMATE_BUS` to drive A's `bus_id`.
+- `size/research` merged with `main`, at 241cf0b (main's eject work with MAXPROC 8; `enter` sets `in_kernel` with `inc`). Same setup, 1581 off the bus:
+  - **Step 1, first boot: `kernel panic: cannot start /bin/init`.** The load was whole (end pointer as expected); the screen showed the banner, `memory: 155 pages free`, `reu: 128 x 64k` and the panic, and stayed there.
+  - The panic does not print the error, so this boot cannot say whether it was a read error, ENOMEM or ENOENT.
+  - **Not seen again.** Every later boot of 241cf0b reached login: the 2 boots of step 2, 5 boots interleaved with ef69485 (A A A B A B A, all OK), then 15 interleaved with `main` 0c060a4 (A M A M ..., 30 of 30 OK). That is 22 of 23 for 241cf0b and 15 of 15 for `main`.
+  - One failure cannot tell the branch from the background. It stays open; if it recurs, a panic that prints the error code is the next step.
+  - Step 2: 11 tests OK, 342 s.
+  - The build was put on the owner's disposable floppy with the nibbler (`experiments/iec-stall/nibcopy.py`; the directory shows `breadbin`; config restored by `nibsetup.sh down`).
+  - Steps 3-5 with `BREADBIN_ULTIMATE_BUS=8` (boot from the physical 1541): boot to login in 51 s, then `echo` and `mount 9 /mnt` (drive A, `ls /mnt/bin`). `format 9 c64fs scratch` ran on drive A (an unlinked copy; `format` refuses 8), then `mkdir`, `cp` and `cat` read back from the new volume.
+  - S1 checks: `pwd` after `cd /bin`, and after `cd /etc` with two `sleep &` children alive; `ls ../bin/sleep` from `/etc`; `ps` shows `init`, `sh`, two `sleep` and `ps` by name before and after the format. 9 of 9 OK.

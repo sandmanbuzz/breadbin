@@ -44,7 +44,7 @@ class ExecSim(unittest.TestCase):
             m[L["pg_used"] + OLD_PAGE - 8 + i] = 1
         m[L["free_pages"]] -= OLD_LEN
         m[L["p_mpage"]], m[L["p_mlen"]] = OLD_PAGE, OLD_LEN
-        m[L["p_name"]:L["p_name"] + 4] = b"old\0"
+        s.mem.under[uci_sim.PNAME:uci_sim.PNAME + 4] = b"old\0"   # slot 0's name
         m[0x20:0x40] = bytes(range(0xA0, 0xC0))      # user zero page the kernel must not touch
 
     def state(self):
@@ -54,7 +54,7 @@ class ExecSim(unittest.TestCase):
             "pg_used": bytes(m[L["pg_used"]:L["pg_used"] + npool]),
             "free_pages": m[L["free_pages"]],
             "p_mpage": m[L["p_mpage"]], "p_mlen": m[L["p_mlen"]],
-            "p_name": bytes(m[L["p_name"]:L["p_name"] + 11]),
+            "p_name": bytes(self.s.mem.slot(0, uci_sim.PNAME, 11)),
             "p_fd": bytes(m[L["p_fd"]:L["p_fd"] + 8]),
             "p_pid": m[L["p_pid"]], "p_state": m[L["p_state"]], "p_uid": m[L["p_uid"]],
             "user_zp": bytes(m[0x20:0x40]),

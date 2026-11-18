@@ -7,7 +7,7 @@
 .include "uci.inc"
 
 .importzp bp
-.import bwrite, name_off
+.import bwrite
 
 .segment "ZEROPAGE"
 fb:     .res 2          ; caller buffer pointer for fs_read/fs_write
