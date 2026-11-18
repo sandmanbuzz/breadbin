@@ -19,10 +19,19 @@ def read(p):
 
 
 def tracked():
-    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True)
-    if out.returncode:
-        raise unittest.SkipTest("not a git checkout")
-    return set(out.stdout.split())
+    """git's file list; where git is missing or the tree is not a checkout it can read (the CI
+    container mounts a worktree without its git directory), the files on disk."""
+    try:
+        out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True)
+        if not out.returncode:
+            return set(out.stdout.split())
+    except FileNotFoundError:
+        pass
+    found = set()
+    for top, dirs, names in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in (".git", "build", "fleet", ".claude")]
+        found.update(os.path.relpath(os.path.join(top, n), ROOT) for n in names)
+    return found
 
 
 class Drift(unittest.TestCase):
