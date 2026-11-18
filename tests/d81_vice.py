@@ -88,6 +88,39 @@ class D81(unittest.TestCase):
         out = subprocess.run([sys.executable, mk, "cat", img9, "/back"], capture_output=True, check=True)
         self.assertEqual(out.stdout, readme)
 
+    def test_format_a_1581(self):
+        """format on a 1581: refused without the module (after the DOS format), format 2 over
+        3200 blocks with it; the volume mounts, takes a file, and reads in mkimage."""
+        mk = os.path.join(ROOT, "tools", "mkimage.py")
+        img9 = os.path.join(ROOT, "build", "t_fmt9.d81")
+        with open(img9, "wb") as f:
+            f.write(bytes(819200))
+        with Vice(IMAGE, extra=["-drive9type", "1581", "-9", img9]) as v:
+            v.wait_shell()
+            v.type("clear\nformat 9 c64fs vol\n")
+            v.wait_for("(y/n)")
+            v.type("y\n")
+            v.wait_for("/lib/km/d81 first", timeout=400)       # (the line wraps before it)
+            self.assertEqual(v.run("mod load /lib/km/d81"), "")
+            v.type("clear\nformat 9 c64fs vol\n")
+            v.wait_for("(y/n)")
+            v.type("y\n")
+            v.wait_for("done", timeout=400)
+            self.assertEqual(v.run("mount 9 /mnt"), "")
+            self.assertIn("drive 9 on /mnt (c64fs)", v.run("mount"))
+            v.run("mkdir /mnt/d")
+            v.run("cp /etc/help /mnt/d/help")
+            self.assertEqual(v.run("umount /mnt"), "")
+        out = subprocess.run([sys.executable, mk, "cat", img9, "/d/help"], capture_output=True, check=True)
+        with open(os.path.join(ROOT, "rootfs", "etc", "help"), "rb") as f:
+            self.assertEqual(out.stdout, f.read())
+        out = subprocess.run([sys.executable, mk, "ls", img9, "/"], capture_output=True, text=True, check=True)
+        self.assertIn("d", out.stdout.split())
+        with open(img9, "rb") as f:
+            data = f.read()
+        self.assertEqual(data[376 * 256:376 * 256 + 9], b"C64F2\x02\x80\x0c\x80")
+        self.assertEqual(data[376 * 256 + 11:376 * 256 + 15], bytes([379 & 255, 1, 32, 1]))
+
 
 if __name__ == "__main__":
     unittest.main()

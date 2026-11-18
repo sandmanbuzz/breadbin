@@ -17,12 +17,12 @@
 ; mounted volume never changes geometry, and a drive that was swapped is asked again.
 ;
 ; Limits. The boot drive (device 0) is opened before any module exists and is never asked:
-; it stays a 1541. c64fs v1 has a one-block bitmap, so a volume holds 2048 blocks (tracks
-; 1 to 52 sector 7); the image tool (tools/mkimage.py d81) marks track 40 (the 1581's
-; header, BAM and directory) used and leaves the tracks past the 2048th block alone. A CBM
-; DOS disk in a 1581 is not handled (cbm.km reads the 1541's track 18). `format` writes the
-; 1541 layout and must not be used on a 1581. A probe that fails on the bus reads as "not
-; a 1581": the mount then finds no superblock and fails without writing.
+; it stays a 1541. A volume is c64fs format 2 over the whole disk, 3200 blocks: two bitmap
+; blocks (377-378), inodes 379-410, and track 40 (the 1581's header, BAM and directory, every
+; block allocated) marked used; tools/mkimage.py d81 and `format` (with this module loaded)
+; write it, as upstream's tools do. A CBM DOS disk in a 1581 is not handled (cbm.km reads
+; the 1541's track 18). A probe that fails on the bus reads as "not a 1581": the mount then
+; finds no superblock and fails without writing.
 ;
 ; Source and licence. Our own work. The 1581's geometry and its block commands are from
 ; the Commodore 1581 Disk Drive User's Guide (the track and sector table; the "U1"/"U2"

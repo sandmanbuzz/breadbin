@@ -711,7 +711,7 @@ uci_probe:
 
 ; uci_iget: ci_ino 1/3 -> a directory, 2 -> the probed file
 uci_iget:
-        ldx #INO_SIZE-1
+        ldx #CI_SIZE-1
         lda #0
 @z:     sta ci,x
         dex

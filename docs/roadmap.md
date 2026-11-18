@@ -84,7 +84,7 @@ Enabling turbo is a one-line story once M0-4 lands, and it should be a runtime s
 - Per-device geometry stays in the one existing table in `blk.s`.
 - No new abstractions for devices we are not supporting.
 
-For when the decision is revisited: the c64fs bitmap is one block and addresses 2048 blocks, so a 1581 (3200 blocks), a 16 MB REU RAM disk or an IEC hard drive does not fit without a scoped v2 (multi-block bitmap, wider inode numbers, geometry from the superblock). A 1571 (1366 blocks) fits as is. Block commands (`U1`, `U2`, `B-P`) are known to work on the 1541; other drives need checking on real hardware. The file-level paths (CBM DOS backend, UCI DOS) do not have this problem.
+Format 2 (upstream's, `docs/filesystem.md`) has the multi-block bitmap, so a 1581 (3200 blocks) fits and `/lib/km/d81` mounts it; what is still open for a 16 MB REU RAM disk (capped at 2048 blocks by the drive cache's banks) or an IEC hard drive is wider inode numbers and geometry read from the superblock. A 1571 (1366 blocks) fits as is. Block commands (`U1`, `U2`, `B-P`) are known to work on the 1541; other drives need checking on real hardware. The file-level paths (CBM DOS backend, UCI DOS) do not have this problem.
 
 ## Memory budget
 
@@ -206,7 +206,7 @@ What this means for the plan:
 - The "NFS without the N" analogy holds, with one consequence: the target keeps one open file per instance while the kernel allows 24. The backend should be stateless in spirit: open, seek, transfer, close per chunk, with at most one cached handle.
 - The UCI is synchronous register I/O at CPU speed, so disk access through it should stop stalling the other processes for seconds, unlike the KERNAL serial path.
 - Load-into-REU plus the existing REU DMA gives a cheap path for program loading, overlays and text paging.
-- **c64fs v2 loses priority.** On a 1541 a 35 KB file limit is fine for a 170 KB disk. Its remaining jobs are the REU RAM disk beyond 512 KB and any future block device, so it shrinks to "make the bitmap and inode widths scale" instead of a full redesign.
+- **c64fs scaling loses priority** (the multi-block bitmap arrived with format 2). On a 1541 a 35 KB file limit is fine for a 170 KB disk. Its remaining jobs are the REU RAM disk beyond 512 KB and any future block device, so it shrinks to "make the bitmap and inode widths scale" instead of a full redesign.
 
 ## Milestones and stories
 
@@ -259,7 +259,7 @@ Programs matter as much as the kernel: `as` is 6.4 KB and `basic` 5.6 KB of the 
 
 - **S5. Block driver table** replacing `cmp #1` in `blk.s`: read, write, block count, type and track mapping per device (1541, REU). REU detection and sizing lifted past 8 MB and the 2048-block cap. *Depends on S1.*
 - **S6. Filesystem interface**, replacing the scattered `dev_type` branches in `file.s`, `fs.s`, `exec.s`, `cbm.s`. Backends: c64fs, CBM DOS. *Depends on S2, S3.*
-- **S7. c64fs scaling** (v1 removed): multi-block bitmap, wider inode numbers, geometry read from the superblock instead of fixed at block 376, a file layout that goes past 35 KB. Image tools updated to match. Nice-to-have; see "Block devices and the filesystem". Keep the scope small. *Depends on S2, S3, S6.*
+- **S7. c64fs scaling** (v1 removed; the multi-block bitmap and 3200-block 1581 volumes are done with format 2): wider inode numbers, geometry read from the superblock instead of fixed at block 376, a file layout that goes past 35 KB. Image tools updated to match. Nice-to-have; see "Block devices and the filesystem". Keep the scope small. *Depends on S2, S3, S6.*
 - **S8. REU-resident `/bin`:** copy commands to the REU RAM disk at boot, so command loads stop costing seconds. `exec.s` appears to run programs from any c64fs device already; confirm. *Depends on S5. Unblocks:* a tolerable dev loop on the Ultimate without further storage work.
 
 ### M3: Ultimate storage (Track A, needs hardware)

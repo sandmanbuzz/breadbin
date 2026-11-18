@@ -430,9 +430,9 @@ class REURoot(unittest.TestCase):
             v.wait_for("cannot mount root", timeout=60)
 
     def test_stale_superblock_version_cannot_mount(self):
-        with open(self.reu, "r+b") as f:     # a superblock of another version: not ours to adopt
+        with open(self.reu, "r+b") as f:     # a superblock of another version (format 1): not ours
             f.seek(376 * 256 + 5)
-            f.write(b"\x02")
+            f.write(b"\x01")
         with self.boot() as v:
             v.wait_for("cannot mount root", timeout=60)
 
@@ -502,8 +502,8 @@ class Cache(unittest.TestCase):
 
     def test_new_disk_discards(self):
         self.boot()
-        with open(self.img, "r+b") as f:    # another build: a different id
-            f.seek(376 * 256 + 15)
+        with open(self.img, "r+b") as f:    # another build: a different id (SB_BUILD_ID, blk.s)
+            f.seek(376 * 256 + 252)
             f.write(b"\xde\xad\xbe\xef")
         _, hits, misses, _ = self.boot()[1]
         self.assertGreater(misses, 20)

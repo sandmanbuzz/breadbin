@@ -51,7 +51,9 @@ MAJ_CON  = 1
 
 ; c64fs
 SB_MAGIC_LEN = 5
-INO_SIZE   = 32
+C64FS_VERSION = 2       ; superblock byte 5 (magic "C64F2", fs.s): upstream's format 2
+INO_SIZE   = 64         ; on disk, 4 a block: bytes 32-39 are upstream's mtime and ctime
+CI_SIZE    = 32         ; what ci holds (bytes 0-31); iput writes 32-63 as zero (no times)
 NDIRECT    = 12
 DIRENT     = 16
 NAME_MAX   = 14
