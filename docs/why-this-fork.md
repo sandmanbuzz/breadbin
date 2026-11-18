@@ -4,11 +4,11 @@ Breadbox is a fork of Breadbin, the Unix-like operating system for the Commodore
 
 **The name is temporary.** "Breadbox" was chosen so that the fork is not confused with upstream and makes no claim to track it. It can change if a collision or a better idea turns up. The version string restarts at 0.1 for the same reason: upstream's number is upstream's.
 
-Status: 2026-11-07. Every claim below points at a file or commit in this repo, or at an upstream commit. Upstream moves quickly; where this page compares, it says which upstream commit it looked at: `bb4bba3` on upstream `main` (2026-11-06, upstream version 0.6) and `f896ed2` on its `release-0.6` branch. Re-check before relying on a line.
+Status: 2026-11-18, on main `185c35a` (this page was last brought up to date on 2026-11-07; much of what was true then has moved). Every claim below points at a file or commit in this repo, or at an upstream commit. Upstream moves quickly; where this page compares, it says which upstream commit it looked at: `0b3f621` on upstream `main` (2026-11-17; its commit messages say version 0.9) and its release branches up to 0.8. Re-check before relying on a line.
 
 ## What it is
 
-A small Unix-like operating system for the C64, in 6502 assembly (ca65): preemptive multitasking, separate programs in `/bin`, pipes and redirection, signals, a filesystem with directories, and an assembler and BASIC that run on the machine itself (`README.md`). All of that is upstream's work and is shared.
+A small Unix-like operating system for the C64, in 6502 assembly (ca65): preemptive multitasking, separate programs in `/bin`, pipes and redirection, signals, a filesystem with directories, and an assembler and BASIC that run on the machine itself (`README.md`). All of that is upstream's work and is shared. The disk format is c64fs format 2, which is upstream's (`docs/filesystem.md`); we dropped our own v1 and migrated in one step on 2026-11-16.
 
 ## Why it exists
 
@@ -19,12 +19,16 @@ The direction is in `docs/roadmap.md`: make the C64 a place where real software 
 Upstream has a lot we also have (see the next section). These are the parts that differ, checked against upstream `bb4bba3`.
 
 - **No KERNAL ROM at all.** Our own interrupt entry, keyboard, screen driver and serial bus (IEC) driver. No Commodore ROM is needed at run time. Upstream has its own IEC driver too (`src/kernel/iec.s`), but it keeps the KERNAL ROM for the screen and keyboard and runs under the KERNAL interrupt path (its `CLAUDE.md`, `src/kernel/main.s`).
-- **Kernel modules** (`mod` command), with the CBM DOS filesystem and **UCI v1** (`mount uci /u`) as loadable modules, so an Ultimate's own file API is a mounted filesystem. Upstream has CBM DOS disks built into its kernel (`src/kernel/cbm.s`) and no UCI. `mount uci` passes on the real Ultimate (`docs/hardware-notes.md`).
+- **Kernel modules** (`mod` command), with the CBM DOS filesystem, **UCI v1** (`mount uci /u`), the 1581 volume driver (`d81`) and the 1541 block-transfer module (`fast`) as loadable modules, so an Ultimate's own file API is a mounted filesystem and the kernel carries none of that unless it is loaded. Upstream has CBM DOS disks and its 1581 support built into its kernel (`src/kernel/cbm.s`) and no UCI. `mount uci` passes on the real Ultimate (`docs/hardware-notes.md`).
+- **JiffyDOS byte protocol**, written clean-room (`docs/design/jiffydos-cleanroom.md`): the serial driver probes each session and uses it with a JiffyDOS drive, and stays on the standard protocol with any other drive (`make JIFFY=0` builds without). Upstream says JiffyDOS "doesn't help, but doesn't get in the way". Tested under VICE with the JiffyDOS ROMs; I found no hardware run of this protocol in `docs/hardware-notes.md`.
+- **Fast reads on a stock 1541** (`fast` module, story M0-8): drive-side block transfer, about 1.65 to 1.7 times the standard protocol under VICE (`docs/design/fast-io.md`, section 17). Upstream has its own drive-side routine too ("about twice as fast", its README); ours is a module, VICE-tested, not yet run on a physical drive.
+- **Single-drive disk swap:** `eject` and `reattach` let a one-drive system change disks while `/` is served from the REU cache (`0c060a4`).
 - **REU block cache** for the boot drive: write-through, keyed by a build id and the disk label (`cache` command, `make CACHE=0|1|2`). Upstream also keeps a copy of drive 8's blocks in the REU as they are read (`84f0981`), which the survey treats as an earlier version of the same idea.
 - **`turbo`.** Upstream has no equivalent.
-- **Kernel size is measured.** `make size` reports the bytes per module and the headroom, and `docs/size-ledger.tsv` has a row per landing. Upstream also treats RAM as scarce and has an INIT segment and code under the ROM; it has no measurement tool or ledger that we found.
-- **User memory.** The user pool is 155 pages (`$0800-$A2FF`, 39,680 bytes), above a stock C64's 38,911 BASIC bytes. Upstream's `release-0.6` gives programs 125 pages (`61f006d`, kernel at `$8500`).
-- **Test infrastructure.** Upstream has VICE system tests run in parallel on one machine (`tools/ptest.py`, about 40 minutes by its `CLAUDE.md`) and host tests. This fork adds VICE tests sharded across containers (`tools/ci`, `docs/ci.md`), a real-keystroke test, a py65-based simulator for UCI and for `as`, a fake Ultimate server, a hardware test backend (`tools/ultimatetest.py`), locks for shared machines (`tools/with-lock`), and a landing script (`tools/land.sh`) that builds and runs `make test-host` on the merged tree before it commits.
+- **Kernel size is measured.** `make size` reports the bytes per module and the headroom, and `docs/size-ledger.tsv` has a row per landing. Upstream also treats RAM as scarce and has an INIT segment and code under the ROM; it has no measurement tool or ledger that we found. The process save area now lives in the RAM under the I/O area (`feat/psave-io`) and cold code above the BSS, which is how format 2, JiffyDOS and the modules fit.
+- **User memory.** The user pool is 155 pages (`$0800-$A2FF`, 39,680 bytes), above a stock C64's 38,911 BASIC bytes. Upstream gives programs 125 pages since 0.7 (`61f006d`, kernel at `$8500`) and keeps its hot variables in zero page; we keep zero page stock-shaped.
+- **Test infrastructure.** Upstream has VICE system tests run in parallel on one machine (`tools/ptest.py`, about 40 minutes by its `CLAUDE.md`) and host tests. This fork adds VICE tests sharded across containers (`tools/ci`, `docs/ci.md`; 136 of 136 green in 1,439 s on 2026-11-13, one run), a fail-closed per-shard test count, doc drift guards (`tools/test_docs_drift.py`), a real-keystroke test, a py65-based simulator for UCI and for `as`, a fake Ultimate server, a hardware test backend (`tools/ultimatetest.py`), locks for shared machines (`tools/with-lock`), and a landing script (`tools/land.sh`) that builds and runs `make test-host` on the merged tree before it commits.
+- **Shell.** `$?`, `&&` and `||` (own implementation; `2>` is not done), history on the console, TAB completion (adapted from upstream with credit), and `&` for background jobs.
 - **Host-side compiler.** `tools/cc.py`, a C-subset compiler that emits `as` source. It is a host-side reference for now (`README.md`).
 
 ## How we work
@@ -44,24 +48,23 @@ Real hardware is part of the acceptance process, and agents drive it.
 - The same system, keyboard and console tests that run under VICE run against a real Ultimate 64 with `BREADBIN_TARGET=ultimate` (`tools/ultimatetest.py`, `tools/ultimate.py`; `docs/testing.md`).
 - Hardware is a shared, locked resource (`tools/with-lock -r ultimate`), held by one agent at a time, and findings go to `docs/hardware-notes.md` with the command, date and commit. A hardware agent writes images to a physical 1541 and boots them.
 - At a milestone the gate is the full VICE suite, the JiffyDOS-ROM subset, and a hardware run (`CLAUDE.md`). It is a milestone gate, not a per-commit one: hardware answers what only hardware can answer.
-- The gate does find things: the physical-1541 stall was found this way and is still open (below).
+- The gate does find things: the physical-1541 stall was found this way; it is mitigated and no longer reproduces under the session-5 trials, but was never root-caused (below).
 
 ## What upstream has that we have too
 
-Verified in upstream `bb4bba3`: `exec` (`src/kernel/exec.s`; `login` execs into the shell), BRK in user code kills only that process, shell history with Up/Down, TAB completion, `touch`, `as` and BASIC on the machine, MIT licence. Some of these we ported with credit (TAB completion adapted from `4abb291`, `touch`); the rest (`exec`, BRK kill, history) are our own implementations of features upstream also has, so none of them is a first for this fork.
+Verified in upstream: `exec` (`src/kernel/exec.s`; `login` execs into the shell), BRK in user code kills only that process, shell history with Up/Down, TAB completion, `touch`, `$?`, `&&`, `||`, `2>`, `as` and BASIC on the machine, a drive-side fast block routine, 1581 support, `fsck` and `sync`, MIT licence. Some of these we ported with credit (TAB completion adapted from `4abb291`, `touch`); the rest (`exec`, BRK kill, history, `$?`, `&&`, `||`, the fast block transfer, 1581 support) are our own implementations of features upstream also has, so none of them is a first for this fork.
 
 ## What upstream has that we lag on
 
-Tracked in `docs/design/upstream-survey.md`, whose status table is dated 2026-11-04 against upstream `712cc60` and is now 15 upstream commits stale. From the upstream log:
+Tracked in `docs/design/upstream-survey.md`, whose status table is dated 2026-11-04 against upstream `712cc60` and is now far out of date (about 50 more upstream commits). Looking at upstream `0b3f621`:
 
-- **Shell:** `$?`, `&&`, `||` and `2>`. We have none of these yet (backlog; not needed for 0.1).
-- **Disk:** fast 1541 reads (`7bc197a`, about 1.8 times faster; ours is story M0-8), the CLK pulse at talk turnaround (`ff69a25`, tied to the stall below), the jiffy clock keeping time during disk I/O (`d2e3423`).
-- **REU swap:** programs that are not running wait in the REU when memory runs out (`3ad7236`).
-- **1581:** a `breadbin.d81` target and `mount` of a 1581, tested in VICE only. Non-1541 drives are nice-to-have for us, not milestone work.
+- **Shell:** `2>` (stderr redirection; it needs a per-process error descriptor in the kernel). `$?`, `&&` and `||` are done here.
+- **REU swap:** programs that are not running wait in the REU when memory runs out (`3ad7236`). We do not have it; GeoRAM support is also upstream-only.
+- **Userland:** `htop`, `who`, `talk` and `mail` for several terminals, a serial terminal on `/dev/ttyS0`, `fsck` in 18 pages, `sync`, `SYS_SEEK`, `tail` reading the last 2 KB, and games (chess, tetris). None is ported or planned yet; each would be judged by its kernel and pool cost.
+- **Drive robustness:** a drive that was reset or stops answering gives an error and keeps working (`6aca717`, `2374af2`). Our IO release (`9d1b949`) bounds the bus waits and retries failed transfers; the two have not been compared line by line.
 - **`edit` fixes:** several (`1cd090b`, `b84924a`, `683a525`, `1224179`). One equivalent of the flicker fix (`0575584`) has landed here; the others have not been compared.
-- **On `release-0.6` only:** `SYS_SEEK`, `fsck` in 18 pages, `tail` reading the last 2 KB, hot kernel variables in zero page.
 
-Job control, a write-back cache and file times are classed "inspiration only" in the survey.
+What was on this list on 2026-11-07 and is now done here: fast 1541 reads (the `fast` module) and the JiffyDOS protocol, the 1581 (`d81` module, format 2), `$?`/`&&`/`||`. Job control, a write-back cache and file times are classed "inspiration only" in the survey.
 
 ## Platform tiers
 
@@ -77,10 +80,11 @@ The core never requires an REU or an Ultimate.
 
 ## Known limits and open issues
 
-- **Physical 1541 root-mount stall: mitigated, not root-caused.** A bounded wait in `bus_acptr` and three retries with UNTALK took about 1 boot in 4 to 13 of 13, and 5 of 5 on a later build (`docs/hardware-notes.md`). On 2026-11-07, with the candidate build, the owner's manual boot after a full power cycle reached the login prompt, but the automated attempts did not: LOAD hangs, a root-mount panic after a power cycle, and a LOAD ERROR. None was chased, and a follow-up is backlogged (`docs/hardware-notes.md`). The 0.1 release does not claim an automated physical-1541 boot. The Ultimate boot is the evidence for the Recommended tier.
-- **Keyboard.** A key drop on hardware has been seen once and not reproduced on demand. The VICE test `test_tab_no_match_does_not_fire` fails in its setUp; cause not identified (`docs/testing.md`, "Known issues").
+- **Physical 1541 root-mount stall: mitigated, not root-caused.** The bounded wait and retries took about 1 boot in 4 to 13 of 13. The IO release (`9d1b949`, 2026-11-12) bounds every bus wait and retries or reports a failed transfer; on a physical JiffyDOS 1541 it passed 300 write-and-read-back cycles with the cache off and 50 reset-and-boot cycles with it on (`docs/design/io-trial-protocol.md`, session 5; with the cache on, 49 of the 50 boots did not read our files from the drive). The 2026-11-07 failures are likely caused by the test harness's own DMA reads during loads (inferred, not checked at the time). Not tested this way: a stock 1541 ROM, a stock-KERNAL boot load, a machine without an REU. The original stall, seen also with no memory reads, was never root-caused.
+- **Keyboard.** A key drop on hardware has been seen once and not reproduced on demand. The VICE test `test_tab_no_match_does_not_fire` that used to fail in its setUp was a harness problem, fixed by `2c42747` (0 of 5 red since; watch for recurrence; `docs/testing.md`, "Known issues").
 - **Scrolling.** The page-boundary scroll bug (`9cab610`) is fixed and checked in VICE and in the py65 simulator. The commit records no hardware run; the owner checked the release candidate by eye on the real machine.
-- **Kernel space is scarce.** 44 bytes above the BSS and `CODEHI`, guarded by a link-time assert; every kernel byte over the room costs user memory a page at a time.
+- **Kernel space is scarce.** `make size` on `185c35a`: 1,196 bytes below `$CF00` and 643 below `$FFFA`. A link-time assert guards the region above the BSS; every kernel byte over the room costs user memory a page at a time. A dedicated size pass (research first) is planned.
+- **Not yet gated on hardware:** the JiffyDOS protocol, the `fast` module, format 2 and `eject` have VICE tests but no recorded hardware run; the full suite and the hardware list are still owed for this tip.
 - **Modules trust each other:** no file owners, modes or memory protection (`docs/design/next/modules-v1.md`).
 - **Non-1541 drives** are nice-to-have. c64fs v1 compatibility is dropped.
 
