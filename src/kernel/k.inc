@@ -2,7 +2,7 @@
 .include "../../include/breadbin.inc"
 
 KSTART  = $A300     ; must match KRAM in kernel.cfg: the user pool is $0800-KSTART-1
-MAXPROC = 10
+MAXPROC = 8
 NFD     = 8         ; fds per process
 NFILE   = 24        ; system open-file table
 NPIPE   = 4
@@ -32,6 +32,7 @@ PS_ZOMBIE  = 3
 ; wait channels
 CH_TICK  = $01      ; woken every tick
 CH_KEY   = $04      ; woken when the keyboard buffer is not empty
+CH_ROOT  = $08      ; woken when the boot disk is back in its drive (cache op 8)
 CH_SLEEP = $02      ; woken when ticks reach p_wk (sleep)
 CH_CHILD = $80      ; | parent slot
 CH_PIPE  = $40      ; | pipe index
@@ -109,9 +110,9 @@ ST     = $90
 ; mem.s
 .global page_alloc, page_alloc_hi, page_free, mem_init, sys_meminfo, free_pages, total_pages
 ; blk.s
-.global blk_init, bread, bdirty, bflush_all, buf_ptr, reu_banks, dev_present
+.global blk_init, bread, bdirty, bflush_all, buf_ptr, reu_banks, rd_banks, dev_present
 .global iec_open, iec_close, ts_block, iec_command, cur_dev_set, dev_drive, dev_type
-.global bget_buf, binval
+.global bget_buf, binval, ejected
 ; fs.s
 .global fs_mount, iget, iput, ci, ci_dev, ci_ino, bmap, namei, nameiparent
 .global fs_name, dir_lookup, dir_add, dir_remove, ialloc, itrunc, balloc
