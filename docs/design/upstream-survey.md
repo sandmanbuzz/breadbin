@@ -172,7 +172,7 @@ Upstream's cost is about 33 kernel bytes of `jsr` hooks, with the rest in the ca
 | `36bb840` | `edit`: Ctrl-L or CLR redraws the whole screen | ACCEPT | user program, useful with job control |
 | `dc452fb`, `cd860e8` | boot message when drive 8 has no Breadbin disk; `ps` shows 0 pages for an unreaped job | ACCEPT if they apply | check against our boot and `ps` |
 | `520e889` | each VICE takes a free port and runs without a window | INSPO | test infrastructure |
-| `61f006d`, `32e5faf`, `3ad7236` page-count work, `4b3ff28`, `f896ed2`, `2ff35e5`-style c64fs fixes | pool at 125 pages; inode and `/tmp` fixes | skip | our pool is 155 pages; c64fs v1 is dropped |
+| `61f006d`, `32e5faf` (pool growth), `4b3ff28`, `f896ed2` (c64fs inode and `/tmp` fixes) | pool at 125 pages; inode and `/tmp` fixes | skip | our pool is 155 pages; c64fs v1 is dropped |
 | `htop` (`ec53bd4`) | CPU and memory per process, measured from jiffy lateness | SHAPE-OF | a neat way to get CPU shares with no kernel accounting |
 | `talk`, `talkw`, `who` (`9d1a0ab`, `a9cc36d`, `fa949b6`) | chat between the two terminals; list users by terminal | INSPO | only meaningful with a second terminal |
 | `mail` (`cd8e6bb`) | 781-line local mail | skip | low value |
