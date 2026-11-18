@@ -1018,3 +1018,63 @@ class Readline(unittest.TestCase):
         self.tab()                              # a pattern: nothing is added
         self.v.type("\n")
         self.v.wait_for("/home/hello.s", after="$ echo /home/h*.s\n")
+
+
+class ShellOperators(unittest.TestCase):
+    """Shell &&, || and $? expansion: one VICE session."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.img = os.path.join(ROOT, "build", "test_shops.d64")
+        with open(IMAGE, "rb") as f, open(cls.img, "wb") as g:
+            g.write(f.read())
+        cls.v = make_target(cls.img)
+        cls.v.wait_shell()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.v.close()
+
+    def test_and_success(self):
+        """echo ok && echo yes: second command runs."""
+        out = self.v.run("echo ok && echo yes")
+        self.assertIn("yes", out)
+
+    def test_and_fail(self):
+        """cat /nope && echo no: second command skipped."""
+        out = self.v.run("cat /nope && echo no")
+        # the error text itself contains "no" ("/nope", "no such file")
+        self.assertNotIn("no", out.splitlines())
+
+    def test_or_success(self):
+        """echo ok || echo no: second command skipped."""
+        out = self.v.run("echo ok || echo no")
+        self.assertNotIn("no", out)
+
+    def test_or_fail(self):
+        """cat /nope || echo yes: second command runs."""
+        out = self.v.run("cat /nope || echo yes")
+        self.assertIn("yes", out)
+
+    def test_dollar_question_after_success(self):
+        """$? after echo ok is 0."""
+        self.v.run("echo ok")
+        out = self.v.run("echo $?", clear=False)
+        self.assertEqual(out.strip(), "0")
+
+    def test_dollar_question_after_fail(self):
+        """$? after cat /nope is 1."""
+        self.v.run("cat /nope")
+        # clear=False: run() types "clear" first, which would set $? to its own 0
+        out = self.v.run("echo $?", clear=False)
+        self.assertEqual(out.strip(), "1")
+
+    def test_chained_and_or(self):
+        """echo ok && cat /nope || echo recovered: the || fires because last_status != 0."""
+        out = self.v.run("echo ok && cat /nope || echo recovered")
+        self.assertIn("recovered", out)
+
+    def test_chained_or_and(self):
+        """cat /nope || echo ok && echo yes: && fires because echo ok succeeded."""
+        out = self.v.run("cat /nope || echo ok && echo yes")
+        self.assertIn("yes", out)

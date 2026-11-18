@@ -641,7 +641,7 @@ d_ress: jsr expr                ; no bytes stored: zeros are filled in only if s
         lda #<e_resrel
         ldx #>e_resrel
         jmp error
-@sign:  lda pc                  ; image + BSS is what the loader must fit in the pool ($9A00 = 39424 bytes; a total of exactly $9A00 is refused too, conservatively: the pool must be left a byte): the sum is checked,
+@sign:  lda pc                  ; image + BSS is what the loader must fit in the pool (POOLSZ bytes; a total of exactly POOLSZ is refused too, conservatively: the pool must be left a byte): the sum is checked,
         clc                     ; and it is the sum the message names (a wrapped count, 0-1 is $FFFF, carries out or is far over)
         adc ev
         tax

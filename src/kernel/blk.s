@@ -1133,7 +1133,7 @@ cache_attach:
         sta cache_on
         jmp cache_wr            ; the superblock (bp) goes in
 
-.segment "CODE"
+.segment "CODEHI"            ; cold: cache epoch and the cache syscall
 ; cache_epoch: the first write to the boot drive in a boot. Gives the disk a new build id
 ; (and the cache header the same), so a copy of the disk that was not written by this
 ; boot, such as the pristine image mounted again, no longer matches the cache.
