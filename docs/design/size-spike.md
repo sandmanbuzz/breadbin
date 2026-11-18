@@ -125,3 +125,34 @@ change, review, hater-gate loop from the project rules; before and after `make s
 commit; `test-host` plus the targeted VICE tests per module and the full suite at the end
 (the interrupt path, `proc` and `blk` are milestone-class changes). P1 is a safe first step: it
 is verified, small, and in `blk`.
+
+## Pass 2: structural findings (2026-11-18)
+
+A second pass over main at 47f849e, read with the cookbook's first questions: which
+information is duplicated, where state lives, and what the target gives for free.
+`.blocks/routine-sizes.py` prints the size of every routine and table (from
+`build/kernel.lbl` and `build/kernel.map`) and is what the figures below come from. Low =
+below `$CF00` (1196 bytes free at 47f849e), high = below `$FFFA` (643 free). Cold code
+moves from low to high, so a high-region byte is worth a low-region byte as long as cold
+code is left to move.
+
+| # | Finding | Region | Estimate | Status |
+|---|---|---|---|---|
+| S1 | **A page per process under I/O.** `$D000-$DFFF` RAM holds `p_save` (1,900 bytes at `$D040-$D7AB`), and `$D7AC-$DFFF` (2,132 bytes) is unused. The `$D800` cap comes from the simulators in `tools/`, which map `$D000-$DFFF` flat (`tools/test_psave_sim.py`); colour RAM is a separate chip, so on the machine that RAM is free. Give slot N the page `$D0+N`: the zero page save at 0, the stack at `ZPSAVE`, the cwd string at 192 (48 bytes), the name at 240 (11). `p_cwd` (480) and `p_name` (110) leave the BSS, and the two multiply loops (`cwd_ptr` *48, `slot_save_ptr` *190) become "page = `$D0` + slot". Cwd and name readers bank `$01` like `sched` does. Uses `$D000-$D9FF` and leaves `$DA00-$DFFF` (1.5 KB). The simulators must learn the `$01` banking first. | high | -590 BSS, about -50 code | proposed |
+| S2 | **`sys_return` in the `$CF00` page.** The page has 31 free bytes after `enter`; `sys_return` is 34 bytes in CODE. `need_resched` and `in_kernel` only hold 0 and 1, so `lsr` both tests and clears them (-7), and it fits. | low | -34 | proposed |
+| S3 | **The path pointer.** Seven syscalls `jsr set_pp_r0` and four copy `r0` to `pp` inline (`file.s:232`, `exec.s:137`, `cbm.s:128`, `cbm.s:359`). The inline ones become calls. Not done: copying `r0` to `pp` in `enter` for every syscall, which would also remove the seven calls, because a syscall that sleeps would then have its `pp` clobbered by any syscall, not only path syscalls. | low | -20 | proposed |
+| S4 | **Page allocator.** `page_alloc` and `page_alloc_hi` are the same first-fit loop in two directions (about 120 bytes together); `total_pages` is the constant `NPOOL` kept in BSS. One loop with the step (`inx`/`dex`) as a parameter. `pg_used` (155 bytes, 0 or 1 per page) stays: a bitmap saves 135 bytes of BSS but costs about as much code in three places. | low | -40 | proposed |
+| S5 | **P1 needs a clamp.** The prototype in `experiments/size-spike/p1.s` keeps counting tracks past 35: block 700 becomes 37/0 and 720 becomes 38/3 (py65). `format` (`src/bin/format.s:161`) relies on the clamp to tell a 1541 from a 1581: on a 1581 without `/lib/km/d81`, 38/3 exists, so the probe takes the 1581 path and fails on block 1560 with a raw I/O error instead of saying to load the module. P1 also uses `tmp0-tmp2`, which the table version does not: each caller of `blk_to_ts` needs checking. With the clamp, about -35. | low | -35 | verified (py65) |
+
+Read and not pursued:
+
+- Instruction n-gram duplicates over the kernel sources: the most common 4- to 8-instruction
+  sequences repeat 3 to 6 times (`lda nm_dev / ldx nm_ino / jsr iget / bcs`, the `pp` copy).
+  Apart from S3, each is worth a handful of bytes; they belong to the per-module sessions.
+- The syscall records are three bytes with a spare `.byte 0` each (the index is `3n+2`).
+  The 32 spare bytes are interleaved and only fit a per-syscall flag byte; no flag pays
+  for its test in `enter` today.
+- Running cold, pure-computing code (`build_path`, `relocate`) from the RAM left under I/O
+  after S1, through a banking trampoline with interrupts off. Possible, but it puts
+  interrupts-off spans in the shell's hottest path; worth it only if the high region runs
+  out of cold code to take.
