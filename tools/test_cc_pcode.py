@@ -141,10 +141,18 @@ class PCodeOnly(unittest.TestCase):
         self.check('int main() { if ((3 == 3) + (3 != 4) + (1 < 2) + (2 > 1) + (2 <= 2) + (2 >= 3) == 5) '
                    'puts("Y"); return 0; }')
 
-    def test_unsigned_comparisons_at_the_sign_boundary(self):
-        self.check('int main() { int a = 32768; int b = 32767; if (a > b) if (b < a) if (a >= b) '
-                   'if (b <= a) if (65535 / 32768 == 1) if (65535 / 65535 == 1) if (40000 / 300 == 133) '
+    def test_signed_comparisons_at_the_sign_boundary(self):
+        # int is signed: -1 < 0, 32767 > -32768, and the VM's compares (true is -1) give C's 1
+        self.check('int main() { int a = 0 - 1; int b = 0; if (a < b) if (b > a) if (a <= b) if (b >= a) '
+                   'if (a != b) if (a < 0) if (b <= 0) if (32767 > (0 - 32768)) if ((0 - 32768) < 32767) '
+                   'if (32767 >= (0 - 32768)) if ((0 - 32768) <= 32767) if ((1 < 2) + (2 > 1) == 2) '
                    'puts("Y"); return 0; }')
+
+    def test_signed_division_and_its_zero(self):
+        # truncates toward zero; x / 0 is 0
+        self.check('int main() { int z = 0; if (0 - 7 / 2 == 0 - 3) if ((0 - 7) / 2 == 0 - 3) '
+                   'if (7 / (0 - 2) == 0 - 3) if ((0 - 7) / (0 - 2) == 3) if ((0 - 1) / 32767 == 0) '
+                   'if (9 / z == 0) if ((0 - 9) / z == 0) puts("Y"); return 0; }')
 
     def test_fused_operands_every_kind(self):
         # x + v and a[v] carry v in the op (ADDLW ADDLB ADDAW ADDAB, IDXLW IDXLB IDXAW IDXAB,

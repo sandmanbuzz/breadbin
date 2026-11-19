@@ -202,6 +202,18 @@ f_main: P_FUNC
         r = self.go(body)
         self.assertEqual(words(r.out), [w for *_, w in ops])
 
+    def test_div_and_mod_by_zero_are_zero(self):
+        # x / 0 and x % 0 are 0 whatever the sign of x (the divide-by-zero rule cc.py and cc_pcode.py follow)
+        ops = [("5", "0", "PO_DIV", 0), ("-5", "0", "PO_DIV", 0), ("0", "0", "PO_DIV", 0),
+               ("5", "0", "PO_MOD", 0), ("-5", "0", "PO_MOD", 0)]
+        body = "f_main: P_FUNC\n"
+        for i, (a, b, op, _) in enumerate(ops):
+            body += f"        P_W PO_CW, {a}\n        P_W PO_CW, {b}\n        P_OP {op}\n        P_W PO_SAW, buf+{2 * i}\n"
+        body += f"        P_B PO_CB, {2 * len(ops)}\n"
+        body += "        WRITE_BUF\n        P_CN 0\n        P_OP PO_RET\n"
+        r = self.go(body)
+        self.assertEqual(words(r.out), [w for *_, w in ops])
+
     def test_syscall_keeps_the_eval_stack(self):
         # a value under the call survives (asim trashes $08-$1F on every syscall); a bad fd gives
         # -1 and the errno; a string constant is written

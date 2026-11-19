@@ -82,7 +82,13 @@ def run_c(src, steps=3000000):
     return bytes(mem[OUT:end])
 
 
-def unsigned_ops(a, b):
+def signed(v):
+    """A 16-bit value as C's signed int."""
+    return v - 0x10000 if v & 0x8000 else v
+
+
+def signed_ops(a, b):
+    a, b = signed(a), signed(b)
     return {"==": a == b, "!=": a != b, "<": a < b, ">": a > b, "<=": a <= b, ">=": a >= b}
 
 
@@ -98,15 +104,21 @@ class Executed(Case):
         src = 'int main() { puts("hello, world!\\n"); return 0; }'
         self.assertEqual(self.run_c(src), b"hello, world!\n")
 
-    def test_operator_grid_unsigned(self):
+    def test_operator_grid_signed(self):
+        # values as 16-bit patterns; the signed reading is signed_ops'
         pairs = [(0, 0), (0, 1), (1, 0), (5, 5), (0x7FFF, 0x8000), (0x8000, 0x7FFF), (0xFFFF, 1), (1, 0xFFFF),
+                 (0xFFFF, 0), (0, 0xFFFF), (0xFFFF, 0xFFFE), (0x8000, 0x8001), (0xFFFF, 0x8000),
                  (0x0100, 0x0000), (0x0001, 0x0101)]   # equal low bytes, unequal high bytes
         for a, b in pairs:
             for op in ["==", "!=", "<", ">", "<=", ">="]:
                 src = ('int main() { int a = %d; int b = %d; if (a %s b) puts("Y"); else puts("N"); '
                        'return 0; }') % (a, b, op)
-                want = b"Y" if unsigned_ops(a, b)[op] else b"N"
+                want = b"Y" if signed_ops(a, b)[op] else b"N"
                 self.assertEqual(self.run_c(src), want, (a, op, b))
+
+    def test_comparison_values_add_as_ones_and_zeros(self):
+        self.assertEqual(self.run_c('int main() { if ((1 < 2) + (2 > 1) == 2) puts("Y"); else puts("N"); '
+                                    'return 0; }'), b"Y")
 
     def test_arithmetic_wraps_at_16_bits(self):
         cases = [("1 + 2", 3), ("7 - 9", 0xFFFE), ("0 - 1", 0xFFFF), ("0xFFFF + 1", 0),
@@ -244,14 +256,28 @@ class ExecutedSlice3(Case):
                    'else puts("N"); else puts("N"); else puts("N"); return 0; }')
 
     def test_division_of_a_large_number(self):
-        self.check('int main() { if (65535 / 3 == 21845) puts("Y"); else puts("N"); return 0; }')
+        # 65535 is -1 in C's int: -1 / 3 truncates to 0
+        self.check('int main() { if (65535 / 3 == 0) puts("Y"); else puts("N"); return 0; }')
+        self.check('int main() { if (30000 / 3 == 10000) puts("Y"); else puts("N"); return 0; }')
+
+    def test_signed_division_truncates_toward_zero(self):
+        cases = [("0 - 7 / 2", "0 - 3"), ("7 / (0 - 2)", "0 - 3"), ("(0 - 7) / (0 - 2)", "3"),
+                 ("(0 - 7) / 2", "0 - 3"), ("(0 - 1) / 3", "0"), ("(0 - 32768) / 2", "0 - 16384"),
+                 ("(0 - 10) / 5", "0 - 2"), ("0 / (0 - 5)", "0")]
+        for expr, want in cases:
+            self.check('int main() { if (%s == %s) puts("Y"); else puts("N"); return 0; }' % (expr, want), b"Y")
+
+    def test_signed_division_by_zero_is_zero(self):
+        # x / 0 is 0 on both back ends (the VM's DIV, pvm.s _DIV, gives 0 too), for either sign
+        self.check('int main() { int z = 0; if (9 / z == 0) if ((0 - 9) / z == 0) if (0 / z == 0) '
+                   'puts("Y"); else puts("N"); else puts("N"); else puts("N"); return 0; }')
 
     def test_precedence_of_the_multiplicative_level(self):
         self.check('int main() { if (2 + 3 * 4 == 14) if ((2 + 3) * 4 == 20) if (20 / 4 / 5 == 1) puts("Y"); '
                    'else puts("N"); else puts("N"); else puts("N"); return 0; }')
 
-    def test_division_by_zero_gives_65535(self):
-        self.check('int main() { int z = 0; if (9 / z == 65535) puts("Y"); else puts("N"); return 0; }')
+    def test_division_by_zero_gives_zero(self):
+        self.check('int main() { int z = 0; if (9 / z == 0) puts("Y"); else puts("N"); return 0; }')
 
     def test_a_multiplication_in_a_loop_and_a_global(self):
         self.check("int acc = 1;\n"

@@ -25,9 +25,11 @@ native back end:
 - **Locals are not static:** an uninitialised local holds whatever the frame stack held, not
   its value from the previous call (the native back end's locals are statics).
 
-Unsigned semantics are the native back end's: `<` `>` `<=` `>=` and `/` are unsigned (dividing
-by 0 gives 65535), through small native helpers called with `CALL` (the VM's are signed); only
-the helpers a program uses are emitted.
+Signed semantics are the native back end's: `int` is signed, so `<` `>` `<=` `>=` compare signed
+and `/` truncates toward zero. They are the VM's own ops (ISLT, ISGT, ISLE, ISGE, DIV), which give
+-1 for true: a NEG makes it C's 1. x / 0 is 0 (the VM's DIV, changed to give 0 for this; the
+native back end does the same). The only native helper left is `cc_copy`, and only a program
+that initialises a local char array from a string emits it.
 """
 import cc
 from cc import CompileError, Var
@@ -63,84 +65,6 @@ start:  lda #<cc_fstk
 
 # native helpers, called with CALL: X is the eval stack index (TOS at X, the one under it at X+1)
 HELPERS = {
-    # unsigned comparisons of NOS with TOS: 1 or 0 replaces both
-    "cc_ult": """\
-cc_ult: lda P_ESTKL+1,x         ; NOS < TOS: NOS - TOS borrows
-        cmp P_ESTKL,x
-        lda P_ESTKH+1,x
-        sbc P_ESTKH,x
-        jmp cc_ncarry
-""",
-    "cc_ugt": """\
-cc_ugt: lda P_ESTKL,x           ; NOS > TOS: TOS - NOS borrows
-        cmp P_ESTKL+1,x
-        lda P_ESTKH,x
-        sbc P_ESTKH+1,x
-        jmp cc_ncarry
-""",
-    "cc_ule": """\
-cc_ule: lda P_ESTKL,x           ; NOS <= TOS: TOS - NOS does not borrow
-        cmp P_ESTKL+1,x
-        lda P_ESTKH,x
-        sbc P_ESTKH+1,x
-        jmp cc_carry
-""",
-    "cc_uge": """\
-cc_uge: lda P_ESTKL+1,x         ; NOS >= TOS: NOS - TOS does not borrow
-        cmp P_ESTKL,x
-        lda P_ESTKH+1,x
-        sbc P_ESTKH,x
-        jmp cc_carry
-""",
-    "cc_ncarry": """\
-cc_ncarry:                      ; 1 if the carry is clear
-        lda #0
-        rol a
-        eor #1
-        jmp cc_put
-""",
-    "cc_carry": """\
-cc_carry:                       ; 1 if the carry is set
-        lda #0
-        rol a
-        jmp cc_put
-""",
-    "cc_put": """\
-cc_put: inx                     ; A (0 or 1) replaces NOS and TOS
-        sta P_ESTKL,x
-        lda #0
-        sta P_ESTKH,x
-        rts
-""",
-    # NOS / TOS, unsigned; by 0 gives 65535. The remainder in $3A-$3B (program zero page)
-    "cc_udiv": """\
-cc_udiv:
-        lda #0
-        sta $3A
-        sta $3B
-        ldy #16
-@lp:    asl P_ESTKL+1,x         ; the dividend becomes the quotient, a bit at a time
-        rol P_ESTKH+1,x
-        rol $3A
-        rol $3B
-        lda $3A
-        bcs @take               ; a 17th bit: the remainder is past the divisor
-        cmp P_ESTKL,x
-        lda $3B
-        sbc P_ESTKH,x
-        bcc @next
-@take:  lda $3A                 ; carry set on both paths
-        sbc P_ESTKL,x
-        sta $3A
-        lda $3B
-        sbc P_ESTKH,x
-        sta $3B
-        inc P_ESTKL+1,x
-@next:  dey
-        bne @lp
-        inx
-        rts
-""",
     # copy TOS bytes (1-255) from NOS to the address under it; pops all three
     "cc_copy": """\
 cc_copy:
@@ -164,10 +88,7 @@ cc_copy:
         rts
 """,
 }
-HELPER_USES = {"cc_ult": ["cc_ncarry"], "cc_ugt": ["cc_ncarry"], "cc_ule": ["cc_carry"],
-               "cc_uge": ["cc_carry"], "cc_ncarry": ["cc_put"], "cc_carry": ["cc_put"]}
-
-UCMP = {"<": "cc_ult", ">": "cc_ugt", "<=": "cc_ule", ">=": "cc_uge"}
+VMCMP = {"<": "PO_ISLT", ">": "PO_ISGT", "<=": "PO_ISLE", ">=": "PO_ISGE"}   # signed; true is -1
 
 
 class Local(Var):
@@ -227,10 +148,7 @@ class PGen(cc.Gen):
         self.op("P_W", "PO_CALL", name)
 
     def use(self, name):
-        if name not in self.helpers:
-            self.helpers.add(name)
-            for h in HELPER_USES.get(name, []):
-                self.use(h)
+        self.helpers.add(name)
 
     def push(self, n=1):
         self.depth += n
@@ -615,12 +533,13 @@ class PGen(cc.Gen):
         elif op == "*":
             self.op("P_OP", "PO_MUL")
         elif op == "/":
-            self.helper("cc_udiv")
+            self.op("P_OP", "PO_DIV")       # signed, truncating toward zero; by 0 gives 0 (pvm.s _DIV)
         elif op in ("==", "!="):
             self.op("P_OP", "PO_ISEQ" if op == "==" else "PO_ISNE")
             self.op("P_OP", "PO_NEG")       # the VM's true is -1; C's is 1
         else:
-            self.helper(UCMP[op])
+            self.op("P_OP", VMCMP[op])
+            self.op("P_OP", "PO_NEG")       # as above
         self.pop()
         return (ta[0], True) if ta[1] else ("int", False)
 

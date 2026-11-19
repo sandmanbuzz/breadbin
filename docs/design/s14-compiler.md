@@ -6,7 +6,7 @@ before S17 (self-host or stay in assembly) is decided. `tools/test_cc.py` is its
 
 ## The subset (slice 3)
 
-- `int` only: 16 bit, unsigned in comparisons (`<`, `>`, `<=`, `>=` compare unsigned).
+- `int` only: 16 bit, signed (`<`, `>`, `<=`, `>=` compare signed; `/` truncates toward zero).
 - Functions with typed parameters (`int` or `char`, passed on the software stack and stored in
   each function's static parameter slots); `main` is the entry. Calls are by name.
 - `char`: 8 bit, zero-extended when read; a store keeps the low byte.
@@ -26,7 +26,8 @@ Slice 3 adds:
 - Globals: `int|char [*] name [ [n] ] [= literal]` at top level, static (`g_<name>`), initialised
   as data (a number, a string for a char array or char pointer, or 0 for a pointer).
 - `*` and `/` as binary operators: runtime routines in the emitted program (`cc_mul`: the low 16
-  bits; `cc_div`: unsigned, and dividing by 0 gives 65535).
+  bits; `cc_div`: signed, truncating toward zero, and dividing by 0 gives 0, as the p-code VM's
+  `DIV` does since 2026-11-19).
 - A string literal is the address of its bytes (a char pointer); a char array takes a string,
   its size inferred when left out (a local copies it in each time the declaration runs).
 
@@ -38,7 +39,7 @@ and string arrays of pointers (use char arrays), `*` on pointers (`p * 2` is ref
 - An expression's value is left in `acc` (16 bit: `acc` low, `acc+1` high).
 - A binary operator evaluates the left side, pushes `acc` on a memory stack (`cc_stk`, 32
   levels, `cc_sp` its byte index), evaluates the right side, pops the left into `tmp`, and calls
-  a runtime routine: `cc_add`, `cc_sub` (`tmp - acc`), `cc_eq`, `cc_lt` (unsigned `tmp < acc`),
+  a runtime routine: `cc_add`, `cc_sub` (`tmp - acc`), `cc_eq`, `cc_lt` (signed `tmp < acc`),
   `cc_not`, `cc_swap`. `>` and `<=` are `cc_swap` then `cc_lt`, with `cc_not` for `<=`.
 - A condition is tested by `ora acc,acc+1`: zero is false.
 - Calling convention: `jsr fn_<name>`; the return value is in `acc`. Functions end with
@@ -66,9 +67,6 @@ Refused with a message (checked by `tools/test_cc.py`):
 
 Accepted, by decision, and documented here for the owner:
 
-- Comparisons are unsigned: `int x = 0 - 1; if (x < 0)` takes the false branch. C would take
-  the true branch. Pinned by the executed tests. Signed compare, or refusing `<` on signed
-  values, is for the owner to choose.
 - Block scope is not enforced: `{ int x = 1; } x = 2;` compiles, because all locals of a
   function share one namespace. C would refuse the second use.
 

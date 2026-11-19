@@ -3,7 +3,8 @@
 
   python3 tools/cc.py prog.c > prog.s        then on the C64:  as prog.s prog
 
-Subset: `int` (16 bit) and `char` (8 bit, zero-extended when read), pointers to int or char,
+Subset: `int` (16 bit, signed: `<` `>` `<=` `>=` compare signed, `/` truncates toward zero, and
+x / 0 is 0, as the VM's DIV gives), `char` (8 bit, zero-extended when read), pointers to int or char,
 arrays of int or char (local, static storage), functions with parameters (passed on the
 software stack and stored in each function's static parameter slots), local variables, unary
 `- * &`, `+ - == != < > <= >=`, indexing `a[i]`, calls, `if`/`else`, `while`, `for`, `return`,
@@ -386,18 +387,17 @@ cc_swap:                        ; tmp <-> acc
         sta acc+1
         stx tmp+1
         rts
-cc_lt:                          ; acc = 1 if tmp < acc (unsigned), else 0
+cc_lt:                          ; acc = 1 if tmp < acc (signed), else 0
         sec
         lda tmp
         sbc acc
         lda tmp+1
         sbc acc+1
-        bcc *+11                ; borrow: the 1 below (relative: no label to spend)
+        bvc *+4                 ; signed: on overflow N is the inverse of the sign of the difference
+        eor #$80                ; so flip it back
+        asl a                   ; carry = N = tmp < acc (relative branch and no label: no symbol spent)
         lda #0
-        sta acc
-        sta acc+1
-        rts
-        lda #1
+        rol a
         sta acc
         lda #0
         sta acc+1
@@ -481,7 +481,34 @@ cc_mul_2:
         lda cc_mr+1
         sta acc+1
         rts
-cc_div:                         ; acc = tmp / acc (unsigned; dividing by 0 gives 65535)
+cc_div:                         ; acc = tmp / acc, signed: the quotient truncates toward zero (-7 / 2 is -3)
+        lda acc                 ; x / 0 is 0, as the VM's DIV (src/pvm/pvm.s _DIV) gives
+        ora acc+1
+        bne *+9                 ; relative branches, no labels: every label is an `as` symbol in every program
+        sta acc                 ; A is 0
+        sta acc+1
+        rts
+        lda tmp+1               ; by sign and magnitude: bit 7 of the signs' xor (kept on the stack)
+        eor acc+1               ; says whether to negate the quotient
+        pha
+        lda tmp+1
+        bpl *+19                ; over the 17 bytes negating tmp
+        sec
+        lda #0
+        sbc tmp
+        sta tmp
+        lda #0
+        sbc tmp+1
+        sta tmp+1
+        lda acc+1
+        bpl *+19                ; over the 17 bytes negating acc
+        sec
+        lda #0
+        sbc acc
+        sta acc
+        lda #0
+        sbc acc+1
+        sta acc+1
         lda acc
         sta cc_dv
         lda acc+1
@@ -524,6 +551,15 @@ cc_div_2:
         lda cc_q
         sta acc
         lda cc_q+1
+        sta acc+1
+        pla
+        bpl *+19                ; over the 17 bytes negating the quotient
+        sec
+        lda #0
+        sbc acc
+        sta acc
+        lda #0
+        sbc acc+1
         sta acc+1
         rts
 """
