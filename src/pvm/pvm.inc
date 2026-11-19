@@ -4,6 +4,12 @@
 .import pvm_init, pvm_interp
 .importzp pvm_errno
 
+; The eval stack, for native code called with CALL: X is the index of TOS (the entry under it is
+; at X+1); a native callee pops and pushes by moving X and returns with RTS. Y is free. These are
+; pvm.s's ESTKL and ESTKH (tools/test_cc_pcode.py checks that they agree).
+P_ESTKH = $0A
+P_ESTKL = $15
+
 .macro P_FUNC
         jsr pvm_interp
 .endmacro

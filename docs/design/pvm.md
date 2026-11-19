@@ -50,8 +50,12 @@ each runtime unless said:
 | PLASMA (`xplasm -AO`, bytecode) | 83 | 42 | 51 | 47 | **223** | VM 2,226 bytes; +3 bytes per function entry |
 | cc65 `-Oirs` (native) | 247 | 106 | 188 | 106 | 647 | cc65 runtime not counted |
 | `tools/cc.py` (native, ours) | 699 | 212 | 494 | 300 | 1,705 | 421 |
+| `tools/cc.py --pcode` (bytecode, ours, L2) | 120 | 50 | 82 | 61 | 313 | the VM; 23 bytes of native entry and 55 of unsigned-compare helpers |
 
-PLASMA bytecode is 2.9 times as dense as cc65 and 7.6 times as dense as `cc.py`. The VM pays for
+PLASMA bytecode is 2.9 times as dense as cc65 and 7.6 times as dense as `cc.py`. `cc.py --pcode`
+(L2) is 1.4 times PLASMA's size and 5.4 times as dense as its own native output: the gap to
+PLASMA is mostly the unsigned comparisons (`cc.py`'s `int` is unsigned; the VM compares signed,
+so each `<` is a 3-byte `CALL` to a native helper) and the frame set-up every function pays. The VM pays for
 itself after about 2 KB of `cc.py` output, which the shell's own utilities exceed; once it is
 shared (E2) it pays from the first program.
 
@@ -64,7 +68,13 @@ source `src/pvm/test/bench.c`):
 |---|---|---|
 | PLASMA bytecode on the port (`tools/asim.py`) | 472,160 | 1 |
 | `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 609,107 | 0.78 |
+| `tools/cc.py --pcode` on the port (L2) | 669,451 | 0.71 |
 | cc65 `-Oirs` native (`sim65 -c`) | 146,347 | 3.23 |
+
+`cc.py --pcode` is 1.42 times PLASMA's time and 1.10 times its own native output's. About
+93,000 of its cycles are the unsigned-compare helpers: with the VM's signed compares (an
+experiment, wrong for `cc.py`'s unsigned `int`) it is 576,337. A signed `int` in the mini C
+front end would take that back without a VM change.
 
 The VM runs this benchmark faster than our own native compiler and at about a third of cc65's
 speed; its bytecode is a third of cc65's code size (above), the 2,544-byte VM not counted: it is
@@ -207,9 +217,9 @@ Rules for our front ends, found while porting:
   `cc.py` and cc65 recorded here (done); the eval-stack overflow trap tested (done in L0), and
   the push guards, through every guarded op, each guard's removal failing the test (done); the
   frame stack bounded and its trap tested at the boundary (204 levels of plain recursion fit the
-  test's 1 KB, 205 trap), with nothing written below it, and under VICE (`tests/test_pvm_machine.py`) (done). No Makefile
-  rule builds p-code programs yet: with no front end there is nothing to build but tests; L2
-  adds one with the first compiler (`tools/pvmlink.py prog` does the linking).
+  test's 1 KB, 205 trap), with nothing written below it, and under VICE (`tests/test_pvm_machine.py`) (done). The first
+  compiler came with L2; p-code programs are built by the tests, not yet by the Makefile (no
+  shipped program is written in C).
 - **L1s**: one VM for every p-code process (§4 item 3). `tests.test_pvm_machine.SharedVM`
   under VICE: two p-code processes, in the background and in a pipeline, hold one library copy
   (the kernel's page map and library table read through the monitor; `free` differs during the
@@ -224,6 +234,25 @@ Rules for our front ends, found while porting:
   does not check that a format 3 image has no BSS (the tools refuse it); a library path must be
   absolute (`tools/cx.py` refuses others). A library that is not there is `ENOEXEC`, other
   lookup errors stand, and a third library while two are resident is `EAGAIN`.
+
+- **L2**: `cc.py --pcode` (`tools/cc_pcode.py`) emits p-code with real stack frames: every
+  function `ENTER`s a frame holding its parameters and locals (arrays included), so recursion
+  and mutual recursion work. Every program in `tools/test_cc_run.py` runs on both back ends with
+  the same output (`tools/test_cc_pcode.py`, py65), plus what only the p-code back end does:
+  recursion (fact, fib, even/odd), locals per call, pending values across a call, values spilled
+  to frame temporaries when an expression or a call's arguments need more than the 8 entries
+  `ENTER` guarantees (the compiler counts depth; the operand order is kept), straight-line code
+  past the IP window (the compiler inserts a renormalising `BRNCH` before 240 bytes), the fused
+  operand ops (`ADDI` … `IDXAW`), and frame-stack exhaustion exiting with `ENOMEM`. Under VICE,
+  `tests.test_pvm_machine.CompiledC` runs `tests/test_compiled.py`'s programs as p-code, fib(12)
+  and fact(7), and the exit status of runaway recursion (12). Sizes as CX files, against the
+  native image with its runtime: hello 105 (585), loop 150 (688), ops 386 (1,004), slice2 360
+  (1,396); a p-code process also holds its 1 KB frame stack (BSS) and shares the VM.
+  Where it differs from the native back end: `main`'s value is the exit status; a store through
+  a pointer computes the value before the address; a frame is at most 255 bytes and a call at
+  most 8 arguments (both refused at compile time); an uninitialised local holds whatever the
+  frame stack held (the native back end's locals are statics, so they keep the last call's value); the native back end's `as` limits on names
+  and string lengths do not apply.
 
 ## 7. Sources
 

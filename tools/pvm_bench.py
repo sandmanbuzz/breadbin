@@ -5,6 +5,7 @@
 - pvm:  src/pvm/test/bench.s (upstream PLASMA compiler output) on the ported VM, under tools/asim.py
 - ccpy: src/pvm/test/bench.c through tools/cc.py, native, under py65 (tools/test_cc_run.py's harness)
 - cc65: the same C through cl65 -t sim6502 -Oirs, under sim65 -c
+- ccpcode: the same C through tools/cc.py --pcode (L2) on the same VM, under tools/asim.py
 
 Each figure is the program's cycles less an empty program's under the same harness, so start-up
 and exit are not counted. The two simulators count documented 6502 cycles; neither models the
@@ -24,6 +25,7 @@ sys.path.insert(0, TOOLS)
 import cc  # noqa: E402
 import test_cc_run  # noqa: E402
 import test_pvm  # noqa: E402
+import test_cc_pcode  # noqa: E402
 
 BENCH = os.path.join(ROOT, "src", "pvm", "test")
 EXPECT = 469
@@ -74,6 +76,12 @@ def ccpy(src):
     return mpu.processorCycles, mem[acc] | mem[acc + 1] << 8
 
 
+def ccpcode(src):
+    """Cycles and exit status (main's result & 255) of cc.py --pcode output under asim."""
+    r = test_cc_pcode.run_full(src)
+    return r.cycles, r.exit
+
+
 def cc65(src):
     """Cycles and exit status (main's result & 255) under sim65."""
     with tempfile.TemporaryDirectory(prefix="c65b-") as d:
@@ -96,16 +104,19 @@ def main():
     empty = "int main() {\n  return 0;\n}\n"
     out = {}
     for name, fn, full, base in (("pvm", pvm, "        P_W PO_CALL, _C003\n", "        P_CN 0\n"),
-                                 ("ccpy", ccpy, src, empty), ("cc65", cc65, src, empty)):
+                                 ("ccpy", ccpy, src, empty), ("cc65", cc65, src, empty),
+                                 ("ccpcode", ccpcode, src, empty)):
         cyc, res = fn(full)
         cyc0, _ = fn(base)
-        ok = res == (EXPECT & 0xFF if name == "cc65" else EXPECT)
+        ok = res == (EXPECT & 0xFF if name in ("cc65", "ccpcode") else EXPECT)
         if not ok:
             print(json.dumps({"error": "%s gave %d" % (name, res)}))
             return 1
         out[name] = cyc - cyc0
     out["pvm_vs_ccpy"] = round(out["pvm"] / out["ccpy"], 2)
     out["pvm_vs_cc65"] = round(out["pvm"] / out["cc65"], 2)
+    out["ccpcode_vs_ccpy"] = round(out["ccpcode"] / out["ccpy"], 2)
+    out["ccpcode_vs_pvm"] = round(out["ccpcode"] / out["pvm"], 2)
     print(json.dumps(out))
     return 0
 

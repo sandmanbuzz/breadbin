@@ -15,6 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from vicetest import Vice  # noqa: E402
 import test_pvm  # noqa: E402
+import test_cc_pcode  # noqa: E402
+from tests import test_compiled  # noqa: E402
 
 # PLASMA's compiler output for the benchmark (docs/design/pvm.md section 3): 469
 BENCH = open(os.path.join(ROOT, "src", "pvm", "test", "bench.s")).read() + """
@@ -114,9 +116,15 @@ def label(name):
     raise KeyError(name)
 
 
-def make_disk():
+def make_disk(c_programs=None):
+    """The root with the bytecode programs in /home, and C programs (name -> source) compiled
+    to p-code by cc.py --pcode."""
     tmp = tempfile.mkdtemp(prefix="pvm-")
     try:
+        for name, src in (c_programs or {}).items():
+            d = os.path.join(tmp, "c-" + name)
+            os.mkdir(d)
+            shutil.copy(test_cc_pcode.build(src, d), os.path.join(tmp, name))
         root = os.path.join(tmp, "root")
         shutil.copytree(os.path.join(ROOT, "build", "root"), root)
         for name, body in PROGRAMS.items():
@@ -130,6 +138,8 @@ def make_disk():
                            ("pvmnolib", broken(rec, path="/lib/nope"))):
             with open(os.path.join(root, "home", name), "wb") as f:
                 f.write(data)
+        for name in c_programs or {}:
+            shutil.copy(os.path.join(tmp, name), os.path.join(root, "home", name))
         img = os.path.join(ROOT, "build", "t_pvm.d64")
         subprocess.run([sys.executable, os.path.join(ROOT, "tools", "mkimage.py"), "build", img,
                         "--boot", os.path.join(ROOT, "build", "breadbin.prg"), "--root", root,
@@ -163,6 +173,48 @@ class PCode(unittest.TestCase):
     def test_frame_stack_overflow_exits_with_enomem(self):
         self.assertEqual(self.results["pvmdeep"].split(), [])
         self.assertEqual(self.results["pvmdeep?"].split(), ["12"])
+
+
+# C compiled to p-code (L2): test_compiled's programs, which that test assembles with `as` on the
+# machine, and what only the p-code back end does
+C_PROGRAMS = {"p" + name: src for name, src in test_compiled.PROGRAMS.items()}
+C_PROGRAMS.update({
+    "pcrec": "int fib(int n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); }\n"
+             "int fact(int n) { if (n == 0) return 1; return n * fact(n - 1); }\n"
+             'int main() { if (fib(12) == 144) puts("fib\\n"); if (fact(7) == 5040) puts("fact\\n"); return 3; }\n',
+    "pcdeep": 'int f(int n) { return f(n + 1) + 1; }\nint main() { f(0); puts("past\\n"); return 0; }\n',
+})
+
+
+class CompiledC(unittest.TestCase):
+    """cc.py --pcode on the host -> /home -> run on the kernel with /lib/pvm. One VICE session."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.results = {}
+        with Vice(make_disk(C_PROGRAMS)) as v:
+            v.wait_shell()
+            for name in C_PROGRAMS:
+                cls.results[name] = v.run(f"/home/{name}", timeout=120)
+                cls.results[name + "?"] = v.run("echo $?", clear=False, timeout=30)
+
+    def test_the_compiled_programs(self):
+        r = self.results
+        self.assertEqual(r["pcchello"].splitlines(), ["hello, world!"])
+        self.assertEqual(r["pccloop"].splitlines(), ["tick"] * 5)
+        self.assertEqual("".join(r["pccops"].split()), "eqsubge" + "".join(test_compiled.LONG_LINE.split()))
+        self.assertEqual(r["pccchar"].split(), ["p", "i", "mul"])
+        self.assertEqual(r["pccslice2"].split(), ["sum", "sub", "char"])
+        for name in test_compiled.PROGRAMS:
+            self.assertEqual(r["p" + name + "?"].split(), ["0"], name)
+
+    def test_recursion_and_the_exit_status(self):
+        self.assertEqual(self.results["pcrec"].split(), ["fib", "fact"])
+        self.assertEqual(self.results["pcrec?"].split(), ["3"])
+
+    def test_running_out_of_frame_stack_exits_with_enomem(self):
+        self.assertEqual(self.results["pcdeep"].split(), [])
+        self.assertEqual(self.results["pcdeep?"].split(), ["12"])
 
 
 class SharedVM(unittest.TestCase):

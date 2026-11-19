@@ -1097,13 +1097,20 @@ def compile_program(src):
 
 
 def main(argv):
+    pcode = len(argv) == 3 and argv[1] == "--pcode"
+    if pcode:
+        argv = argv[:1] + argv[2:]
     if len(argv) != 2:
-        print("usage: cc.py prog.c > prog.s", file=sys.stderr)
+        print("usage: cc.py [--pcode] prog.c > prog.s", file=sys.stderr)
         return 2
     with open(argv[1], encoding="utf-8") as f:
         src = f.read()
     try:
-        sys.stdout.write(compile_c(src))
+        if pcode:
+            from cc_pcode import compile_pcode     # ca65 source for the VM (tools/cc_pcode.py)
+            sys.stdout.write(compile_pcode(src))
+        else:
+            sys.stdout.write(compile_c(src))
     except CompileError as e:
         print(f"{argv[1]}: {e}", file=sys.stderr)
         return 1
