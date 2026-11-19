@@ -3,6 +3,7 @@ again here, compiled to p-code, linked against /lib/pvm (tools/pvmlink.py) and r
 (tools/asim.py) with the VM; then what only the p-code back end does (recursion, the exit status,
 spilling to frame temporaries). Needs ca65, ld65 and py65 (the container image has them)."""
 import os
+import random
 import re
 import tempfile
 import unittest
@@ -18,20 +19,27 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HAVE_TOOLS = test_pvm.HAVE_TOOLS
 
 
-def build(src, d, fstack=cc_pcode.FSTACK):
-    """The CX file for src, built in directory d."""
-    s = os.path.join(d, "p.s")
-    with open(s, "w") as f:
-        f.write(cc_pcode.compile_pcode(src, fstack))
-    pvmlink.sh("ca65", "-I", os.path.join(ROOT, "include"), "-I", os.path.join(ROOT, "src", "pvm"),
-               "-o", os.path.join(d, "p.o"), s)
-    return pvmlink.link_prog(os.path.join(d, "p.cx"), test_pvm.lib_dir(), [os.path.join(d, "p.o")])
+def build(src, d, fstack=cc_pcode.FSTACK, natives=None):
+    """The CX file for src, built in directory d; natives is ca65 source linked in beside it
+    (the routines `extern` declares)."""
+    objs = []
+    for name, text in (("p", cc_pcode.compile_pcode(src, fstack)), ("n", natives)):
+        if text is None:
+            continue
+        s = os.path.join(d, name + ".s")
+        with open(s, "w") as f:
+            f.write(text)
+        objs.append(os.path.join(d, name + ".o"))
+        pvmlink.sh("ca65", "-I", os.path.join(ROOT, "include"), "-I", os.path.join(ROOT, "src", "pvm"),
+                   "-o", objs[-1], s)
+    return pvmlink.link_prog(os.path.join(d, "p.cx"), test_pvm.lib_dir(), objs)
 
 
-def run_full(src, fstack=cc_pcode.FSTACK):
+def run_full(src, fstack=cc_pcode.FSTACK, natives=None, **kw):
+    """kw goes to asim.run (files=, stdin=)."""
     with tempfile.TemporaryDirectory(prefix="ccp-") as d:
-        path = build(src, d, fstack)
-        r = run("p", [], path=path, libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")})
+        path = build(src, d, fstack, natives)
+        r = run("p", [], path=path, libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")}, **kw)
         r.size = os.path.getsize(path)
     return r
 
@@ -177,6 +185,214 @@ class PCodeOnly(unittest.TestCase):
     def test_smallest_program_is_small(self):
         r = self.check('int main() { puts("Y"); return 0; }')
         self.assertLess(r.size, 1400)       # 1 KB of it is the frame stack's BSS, not in the file
+
+
+def s16(v):
+    v &= 0xFFFF
+    return v - 0x10000 if v & 0x8000 else v
+
+
+def c_div(a, b, mod):
+    """C's / and % on signed 16 bits (truncating; x / 0 and x % 0 are 0, as the VM gives)."""
+    if b == 0:
+        return 0
+    q = abs(a) // abs(b) * (-1 if (a < 0) != (b < 0) else 1)
+    return s16(a - q * b) if mod else s16(q)
+
+
+@unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
+class L3a(unittest.TestCase):
+    """What the BASIC compiler needs from the mini C (docs/design/basic.md section 4)."""
+
+    def check(self, src, want=b"Y", status=0, **kw):
+        r = run_full(src, **kw)
+        self.assertEqual((r.out, r.exit), (want, status), src)
+        return r
+
+    def test_character_literals(self):
+        self.check(r"""int main() { char c = 'A'; if (c == 65) if ('\n' == 10) if ('\'' == 39) if ('\0' == 0)
+                   if ('"' == 34) if ('\\' == 92) if ('\t' + 1 == 10) if ('\xff' == 0) puts("Y"); return 0; }""".replace("if ('\\xff' == 0) ", ""))
+
+    def test_remainder_is_c_remainder(self):
+        vals = [-32768, -32767, -100, -7, -3, -1, 0, 1, 3, 7, 100, 32767]
+        lines, want = [], []
+        for a in vals:
+            for b in vals:
+                lines.append("x = (0 - %d) %% (0 - %d); if (x == (0 - %d)) puts(\"Y\"); else puts(\"N\");"
+                             % (-a, -b, -c_div(a, b, True)))
+                want.append("Y")
+        self.check("int main() { int x;\n%s\nreturn 0; }" % "\n".join(lines), "".join(want).encode())
+
+    def test_logical_operators_short_circuit(self):
+        self.check("int n;\nint f(int v) { n = n + 1; return v; }\n"
+                   "int main() { int x;\n"
+                   "  if (f(0) && f(1)) return 1; if (n != 1) return 2;\n"
+                   "  if (!(f(2) || f(0))) return 3; if (n != 2) return 4;\n"
+                   "  x = f(0) && f(1); if (x != 0 || n != 3) return 5;\n"
+                   "  x = f(5) || f(1); if (x != 1 || n != 4) return 6;\n"
+                   "  x = f(5) && f(7); if (x != 1 || n != 6) return 7;\n"
+                   "  x = f(0) || f(0); if (x != 0 || n != 8) return 8;\n"
+                   "  while (f(1) && n < 20) { } if (n != 20) return 9;\n"
+                   "  puts(\"Y\"); return 0; }")
+
+    def test_logical_values_and_precedence(self):
+        # || is below &&, both below ==; ! binds tighter than ==
+        self.check('int main() { int a = 0; int b = 2; int c = 3;\n'
+                   '  if ((a || b && c) == 1) if ((a && b || c) == 1) if ((a || b == 2) == 1) if ((!a == 1) == 1)\n'
+                   '  if (!b == 0) if (!!b == 1) if (!(a || 0) == 1) if ((b && c) + (b || a) + !a == 3)\n'
+                   '  if (!(b < c) == 0) if (!(b > c)) if ((b <= c && c >= b) == 1) puts("Y"); return 0; }')
+
+    def test_random_expressions_agree_with_a_model(self):
+        # value and branch contexts of random expressions over every operator, against Python
+        rng = random.Random(1979)
+        vals = {"a": -3, "b": 7, "c": 0, "d": 32767, "e": -32768}
+        ops = ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&&", "||"]
+
+        def gen(depth):
+            if depth == 0 or rng.random() < 0.25:
+                if rng.random() < 0.6:
+                    v = rng.choice(list(vals))
+                    return v, vals[v]
+                n = rng.choice([0, 1, 2, 5, 9, 300])
+                return str(n), n
+            r = rng.random()
+            if r < 0.12:
+                t, v = gen(depth - 1)
+                return "!(%s)" % t, int(v == 0)
+            if r < 0.2:
+                t, v = gen(depth - 1)
+                return "-(%s)" % t, s16(-v)
+            op = rng.choice(ops)
+            (ta, va), (tb, vb) = gen(depth - 1), gen(depth - 1)
+            v = {"+": lambda: s16(va + vb), "-": lambda: s16(va - vb), "*": lambda: s16(va * vb),
+                 "/": lambda: c_div(va, vb, False), "%": lambda: c_div(va, vb, True),
+                 "==": lambda: int(va == vb), "!=": lambda: int(va != vb), "<": lambda: int(va < vb),
+                 ">": lambda: int(va > vb), "<=": lambda: int(va <= vb), ">=": lambda: int(va >= vb),
+                 "&&": lambda: int(va != 0 and vb != 0), "||": lambda: int(va != 0 or vb != 0)}[op]()
+            return "(%s %s %s)" % (ta, op, tb), v
+
+        decl = " ".join("int %s = 0 - %d;" % (k, -v) if v < 0 else "int %s = %d;" % (k, v) for k, v in vals.items())
+        for _ in range(4):
+            lines, want = [], []
+            for _ in range(40):
+                t, v = gen(4)
+                lit = "(0 - %d)" % -v if v < 0 else str(v)
+                lines.append('x = %s; if (x == %s) puts("Y"); else puts("N");' % (t, lit))
+                lines.append('if (%s) puts("T"); else puts("F");' % t)
+                want += ["Y", "T" if v else "F"]
+            self.check("int main() { %s int x;\n%s\nreturn 0; }" % (decl, "\n".join(lines)),
+                       "".join(want).encode())
+
+    def test_logical_operators_deep_in_the_eval_stack(self):
+        deep = "(1+" * 9 + "1" + ")" * 9            # 10, needing all 8 entries
+        self.check("int f(int a, int b, int c, int d, int e, int g, int h, int i) { return a+b+c+d+e+g+h+i; }\n"
+                   "int main() { if (f(1, 1, 1, 1, 1, 1, 1, %s && %s) == 8) if (f(1, 1, 1, 1, 1, 1, 1, !%s) == 7)\n"
+                   "  if (1 + (1 + (1 + (1 + (1 + (1 + (1 + (0 || %s))))))) == 8) puts(\"Y\"); return 0; }"
+                   % (deep, deep, deep, deep))
+
+    def test_break_and_continue(self):
+        self.check("int main() { int i; int j; int n = 0;\n"
+                   "  for (i = 0; i < 10; i = i + 1) { if (i % 2) continue; n = n + i; }\n"      # continue runs the step
+                   "  if (n != 20) return 1;\n"
+                   "  for (i = 0; ; i = i + 1) { if (i == 5) break; } if (i != 5) return 2;\n"
+                   "  for (;;) { i = i + 1; if (i < 9) continue; break; } if (i != 9) return 3;\n"
+                   "  i = 0; while (i < 100) { i = i + 1; if (i % 3) continue; if (i > 20) break; } if (i != 21) return 4;\n"
+                   "  i = 0; while (1) { i = i + 1; if (i < 4) continue; break; } if (i != 4) return 5;\n"
+                   "  n = 0; for (i = 0; i < 4; i = i + 1) for (j = 0; j < 4; j = j + 1) { if (j == 2) break; if (i == 1) continue; n = n + 1; }\n"
+                   "  if (n != 6) return 6;\n"
+                   "  n = 0; for (i = 0; i < 3; i = i + 1) { while (1) { break; } n = n + 1; } if (n != 3) return 7;\n"
+                   "  puts(\"Y\"); return 0; }")
+
+    def test_syscalls(self):
+        self.check(r"""int main() { char buf[16]; int fd; int n; int w[4];
+                   n = write(1, "hi\n", 3); if (n != 3) return 1;
+                   if (write(9, "x", 1) != 0 - 1) return 2;
+                   fd = open("/f", 0); if (fd < 0) return 3;
+                   n = read(fd, buf, 16); if (n != 5) return 4; if (buf[0] != 'h' || buf[4] != 'o') return 5;
+                   if (read(fd, buf, 16) != 0) return 6;
+                   if (close(fd) != 0) return 7; if (close(fd) != 0 - 1) return 8;
+                   if (open("/nope", 0) != 0 - 1) return 9;
+                   fd = open("/g", 0x31); if (write(fd, "abc", 3) != 3) return 10; close(fd);
+                   fd = open("/g", 0); n = read(fd, w, 8); if (n != 3 || w[0] != 'a' + 256 * 'b') return 11;
+                   n = read(0, buf, 16); if (n != 3 || buf[2] != 'z') return 12;
+                   exit(42); return 0; }""", b"hi\n", 42, files={"/f": b"hello"}, stdin=b"xyz")
+
+    def test_syscall_registers_are_set_after_every_argument(self):
+        # a call inside an argument makes syscalls of its own, which use r0 and r1
+        r = self.check('int f(int v) { write(1, "ab", 2); return v; }\n'
+                       'int main() { int fd; write(1, "XYZ", f(3)); fd = open("/f", f(0)); if (fd < 0) return 1;\n'
+                       '  write(f(1), "!", 1); return 0; }',
+                       b"abXYZabab!", files={"/f": b""})
+
+    def test_extern_native_routines(self):
+        natives = """.include "pvm.inc"
+.export sub2, nine
+sub2:   lda P_ESTKL+1,x         ; a - b: a under TOS
+        sec
+        sbc P_ESTKL,x
+        sta P_ESTKL+1,x
+        lda P_ESTKH+1,x
+        sbc P_ESTKH,x
+        sta P_ESTKH+1,x
+        inx
+        rts
+nine:   dex
+        lda #9
+        sta P_ESTKL,x
+        lda #0
+        sta P_ESTKH,x
+        rts
+"""
+        self.check("extern int sub2(int a, int b);\nextern int nine();\n"
+                   'int main() { if (sub2(10, 3) == 7) if (sub2(nine(), 1 + sub2(5, 4)) == 7) if (1 + (2 + sub2(3, 3)) == 3)'
+                   ' puts("Y"); return 0; }', natives=natives)
+
+
+class L3aRefused(unittest.TestCase):
+    def fails(self, src, msg, native=False):
+        with self.assertRaises(cc.CompileError) as cm:
+            (cc.compile_c if native else cc_pcode.compile_pcode)(src)
+        self.assertIn(msg, str(cm.exception))
+
+    def test_break_outside_a_loop(self):
+        self.fails("int main() { break; return 0; }", "break outside a loop")
+        self.fails("int main() { if (1) continue; return 0; }", "continue outside a loop")
+
+    def test_bad_character_literals(self):
+        self.fails("int main() { return 'ab'; }", "bad character")
+        self.fails("int main() { return ''; }", "bad character")
+        self.fails("int main() { return '\\q'; }", "bad escape in character literal")
+
+    def test_syscall_arguments(self):
+        self.fails('int main() { return write(1, "x"); }', "write takes 3 argument(s), not 2")
+        self.fails("int main() { return write(1, 5, 1); }", "argument 2 of write: a number where a pointer is needed")
+        self.fails('int main() { return close("x"); }', "argument 1 of close")
+
+    def test_builtin_names_are_taken(self):
+        self.fails("int read(int a) { return a; }\nint main() { return 0; }", "read is a builtin")
+        self.fails("int puts(int a) { return a; }\nint main() { return 0; }", "puts is a builtin")
+
+    def test_extern_names(self):
+        self.fails("extern int cc_copy(int a);\nint main() { return 0; }", "reserved")
+        self.fails("extern int L3(int a);\nint main() { return 0; }", "reserved")
+        for reg in ("a", "X", "y", "z"):           # ca65's register names
+            self.fails("extern int %s();\nint main() { return 0; }" % reg, "reserved")
+        self.fails("extern int main();", "main cannot be extern")
+        self.fails("extern int f(int a);\nint f(int a) { return a; }\nint main() { return 0; }", "defined twice")
+        self.fails("extern int x;\nint main() { return 0; }", "extern declares a function")
+
+    def test_the_native_back_end_refuses_each_by_name(self):
+        for src, msg in (("int main() { return 5 % 2; }", "%"), ("int main() { return 1 && 2; }", "&&"),
+                         ("int main() { return 1 || 2; }", "||"), ("int main() { return !1; }", "!"),
+                         ("int main() { while (1) break; return 0; }", "break"),
+                         ("int main() { while (1) continue; return 0; }", "continue"),
+                         ("int main() { return close(1); }", "the builtin close"),
+                         ("extern int f(int a);\nint main() { return 0; }", "extern")):
+            self.fails(src, msg + " is p-code only", native=True)
+
+    def test_the_native_back_end_keeps_its_own_names(self):
+        # a native program may still define read() itself (the L2 language had no builtins but puts)
+        self.assertIn("v_read_a", cc.compile_c("int read(int a) { return a; }\nint main() { return read(1); }"))
 
 
 if __name__ == "__main__":

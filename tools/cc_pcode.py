@@ -25,12 +25,32 @@ native back end:
 - **Locals are not static:** an uninitialised local holds whatever the frame stack held, not
   its value from the previous call (the native back end's locals are statics).
 
+L3a (docs/design/basic.md section 4) adds, to this back end only:
+
+- `%` (the VM's MOD: the dividend's sign, as C's; x % 0 is 0), `&&` `||` `!` (short-circuit; as
+  values, 0 or 1), `break` and `continue` (`continue` in a `for` runs the step).
+- **Syscall builtins:** `read(fd, buf, n)` and `write(fd, buf, n)` give the count, `open(path,
+  flags)` the fd, `close(fd)` 0, each -1 on error; `exit(status)`. One `SYS` each; `r0`/`r1` are
+  stored after every argument is evaluated, since a call inside an argument may make syscalls
+  of its own. `open` evaluates `flags` before `path` (C leaves the order unspecified). `buf` may
+  point to int or char. These names, and `puts`, cannot name a function.
+- **`extern int name(params);`** declares a native routine linked in beside the program (another
+  ca65 object; `.export name` there). `CALL` reaches it with the arguments on the eval stack, the
+  first deepest and the last at TOS (X is TOS's index, `P_ESTKL`/`P_ESTKH` in pvm.inc); it pops
+  them, pushes one result, and returns with RTS. It may not make syscalls (they clobber the eval
+  stack's zero page; only `SYS` saves it) and may not use more entries than its arguments took
+  (one, with none). Its name is the ca65 symbol, so the compiler's own prefixes are refused.
+
+A compare that decides a branch is the VM's compare and a `BRTRU`/`BRFLS`, with no `NEG`.
+
 Signed semantics are the native back end's: `int` is signed, so `<` `>` `<=` `>=` compare signed
 and `/` truncates toward zero. They are the VM's own ops (ISLT, ISGT, ISLE, ISGE, DIV), which give
 -1 for true: a NEG makes it C's 1. x / 0 is 0 (the VM's DIV, changed to give 0 for this; the
 native back end does the same). The only native helper left is `cc_copy`, and only a program
 that initialises a local char array from a string emits it.
 """
+import re
+
 import cc
 from cc import CompileError, Var
 
@@ -46,6 +66,10 @@ PRELUDE = """\
 .include "breadbin.inc"
 .include "pvm.inc"
 SYSN_WRITE = (SYS_WRITE - SYS_BASE) / 3
+SYSN_READ = (SYS_READ - SYS_BASE) / 3
+SYSN_OPEN = (SYS_OPEN - SYS_BASE) / 3
+SYSN_CLOSE = (SYS_CLOSE - SYS_BASE) / 3
+SYSN_EXIT = (SYS_EXIT - SYS_BASE) / 3
 .segment "BSS"
 cc_fstk: .res {fstack}
 cc_fend:
@@ -87,7 +111,41 @@ cc_copy:
         inx
         rts
 """,
+    # after SYS: the result of read and write is the count the kernel left in r1 (-1 on error)
+    "cc_r1": """\
+cc_r1:  lda pvm_errno
+        bne @e
+        lda r1
+        sta P_ESTKL,x
+        lda r1+1
+        sta P_ESTKH,x
+@e:     rts
+""",
+    # after SYS: open's fd is A alone; X is whatever the kernel left (-1 on error)
+    "cc_lo": """\
+cc_lo:  lda pvm_errno
+        bne @e
+        sta P_ESTKH,x
+@e:     rts
+""",
+    # after SYS: close gives 0 (-1 on error)
+    "cc_ok": """\
+cc_ok:  lda pvm_errno
+        bne @e
+        sta P_ESTKL,x
+        sta P_ESTKH,x
+@e:     rts
+""",
 }
+# the syscall builtins: SYS number, the fixing helper, and the parameters (base, pointer)
+SYSCALLS = {
+    "read": ("SYSN_READ", "cc_r1", [("int", False), None, ("int", False)]),       # None: any pointer
+    "write": ("SYSN_WRITE", "cc_r1", [("int", False), None, ("int", False)]),
+    "open": ("SYSN_OPEN", "cc_lo", [("char", True), ("int", False)]),
+    "close": ("SYSN_CLOSE", "cc_ok", [("int", False)]),
+    "exit": ("SYSN_EXIT", None, [("int", False)]),
+}
+assert set(SYSCALLS) == set(cc.SYSCALLS)
 VMCMP = {"<": "PO_ISLT", ">": "PO_ISGT", "<=": "PO_ISLE", ">=": "PO_ISGE"}   # signed; true is -1
 
 
@@ -105,6 +163,8 @@ class PGen(cc.Gen):
         self.fstack = fstack
         self.helpers = set()
         self._need = {}
+        self.loops = []                  # (break label, continue label), innermost last
+        self.externs = [name for name, _, body, _ in funcs if body is None]
 
     # --- emission ---
 
@@ -169,7 +229,19 @@ class PGen(cc.Gen):
         for d in globs:
             self.global_var(d)
         for name, params, body, line in funcs:
-            self.function(name, params, body, line)
+            if name in SYSCALLS or name == "puts":
+                raise CompileError(f"line {line}: {name} is a builtin; a function cannot have its name")
+            if body is None:
+                if name == "main":
+                    raise CompileError(f"line {line}: main cannot be extern (start calls the compiled main)")
+                if (name in ("start", "r0", "r1", "r2") or name.lower() in ("a", "x", "y", "z", "s")
+                        or re.fullmatch(r"L\d+", name)
+                        or name.startswith(("cc_", "fn_", "pvm_", "FS_", "SYSN_", "P_", "PO_", "SYS_"))):
+                    raise CompileError(f"line {line}: extern {name}: the name is reserved for the compiler")
+                self.claim(name, line)
+                self.out.append(f".import {name}")
+            else:
+                self.function(name, params, body, line)
         for name, line in self.calls:
             if name not in self.funcs:
                 raise CompileError(f"line {line}: undefined function {name}")
@@ -225,11 +297,13 @@ class PGen(cc.Gen):
         key = id(e)
         if key not in self._need:
             kind = e[0]
-            if kind == "bin":
+            if kind == "bin" and e[1] in ("&&", "||"):
+                n = max(self.need(e[2]), self.need(e[3]))     # the left value is gone before the right
+            elif kind == "bin":
                 n = max(self.need(e[2]), self.need(e[3]), 2)
             elif kind == "index":
                 n = max(self.need(e[1]), self.need(e[2]), 2)
-            elif kind in ("neg", "deref"):
+            elif kind in ("neg", "deref", "not"):
                 n = self.need(e[1])
             elif kind == "addr":
                 n = 1 if e[1][0] == "var" else self.need(e[1][1] if e[1][0] == "deref" else e[1])
@@ -315,32 +389,64 @@ class PGen(cc.Gen):
             if other is not None:
                 self.stmt(other)
             self.lab(end_l)
-        elif kind == "while":
-            # the test at the bottom: one branch an iteration, not two
-            _, cond, body, _line = s
-            top_l, test_l = self.new_label(), self.new_label()
-            if cond[0] == "num" and cond[1] != 0:
-                self.lab(top_l)
-                self.stmt(body)
-                self.op("P_BR", "PO_BRNCH", top_l)
-                return
-            self.op("P_BR", "PO_BRNCH", test_l)
+        elif kind in ("while", "for"):
+            # the test at the bottom: one branch an iteration, not two; `continue` goes to the
+            # step (a for's) or the test
+            cond, body = s[1], s[2]
+            step = s[3] if kind == "for" else None
+            top_l, test_l, end_l = self.new_label(), self.new_label(), self.new_label()
+            forever = cond[0] == "num" and cond[1] != 0
+            cont_l = self.new_label() if step else (top_l if forever else test_l)
+            if not forever:
+                self.op("P_BR", "PO_BRNCH", test_l)
             self.lab(top_l)
+            self.loops.append((end_l, cont_l))
             self.stmt(body)
-            self.lab(test_l)
-            self.cond(cond, top_l, when=True)
+            self.loops.pop()
+            if step:
+                self.lab(cont_l)
+                self.stmt(step)
+            if forever:
+                self.op("P_BR", "PO_BRNCH", top_l)
+            else:
+                self.lab(test_l)
+                self.cond(cond, top_l, when=True)
+            self.lab(end_l)
+        elif kind in ("break", "continue"):
+            if not self.loops:
+                raise CompileError(f"line {s[1]}: {kind} outside a loop")
+            self.op("P_BR", "PO_BRNCH", self.loops[-1][kind == "continue"])
         elif kind == "block":
             for x in s[1]:
                 self.stmt(x)
 
     def cond(self, e, lbl, when=False):
-        """Branch to lbl when e's truth is `when`."""
+        """Branch to lbl when e's truth is `when`. `!`, `&&` and `||` become branches; a
+        comparison's -1 needs no NEG here."""
+        if e[0] == "not":
+            self.cond(e[1], lbl, not when)
+            return
+        if e[0] == "bin" and e[1] in ("&&", "||"):
+            if (e[1] == "||") == when:          # either side decides alone
+                self.cond(e[2], lbl, when)
+                self.cond(e[3], lbl, when)
+            else:                               # the left side can only rule the branch out
+                skip = self.new_label()
+                self.cond(e[2], skip, not when)
+                self.cond(e[3], lbl, when)
+                self.lab(skip)
+            return
         if e[0] == "bin" and e[1] in ("==", "!="):
             self.operands(e)
             self.op("P_BR", "PO_BREQ" if (e[1] == "==") == when else "PO_BRNE", lbl)
             self.pop(2)
             return
-        self.expr(e)
+        if e[0] == "bin" and e[1] in VMCMP:
+            self.operands(e)
+            self.op("P_OP", VMCMP[e[1]])
+            self.pop()
+        else:
+            self.expr(e)
         self.op("P_BR", "PO_BRTRU" if when else "PO_BRFLS", lbl)
         self.pop()
 
@@ -457,8 +563,15 @@ class PGen(cc.Gen):
             _, name, args, line = e
             if name == "puts":
                 self.puts(args, line, value=True)
+            elif name in SYSCALLS:
+                self.syscall(name, args, line)
             else:
                 self.call(name, args, line)
+            return ("int", False)
+        if kind == "not":
+            self.expr(e[1])
+            self.op("P_OP", "PO_LNOT")
+            self.op("P_OP", "PO_NEG")       # LNOT's true is -1
             return ("int", False)
         if kind == "neg":
             if self.expr(e[1])[1]:
@@ -511,8 +624,24 @@ class PGen(cc.Gen):
             raise CompileError(f"line {line}: a pointer can only be added to or subtracted from")
         return ta, tb
 
+    def logical(self, e):
+        """a && b, a || b as a value: BRAND/BROR keep the left value when it decides, then LNOT
+        and ADDI 1 make 0 or 1 of either side's value."""
+        _, op, a, b, line = e
+        end = self.new_label()
+        self.expr(a)
+        self.op("P_BR", "PO_BRAND" if op == "&&" else "PO_BROR", end)
+        self.pop()
+        self.expr(b)
+        self.lab(end)
+        self.op("P_OP", "PO_LNOT")
+        self.op("P_B", "PO_ADDI", 1)
+        return ("int", False)
+
     def binary(self, e):
         _, op, a, b, line = e
+        if op in ("&&", "||"):
+            return self.logical(e)
         x = self.simple(b) if op == "+" or (op == "-" and b[0] == "num") else None
         if x:
             ta = self.expr(a)
@@ -534,6 +663,8 @@ class PGen(cc.Gen):
             self.op("P_OP", "PO_MUL")
         elif op == "/":
             self.op("P_OP", "PO_DIV")       # signed, truncating toward zero; by 0 gives 0 (pvm.s _DIV)
+        elif op == "%":
+            self.op("P_OP", "PO_MOD")       # the dividend's sign, as C's; x % 0 is 0
         elif op in ("==", "!="):
             self.op("P_OP", "PO_ISEQ" if op == "==" else "PO_ISNE")
             self.op("P_OP", "PO_NEG")       # the VM's true is -1; C's is 1
@@ -549,12 +680,26 @@ class PGen(cc.Gen):
         params = self.params[name]
         if len(args) != len(params):
             raise CompileError(f"line {line}: {name} takes {len(params)} argument(s), not {len(args)}")
+        self.arguments(name, args, [(base, ptr, pname) for base, ptr, pname, _ in params], line)
+        self.calls.append((name, line))
+        self.op("P_W", "PO_CALL", name if name in self.externs else "fn_" + name)
+        self.pop(len(args))
+        self.push()
+
+    def arguments(self, name, args, params, line):
+        """Push the arguments, the first deepest; through frame temporaries when they would not
+        fit. params: (base, pointer, name), base None for any pointer."""
         if self.depth + len(args) > ESLIMIT:
             raise CompileError(f"line {line}: {name} takes {len(args)} arguments; at most {ESLIMIT} fit")
         fits = all(self.depth + i + self.need(a) <= ESLIMIT for i, a in enumerate(args))
         slots = []
-        for a, (base, ptr, pname, _lbl) in zip(args, params):
-            self.check((base, ptr), self.expr(a), a, line, f"argument {pname} of {name}")
+        for a, (base, ptr, pname) in zip(args, params):
+            t = self.expr(a)
+            what = f"argument {pname} of {name}"
+            if base is not None:
+                self.check((base, ptr), t, a, line, what)
+            elif not t[1]:
+                raise CompileError(f"line {line}: {what}: a number where a pointer is needed")
             if not fits:
                 slots.append(self.temp())
                 self.op("P_B", "PO_SLW", slots[-1])
@@ -563,10 +708,25 @@ class PGen(cc.Gen):
             self.op("P_B", "PO_LLW", s)
             self.push()
         self.temps += reversed(slots)
-        self.calls.append((name, line))
-        self.op("P_W", "PO_CALL", "fn_" + name)
-        self.pop(len(args))
-        self.push()
+
+    def syscall(self, name, args, line):
+        """read(fd, buf, n), write(fd, buf, n), open(path, flags), close(fd), exit(status): one
+        SYS each, the kernel's r0 and r1 stored from the eval stack after every argument is
+        evaluated (a call inside an argument may make syscalls of its own). open evaluates flags
+        before path (C leaves the order open), so that path is the one under TOS."""
+        sysn, fix, types = SYSCALLS[name]
+        if len(args) != len(types):
+            raise CompileError(f"line {line}: {name} takes {len(types)} argument(s), not {len(args)}")
+        params = [(t[0], t[1], str(i + 1)) if t else (None, True, str(i + 1)) for i, t in enumerate(types)]
+        if name == "open":
+            args, params = args[::-1], params[::-1]
+        self.arguments(name, args, params, line)
+        for reg in ("r1", "r0")[3 - len(args):]:
+            self.op("P_W", "PO_SAW", reg)
+            self.pop()
+        self.op("P_SYS", sysn)              # pops the last argument, pushes the result
+        if fix:
+            self.helper(fix)
 
     def puts(self, args, line, value):
         if len(args) != 1 or args[0][0] != "str":
