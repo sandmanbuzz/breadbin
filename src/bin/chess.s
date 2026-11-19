@@ -66,8 +66,8 @@ game_loop:
     jsr print
 @no_chk:
     jsr print_prompt
-    jsr read_line           ; returns length in A (0 if empty)
-    beq game_loop
+    jsr read_line           ; C=0 and the length in A, or C=1 at end of input
+    bcs @do_quit            ; (upstream spun here forever when stdin ended)
 
     lda in_buf
     cmp #'q'
@@ -735,7 +735,7 @@ validate_pawn:
     sbc #$10
     tax
     lda board,x
-    bne @w_cap
+    bne @w_cap    ; blocked: only a capture is left (upstream refused it)
     lda zp_from
     sec
     sbc #$20
@@ -787,7 +787,7 @@ validate_pawn:
     adc #$10
     tax
     lda board,x
-    bne @b_cap
+    bne @b_cap    ; blocked: only a capture is left
     lda zp_from
     clc
     adc #$20
@@ -1195,16 +1195,16 @@ read_line:
     lda #0                  ; fd 0 = stdin
     jsr SYS_READ
     bcs @empty
-    lda r1                  ; r1 = byte count read
+    lda r1                  ; r1 = byte count read; 0 = end of input
     beq @empty
     tax
     lda #0
     sta in_buf,x
     txa
+    clc
     rts
 @empty:
-    lda #0
-    sta in_buf
+    sec
     rts
 
 save_tmp:
