@@ -330,6 +330,48 @@ class Boot(unittest.TestCase):
         self.assertEqual(n.get("io_nwretry"), 0)
         self.assertEqual(n.get("io_nwfail"), 0)
 
+    def _leave_game(self):
+        """Quit a game left running, so a failed game test cannot feed the next one's keys to it."""
+        if not self.v.screen().rstrip().endswith("$"):
+            self.v.type("q\n")
+            self.v.wait_shell()
+
+    def test_30_chess(self):
+        """The size-optimised chess plays a move, answers one, saves and quits (tools/test_games_sim.py has the rest)."""
+        self.v.type("clear\n")
+        self.v.wait_for("$")
+        self.v.type("chess\n")
+        self.addCleanup(self._leave_game)
+        self.v.wait_for("white (e2e4/a/s/l/q)>", timeout=60)
+        self.v.type("e2e4\n")
+        s = self.v.wait_for("black (e7e5/a/s/l/q)>", after="e2e4")
+        self.assertIn("4 . . . . P . . .", s)
+        self.v.type("a\n")
+        s = self.v.wait_for("white (e2e4/a/s/l/q)>", after="> a")
+        self.assertIn("6 n . . . . . . .", s)       # the AI's answer (the same one the simulator gives)
+        self.v.type("s\n")
+        self.v.wait_for("saved /tmp/chess.sav", timeout=60)
+        self._leave_game()
+        self.assertEqual(self.run_("ls /tmp").split().count("chess.sav"), 1)
+
+    def test_31_tetris(self):
+        """The size-optimised tetris draws the well, hard drops stack pieces, q ends it. A gated screen
+        read can take many seconds on hardware and gravity plays on meanwhile, so the game may already
+        be over when a read returns: q is sent only to a game still running."""
+        self.v.type("clear\n")
+        self.v.wait_for("$")
+        self.v.type("tetris\n")
+        self.addCleanup(self._leave_game)
+        s = self.v.wait_for("SCORE: 0", timeout=60)
+        self.assertIn("+----------+", s)
+        self.v.keybuf(b" ")                          # hard drop
+        s = self.v.screen()
+        self.assertTrue(any(c in s for c in "#O@%&*="), s)
+        if "GAME OVER" not in s:
+            self.v.keybuf(b"q")
+            self.v.wait_for("GAME OVER", timeout=30)
+        self.v.wait_shell()
+
 
 class Persistence(unittest.TestCase):
     """Files written by Breadbin survive a reboot and are readable on the host."""
