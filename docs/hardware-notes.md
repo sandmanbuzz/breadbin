@@ -754,3 +754,13 @@ Setup as read from `/v1/drives` after the fact: Drive A = device **9** (emulated
   - The build was put on the owner's disposable floppy with the nibbler (`experiments/iec-stall/nibcopy.py`; the directory shows `breadbin`; config restored by `nibsetup.sh down`).
   - Steps 3-5 with `BREADBIN_ULTIMATE_BUS=8` (boot from the physical 1541): boot to login in 51 s, then `echo` and `mount 9 /mnt` (drive A, `ls /mnt/bin`). `format 9 c64fs scratch` ran on drive A (an unlinked copy; `format` refuses 8), then `mkdir`, `cp` and `cat` read back from the new volume.
   - S1 checks: `pwd` after `cd /bin`, and after `cd /etc` with two `sleep &` children alive; `ls ../bin/sleep` from `/etc`; `ps` shows `init`, `sh`, two `sleep` and `ps` by name before and after the format. 9 of 9 OK.
+
+### 2026-11-18, chess and tetris (size pass) at 3485885 plus the two new Boot tests (cloud session)
+
+Setup: C64 Ultimate firmware 1.1.0, drive A = device 9 (JiffyDOS 1541-II ROM), JiffyDOS KERNAL; `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE_BUS=9`, under the `ultimate` lock. `python3 -m unittest -v tests.test_system.Boot.test_30_chess tests.test_system.Boot.test_31_tetris`: 2 tests OK, 95 s.
+
+- Chess: `e2e4` is accepted, the AI answers `a` with Na6, and the screen is the one the py65 simulator prints (`tools/test_games_sim.py`); `s` saves `/tmp/chess.sav` and it is listed; `q` returns to the shell.
+- Tetris: the well and `SCORE: 0` appear; a hard drop (space) stacks a piece; `q` ends the game. Instrumented run: the jiffy clock at `$A0-$A2` ran at 60.1 Hz in the shell (301 jiffies in 5.0 s), and with no keys the pieces fall and stack at the expected pace (cells 5, 19, 25, 29, 40) to GAME OVER after about 55 s.
+- Lesson for tests of timed programs: a gated screen read can take 1 to 10 s on hardware, and the game plays on meanwhile, so it may be over when the read returns. Send `q` only to a game still running (`test_31_tetris` does). A failing test must also quit the game (`_leave_game`), or the next test's keys go to it.
+- Config: the harness left drive A on `/Temp/test.d64`; remounted `/Temp/breadbin.d64` afterwards (no trap in the harness; `/v1/drives` before and after).
+- Not run: the full hardware list, JiffyDOS-ROM VICE runs, `tools/ci/run.sh test-smoke`.
