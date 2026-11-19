@@ -41,6 +41,7 @@ def toolong(path):
 class Result:
     def __init__(self):
         self.exit = None
+        self.mem = b""                 # the 64 KB at exit
         self.out = b""
         self.err = b""
         self.files = {}
@@ -65,11 +66,12 @@ def cx_load(data, page):
     return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False):
+def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
     fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_create=path makes a write-open of that path fail with EIO; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs).
     cooked=True makes a read of fd 0 stop after the first LF, as the console's cooked mode does (a read at the end of stdin returns 0 bytes).
+    poke maps an offset in the program image (a link address, e.g. a label from build/p/<prog>.lbl) to bytes written there before the first instruction: a board or a table to start from.
     kbd=True models the keyboard and clock a game polls: KEYCNT ($C6) is 1 while stdin has bytes left, the jiffy clock ($A0-$A2, big-endian) starts at jiffy0 and each YIELD advances it by yield_jiffies, and TIME answers it (A/X/Y = lo/mid/hi)."""
     if MPU is None:
         raise RuntimeError("py65 not installed")
@@ -81,6 +83,8 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
     mem = [0] * 65536
     base = BASE_PAGE << 8
     mem[base:base + len(image)] = list(image)
+    for off, b in (poke or {}).items():
+        mem[base + off:base + off + len(b)] = list(b)
     # argv: strings and the pointer array well above the program (the real layout puts them at the
     # end of the process's run; only the pointers matter to the program)
     top = 0xC000
@@ -137,6 +141,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
             fd = cpu.a
             if name == "EXIT":
                 res.exit = cpu.a
+                res.mem = bytes(mem)
                 break
             elif name == "OPEN":
                 path_, flags = cstr(r(2)), cpu.a
