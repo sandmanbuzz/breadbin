@@ -63,17 +63,23 @@ OP_SYS  = $C6
 .segment "BSS"
 esave:     .res ESTKSZ
 pvm_errno: .res 1
+flim:      .res 2       ; the bottom of the frame stack (pvm_init)
 
 ; The PVM segment starts the image (src/pvm/pvm.cfg): the entry jump, handlers up to a page,
 ; the opcode table page-aligned (JMP (OPTBL) puts the opcode in the low byte), more handlers.
 .segment "PVM"
         jmp pvm_main
 
-; pvm_init: A/Y = top of the frame stack (lo/hi). Returns X = eval stack index; native code must
-; keep X while it calls bytecode.
+; pvm_init: A/Y = top of the frame stack (lo/hi), r0 = its bottom (at least $0100: one allocation
+; is at most 255 bytes, so the check in fsalloc cannot wrap). Returns X = eval stack index; native
+; code must keep X while it calls bytecode.
 pvm_init:
         sta IFP
         sty IFP+1
+        lda r0
+        sta flim
+        lda r0+1
+        sta flim+1
         ldy #9
 @c:     lda zpcode,y
         sta DROP,y
@@ -89,28 +95,6 @@ zpcode: inx                     ; DROP
         .byte $B9, $FF, $FF     ; FETCHOP: lda $FFFF,y (IP)
         .byte $85, OPIDX        ; sta OPIDX
         jmp (OPTBL)
-
-; pvm_interp: the header of every bytecode function is JSR pvm_interp. Reached from native code:
-; push the native-return marker (high byte 0) and run the bytecode after the JSR.
-pvm_interp:
-        lda IFP
-        sec
-        sbc #2
-        sta IFP
-        bcs :+
-        dec IFP+1
-:       ldy #1
-        lda #0
-        sta (IFP),y
-        pla
-        clc
-        adc #1
-        sta IP
-        pla
-        adc #0
-        sta IP+1
-        ldy #0
-        jmp FETCHOP
 
 ; ---- multiply, divide ----
 MUL:    sty IPY
@@ -203,6 +187,17 @@ XOR:    lda ESTKL+1,x
         eor ESTKH,x
         sta ESTKH+1,x
         jmp DROP
+LLB:    iny
+        lda (IP),y
+        sty IPY
+        tay
+        dex
+        lda (IFP),y
+        sta ESTKL,x
+        lda #0
+        sta ESTKH,x
+        ldy IPY
+        jmp NEXTOP
 PRETBL:
 ; ---- the opcode table ----
         .align 256
@@ -485,17 +480,6 @@ LLA:    iny
         lda #0
         adc IFP+1
         sta ESTKH,x
-        jmp NEXTOP
-LLB:    iny
-        lda (IP),y
-        sty IPY
-        tay
-        dex
-        lda (IFP),y
-        sta ESTKL,x
-        lda #0
-        sta ESTKH,x
-        ldy IPY
         jmp NEXTOP
 LLW:    iny
         lda (IP),y
@@ -1045,6 +1029,24 @@ ADDBRLE: lda ESTKL,x
         bne BRLE
 
 ; ---- calls ----
+; pvm_interp: the header of every bytecode function is JSR pvm_interp. Reached from native code:
+; push the native-return marker (high byte 0) and run the bytecode after the JSR.
+pvm_interp:
+        lda #2
+        jsr fsalloc
+        ldy #1
+        lda #0
+        sta (IFP),y
+        pla
+        clc
+        adc #1
+        sta IP
+        pla
+        adc #0
+        sta IP+1
+        ldy #0
+        jmp FETCHOP
+
 CALL:   iny
         lda (IP),y
         sta TMP
@@ -1077,12 +1079,9 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
         lda (TMP),y
         cmp #>pvm_interp
         bne @native
-        lda IFP                 ; carry is set: push the return IP on the frame stack
-        sbc #2
-        sta IFP
-        bcs :+
-        dec IFP+1
-:       ldy #0
+        lda #2                  ; push the return IP on the frame stack
+        jsr fsalloc
+        ldy #0
         lda IP
         sta (IFP),y
         iny
@@ -1113,6 +1112,19 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
 pvm_overflow:
         lda #ENOMEM
         jmp SYS_EXIT
+; fsalloc: take A bytes (0-255) from the frame stack before anything is written there. Below the
+; bottom pvm_init was given, the process exits with ENOMEM. Keeps X and Y.
+fsalloc: eor #$FF
+        sec
+        adc IFP
+        sta IFP
+        bcs :+
+        dec IFP+1
+:       cmp flim
+        lda IFP+1
+        sbc flim+1
+        bcc pvm_overflow
+        rts
 ; ENTER framesize, params (always the first op: IP is the function, Y is 0): make the frame and
 ; move the params into it from the eval stack. If fewer than ESRESERVE entries would be free once
 ; the params are gone, the caller's pending entries move to the frame stack first and LEAVE moves
@@ -1132,14 +1144,8 @@ ENTER:  ldy #2
         sta TMP
         asl
         adc #1                  ; 2p + 1 bytes (carry clear: p < 12)
-        sta TMP+1
-        lda IFP
-        sec
-        sbc TMP+1
-        sta IFP
-        bcs :+
-        dec IFP+1
-:       stx ESP
+        jsr fsalloc
+        stx ESP
         ldx DVSIGN
         ldy #1
 @sp:    lda ESTKL,x
@@ -1156,22 +1162,15 @@ ENTER:  ldy #2
         bne @cnt                ; always
 @nosp:  lda #0
         sta TMP
-        lda IFP
-        bne :+
-        dec IFP+1
-:       dec IFP
+        lda #1
+        jsr fsalloc
         lda #0
 @cnt:   ldy #0
         sta (IFP),y
         iny
         lda (IP),y              ; framesize
-        eor #$FF
-        sec
-        adc IFP
-        sta IFP
-        bcs :+
-        dec IFP+1
-:       iny
+        jsr fsalloc
+        iny
         lda (IP),y
         beq @done
         asl
