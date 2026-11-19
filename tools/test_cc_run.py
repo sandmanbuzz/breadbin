@@ -86,11 +86,17 @@ def unsigned_ops(a, b):
     return {"==": a == b, "!=": a != b, "<": a < b, ">": a > b, "<=": a <= b, ">=": a >= b}
 
 
+class Case(unittest.TestCase):
+    """The programs below run on the native back end here, and on the p-code one in
+    tools/test_cc_pcode.py (the same classes with run_c replaced)."""
+    run_c = staticmethod(run_c)
+
+
 @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
-class Executed(unittest.TestCase):
+class Executed(Case):
     def test_hello(self):
         src = 'int main() { puts("hello, world!\\n"); return 0; }'
-        self.assertEqual(run_c(src), b"hello, world!\n")
+        self.assertEqual(self.run_c(src), b"hello, world!\n")
 
     def test_operator_grid_unsigned(self):
         pairs = [(0, 0), (0, 1), (1, 0), (5, 5), (0x7FFF, 0x8000), (0x8000, 0x7FFF), (0xFFFF, 1), (1, 0xFFFF),
@@ -100,49 +106,49 @@ class Executed(unittest.TestCase):
                 src = ('int main() { int a = %d; int b = %d; if (a %s b) puts("Y"); else puts("N"); '
                        'return 0; }') % (a, b, op)
                 want = b"Y" if unsigned_ops(a, b)[op] else b"N"
-                self.assertEqual(run_c(src), want, (a, op, b))
+                self.assertEqual(self.run_c(src), want, (a, op, b))
 
     def test_arithmetic_wraps_at_16_bits(self):
         cases = [("1 + 2", 3), ("7 - 9", 0xFFFE), ("0 - 1", 0xFFFF), ("0xFFFF + 1", 0),
                  ("0 - (5 - 2)", 0xFFFD), ("-5 + 9", 4), ("-(3)", 0xFFFD)]
         for expr, value in cases:
             src = 'int main() { if (%s == %d) puts("Y"); else puts("N"); return 0; }' % (expr, value)
-            self.assertEqual(run_c(src), b"Y", expr)
+            self.assertEqual(self.run_c(src), b"Y", expr)
 
     def test_functions_return_values_through_calls(self):
         src = ("int g() { return 40; }\n"
                "int f() { return g() + 2; }\n"
                "int main() { if (f() == 42) puts(\"Y\"); else puts(\"N\"); return 0; }\n")
-        self.assertEqual(run_c(src), b"Y")
+        self.assertEqual(self.run_c(src), b"Y")
 
     def test_long_string_prints_all_of_it(self):
         text = "the quick brown fox jumps over the lazy dog, twice over and over again\\n"
         want = text.replace("\\n", "\n").encode("latin-1")
-        self.assertEqual(run_c('int main() { puts("%s"); return 0; }' % text), want)
+        self.assertEqual(self.run_c('int main() { puts("%s"); return 0; }' % text), want)
 
     def test_long_loop_body_runs(self):
         body = "".join("    n = n + %d;\n" % (i % 7) for i in range(60))
         src = "int main() { int n = 0; int i = 0; while (i < 3) {\n%s    i = i + 1; }\n" % body
         src += "if (n == %d) puts(\"Y\"); else puts(\"N\"); return 0; }\n" % (3 * sum(i % 7 for i in range(60)))
-        self.assertEqual(run_c(src), b"Y")
+        self.assertEqual(self.run_c(src), b"Y")
 
     def test_output_longer_than_255_bytes_is_counted_in_full(self):
         # 300 bytes in two puts (one string is at most 254 bytes): a one-byte count would check
         # only the first 44 of them
         a, b = "0123456789" * 15, "abcdefghij" * 15
         src = 'int main() { puts("%s"); puts("%s"); return 0; }' % (a, b)
-        self.assertEqual(run_c(src), (a + b).encode("latin-1"))
+        self.assertEqual(self.run_c(src), (a + b).encode("latin-1"))
 
     def test_deep_expression_within_the_stack(self):
         expr = "1+(" * 30 + "1" + ")" * 30          # 31 values pushed at once: the limit
         src = 'int main() { if (%s == 31) puts("Y"); else puts("N"); return 0; }' % expr
-        self.assertEqual(run_c(src), b"Y")
+        self.assertEqual(self.run_c(src), b"Y")
 
 
 @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
-class ExecutedSlice2(unittest.TestCase):
+class ExecutedSlice2(Case):
     def check(self, src, want=b"Y"):
-        self.assertEqual(run_c(src), want, src)
+        self.assertEqual(self.run_c(src), want, src)
 
     def test_char_is_zero_extended_and_keeps_the_low_byte(self):
         self.check('int main() { char c = 321; if (c == 65) puts("Y"); else puts("N"); return 0; }')
@@ -202,9 +208,9 @@ class ExecutedSlice2(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
-class ExecutedSlice3(unittest.TestCase):
+class ExecutedSlice3(Case):
     def check(self, src, want=b"Y"):
-        self.assertEqual(run_c(src), want, src)
+        self.assertEqual(self.run_c(src), want, src)
 
     def test_a_negative_int_global_starts_at_its_value(self):
         self.check('int g = -5;\nint main() { if (g == 65531) puts("Y"); else puts("N"); return 0; }')
@@ -254,13 +260,13 @@ class ExecutedSlice3(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
-class ExecutedDeepSum(unittest.TestCase):
+class ExecutedDeepSum(Case):
     def test_a_600_term_sum_compiles_and_runs(self):
         # a left-deep chain recursed once per term in code generation (34e8ba refused it cleanly):
         # it is a valid program and must give its value
         expr = " + ".join(["1"] * 600)
         src = 'int main() { if (%s == 600) puts("Y"); else puts("N"); return 0; }' % expr
-        self.assertEqual(run_c(src), b"Y")
+        self.assertEqual(self.run_c(src), b"Y")
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ It is a real kernel, not a shell that prints canned output:
 - **Users and screen.** There's a `login` with passwords (`passwd`, `whoami`), a full-screen editor (`edit`), colour `theme`s, shell wildcards (`*.bas`) and `jobs`.
 - **JiffyDOS.** The serial driver speaks the JiffyDOS byte protocol with a JiffyDOS drive (it probes at the start of each session, and stays on the standard protocol with any other drive, or with a sprite on); `make JIFFY=0` builds without it. Details and caveats: `docs/design/fast-io.md`.
 - **Stock hardware.** It runs on a stock C64 with a 1541, and the same disk boots with or without an REU or an Ultimate (see Platform tiers).
-- **BASIC and an assembler.** Both run *on* the C64: `basic` is an integer BASIC, and `as` is a 6502 assembler that produces new Breadbin commands (a trailing `.res` is the program's BSS, so big buffers cost no disk space). A small C-subset compiler, `tools/cc.py`, runs on the host and emits `as` source that the C64 assembles and runs; it is a host-side reference for now.
+- **BASIC and an assembler.** Both run *on* the C64: `basic` is an integer BASIC, and `as` is a 6502 assembler that produces new Breadbin commands (a trailing `.res` is the program's BSS, so big buffers cost no disk space). A small C-subset compiler, `tools/cc.py`, runs on the host and emits `as` source that the C64 assembles and runs, or with `--pcode` bytecode for the shared p-code VM (`/lib/pvm`, `docs/design/pvm.md`), with real recursion; it is a host-side reference for now.
 
 ## Building
 
