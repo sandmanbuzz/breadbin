@@ -49,6 +49,7 @@ In priority order. Each epic has stories; each story is done when its acceptance
 
 - **Microsoft BASIC for 6502**, version 1.1 (1978), released by Microsoft under the **MIT** licence (`github.com/microsoft/BASIC-M6502`); it includes the PET configuration and the floating-point package. Take what beats our own code on size; it is unlikely to meet our compactness bar unchanged. **Only that source**: Commodore's BASIC ROM is proprietary and is never copied or disassembled for this.
 - **PLASMA** (David Schmenk, **MIT**, `github.com/dschmenk/PLASMA`): a 6502 bytecode VM and language with a module system; the closest prior art for the VM, the calling convention and relocatable modules. Base PLASMA may be adopted if it is the solution L0 selects.
+- **UCSD p-System** (the p-machine of UCSD Pascal and Apple Pascal): proven, documented in great depth, and with a long 6502 history (Apple II, and the C64's own ports). A **design reference only**: the released source (versions I.4 and I.5, 2006) is for non-commercial use, so no UCSD code or derived code comes in; we learn from the published descriptions of the p-machine, as for any clean room. It may be ruled out early in L0.
 - **Lawless Legends** (`github.com/badvision/lawless-legends`, **Apache-2.0**): a large game built on PLASMA with its own extensions and module-based memory management. Apache-2.0 is the outer limit of what we take: ideas only, code only if backed into a corner (owner's call), and we do not ask for a re-licence.
 
 **Stories:**
