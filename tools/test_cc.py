@@ -38,6 +38,12 @@ class Hello(unittest.TestCase):
         self.assertTrue(out.startswith("start:\n"), out[:40])
         self.assertIn("        jsr fn_main\n        lda #0\n        jmp sys_exit\n", out)
 
+    def test_the_runtime_spends_no_more_symbols(self):
+        # every runtime label is an `as` symbol in every program, used or not: 32 of the 220
+        # (signed division came in with relative branches and the stack, not labels)
+        out = compile_src("int main() { return 0; }")
+        self.assertLessEqual(len(re.findall(r"^[A-Za-z_][A-Za-z_0-9]*:", out, re.M)), 32)
+
     def test_string_is_zero_terminated_bytes(self):
         out = compile_src(HELLO)
         self.assertIn("s_1:\n        .byte 104, 101, 108, 108, 111, 44, 32, 119, 111, 114, 108, 100, 33, 10, 0\n", out)
