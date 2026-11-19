@@ -20,6 +20,9 @@
 # [provenance]
 # created = "2026-11-18"
 # source = "local"
+#
+# [stamp]
+# verified = "9526d1bf1939"
 # ///
 """Run the same random input through two chess binaries and compare everything observable."""
 import argparse, json, os, random, re, sys
