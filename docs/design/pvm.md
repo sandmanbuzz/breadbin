@@ -62,21 +62,23 @@ source `src/pvm/test/bench.c`):
 
 | | cycles | speed relative to the VM |
 |---|---|---|
-| PLASMA bytecode on the port (`tools/asim.py`) | 472,875 | 1 |
+| PLASMA bytecode on the port (`tools/asim.py`) | 472,160 | 1 |
 | `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 609,107 | 0.78 |
 | cc65 `-Oirs` native (`sim65 -c`) | 146,347 | 3.23 |
 
 The VM runs this benchmark faster than our own native compiler and at about a third of cc65's
-speed; its bytecode is a third of cc65's code size (above), the 2,533-byte VM not counted, which
-pays for itself only across programs once it is shared (E2). It executes 8,358 ops, about 57 cycles an op on
+speed; its bytecode is a third of cc65's code size (above), the 2,544-byte VM not counted: it is
+a shared library (§4 item 3), loaded once for every p-code process. It executes 8,358 ops, about 57 cycles an op on
 average. The simulators count documented cycles and do not model badlines, so these are CPU
 ratios: on a C64 the badlines and the interrupt slow all three alike. cc65's start-up clears the
 program's BSS (220 bytes here, not in the empty program), so its figure carries a few thousand
 cycles the others do not, under 2 %. The VM figure was 463,755 before the frame-stack check
-(§5), 471,285 before the push guards (§4 item 2) and 472,248 before `LEAVE`'s checks.
+(§5), 471,285 before the push guards (§4 item 2), 472,248 before `LEAVE`'s checks and 472,875
+before the VM became a library (the code moved, so the change is layout).
 
-The port (§4) is 2,533 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
-with no alignment padding left, an assert keeping it under 8) plus 25 bytes of BSS.
+The port (§4) is 2,544 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
+with no alignment padding left, an assert keeping it under 8) and no BSS: the library file
+`/lib/pvm` is 2,801 bytes, 12 blocks, 10 pages when loaded.
 
 The C64 VM (`src/vmsrc/c64/plvmc64.s`, upstream commit `f209e30`, 2026-11-03) has no KERNAL
 calls in its core: the loader and `cmd` around it do. Opcodes are even, `$00–$C4`; `$C6–$FE`
@@ -91,8 +93,9 @@ Ported changes, each forced by §1:
    byte loads, which write one slot below TOS, may touch). It is kernel syscall scratch, so the
    syscall path (item 4) saves the stack around the call. The VM's own state is `$23–$36`: the
    self-modifying fetch routine (10 bytes at `$23`, the instruction pointer is its operand),
-   `IFP`, `ESP`, a `JMP` trampoline, `TMP`, `DVSIGN`, `SRC`. The program keeps `$39–$3F`
-   (`src/pvm/pvm.cfg`). A p-code program does not link `lib.s`'s zero-page users. Nothing in
+   `IFP`, `ESP`, a `JMP` trampoline, `TMP`, `DVSIGN`, `SRC`, then `flim` (the frame stack's
+   bottom, `$37–$38`) and `pvm_errno` (`$39`), where BSS was before the VM became a library. The
+   program keeps `$3A–$3F` (`src/pvm/prog.cfg`). A p-code program does not link `lib.s`'s zero-page users. Nothing in
    `$60–$8F` is used.
 2. **Return IPs on the frame stack**, not the 6502 stack. Recursion depth is then bounded by the
    frame stack (in the program's BSS), not by `STKSAVE`. A function that starts with
@@ -123,13 +126,31 @@ Ported changes, each forced by §1:
    writes `$20`, the low byte of argv. A native callee may return any
    index; the next push, call or return catches it.
    Cheaper guards are open for later.
-3. **Relocation.** Our front ends emit bytecode as ca65 `.byte` and `.word` lines in the program's
-   source, linked with the VM as an ordinary CX program. No PLASMA module loader.
+3. **Relocation and sharing (L1s).** Our front ends emit bytecode as ca65 `.byte` and `.word`
+   lines in the program's source. The VM is a shared library, CX format 3 (`/lib/pvm`, built by
+   `tools/pvmlink.py lib`, `mk/pvm.mk`): image bytes 0–1 are its id, the low 16 bits of the
+   CRC-32 of its sorted exports and their offsets (`pvm_init`, `pvm_interp`, and `pvm_errno` in
+   zero page), so a VM whose entry points move gets a new id. A p-code program is CX format 2
+   (`tools/pvmlink.py prog`): the format 1 header, then the library relocation count, the id and
+   the library path (16 bytes), 29 bytes in all; after the image, its own relocations (plus its
+   page) and the library's (plus the library's page). It is linked three times against a stub
+   of the exports (`build/pvm/pvmstub.s`), at `$0000`, at `$0100`, and at `$0000` with the stub at
+   `$0100`; the two kinds of relocation must not overlap, which the tool checks. The kernel
+   (`src/kernel/exec.s`) finds the library by its file (device and inode) among the resident
+   ones (two at most) or loads it at the top of the pool, compares the id, and counts the
+   processes using it; the last one's `exit` or `exec` frees it. A missing library or another id
+   is `ENOEXEC`; the library itself cannot be run or loaded as a module. A library replaced on
+   disk while a copy is resident keeps the old copy until its last user exits (the new programs'
+   id does not match, `ENOEXEC`). Cost: 402 bytes of kernel above the BSS (cold, `CODEHI`, and
+   43 of BSS) and 8 below `$CF00`. The smallest p-code program went from 2,890 bytes (12 blocks)
+   to 94 (1 block); under VICE one p-code process takes 5 pages (1 KB of it the test prelude's
+   frame stack) plus the library's 10, and each further one 5. No PLASMA module loader.
 4. **Syscalls**: one opcode, `SYS n` (`$C6`, the first free one), instead of a native shim per
    call. Bits 0–4 of `n` are the syscall number; TOS goes to `A` (low) and `X` (high), and with
    bit 7 set the low byte of the next entry goes to `Y`. `r0–r2` are stored beforehand with
    `SAW`. The result `A | X << 8` is pushed, or -1 with the errno in `pvm_errno` when carry is
-   set; `pvm_errno` is 0 after a successful call. The eval stack is copied out and back around the call (`tools/asim.py` now trashes
+   set; `pvm_errno` is 0 after a successful call. The eval stack is copied to the frame stack and back around the call (an allocation like any
+   other: a full frame stack exits with `ENOMEM`) (`tools/asim.py` now trashes
    `$08–$1F` on every syscall, so the simulator checks this).
 5. **Numbers.** Fixed point (format chosen at L3) as runtime calls first; opcodes in the free
    range only if L3 measures a need. FP reserves opcodes, nothing more.
@@ -166,9 +187,9 @@ Rules for our front ends, found while porting:
   bottom; upstream does not check. Cost: 1.6 % on the §3 benchmark, 3 code bytes (the five
   inline allocations became one routine; `pvm_init` copies `r0`) and 2 of BSS. Nothing checks
   the caller's `r0`: a caller that forgets it gets an arbitrary bound.
-- **Zero page shared with `lib.s`.** The VM's `$34–$35` and the program's `$39–$3B` are also the
+- **Zero page shared with `lib.s`.** The VM's `$34–$35` and `$39` and the program's `$3A–$3B` are also the
   user library's `lp3`, `lt3` and `lval`; a p-code program must not link those users. Nothing
-  enforces it yet (`src/pvm/pvm.cfg` says so).
+  enforces it yet (`src/pvm/prog.cfg` says so).
 - **Syscall scratch.** Any kernel change that starts using `$08–$1F` in the IRQ path breaks
   item 1. A note in `k.inc` keeps that visible.
 - **Upstream drift.** The port is a fork of one file; upstream fixes are merged by hand.
@@ -188,7 +209,21 @@ Rules for our front ends, found while porting:
   frame stack bounded and its trap tested at the boundary (204 levels of plain recursion fit the
   test's 1 KB, 205 trap), with nothing written below it, and under VICE (`tests/test_pvm_machine.py`) (done). No Makefile
   rule builds p-code programs yet: with no front end there is nothing to build but tests; L2
-  adds one with the first compiler.
+  adds one with the first compiler (`tools/pvmlink.py prog` does the linking).
+- **L1s**: one VM for every p-code process (§4 item 3). `tests.test_pvm_machine.SharedVM`
+  under VICE: two p-code processes, in the background and in a pipeline, hold one library copy
+  (the kernel's page map and library table read through the monitor; `free` differs during the
+  pipeline and is back to its first output after); killing them frees it with the last; `exec`
+  from p-code to p-code, from p-code to a native program and from a native program to p-code
+  leaves no reference behind; a wrong id, a missing library, running the library and `mod load`
+  of it give `exec format`; a mismatched id with nobody holding the library leaves nothing
+  allocated. The smallest p-code program is 94 bytes, 1 block (done). Known limits: a library is
+  known by its device and 1-byte inode, with no generation, so a library replaced on disk under
+  a reused inode while a copy is resident binds new programs to the old copy (on UCI every file
+  is inode 2, so two libraries under `/u` would alias: libraries live on the root); the kernel
+  does not check that a format 3 image has no BSS (the tools refuse it); a library path must be
+  absolute (`tools/cx.py` refuses others). A library that is not there is `ENOEXEC`, other
+  lookup errors stand, and a third library while two are resident is `EAGAIN`.
 
 ## 7. Sources
 

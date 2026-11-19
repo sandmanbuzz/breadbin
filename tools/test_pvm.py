@@ -1,6 +1,6 @@
-"""The p-code VM (src/pvm/pvm.s, docs/design/pvm.md) run under py65 (tools/asim.py): bytecode
-programs written with src/pvm/pvm.inc are linked with the VM through src/pvm/pvm.cfg, made into
-CX files with tools/cx.py like any program, and run. Needs ca65, ld65 and py65 (the container
+"""The p-code VM (src/pvm/pvm.s, docs/design/pvm.md) run under py65 (tools/asim.py): the VM is
+built as the shared library /lib/pvm (CX format 3) and bytecode programs written with
+src/pvm/pvm.inc are linked against it (format 2) by tools/pvmlink.py, then run. Needs ca65, ld65 and py65 (the container
 image has them; the host test run skips without them)."""
 import os
 import shutil
@@ -8,17 +8,17 @@ import subprocess
 import tempfile
 import unittest
 
+import pvmlink
 from asim import MPU, run
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HAVE_TOOLS = bool(shutil.which("ca65") and shutil.which("ld65") and MPU)
 
 # native entry: init the VM with a 1 KB frame stack, call main (bytecode), exit 0. Two canary
-# bytes sit below the frame stack; $3B/$3C point at them
+# bytes sit below the frame stack; $3C/$3D point at them
 PRELUDE = """
 .include "breadbin.inc"
 .include "pvm.inc"
-.export pvm_main
 .macpack generic
 SYSN_WRITE = (SYS_WRITE - SYS_BASE) / 3
 SYSN_EXIT  = (SYS_EXIT - SYS_BASE) / 3
@@ -33,9 +33,9 @@ pvm_main:
         sta fguard
         sta fguard+1
         lda #<fguard
-        sta $3b
-        lda #>fguard
         sta $3c
+        lda #>fguard
+        sta $3d
         lda #<fstk
         sta r0
         lda #>fstk
@@ -44,9 +44,9 @@ pvm_main:
         ldy #>fstk_end
         jsr pvm_init
         jsr f_main
-        stx $39             ; the eval stack index after main returned
+        stx $3a             ; the eval stack index after main returned
         tsx
-        stx $3a             ; the 6502 stack pointer
+        stx $3b             ; the 6502 stack pointer
         lda #0
         jmp SYS_EXIT
 ; write(1, buf, n): n on the eval stack
@@ -98,30 +98,29 @@ f_pdec: P_FUNC
 """
 
 
+_LIB = []
+
+
+def lib_dir():
+    """A directory holding /lib/pvm and its stub, built once per test run."""
+    if not _LIB:
+        _LIB.append(tempfile.mkdtemp(prefix="pvmlib-"))
+        pvmlink.build_lib(_LIB[0])
+    return _LIB[0]
+
+
 def build_cx(body, d):
-    """The CX file for PRELUDE + body, built in directory d."""
+    """The format 2 CX file for PRELUDE + body, built in directory d (the library: lib_dir())."""
     src = os.path.join(d, "t.s")
     with open(src, "w") as f:
         f.write(PRELUDE + body)
-    inc = ["-I", os.path.join(ROOT, "include"), "-I", os.path.join(ROOT, "src", "pvm")]
-
-    def sh(*a):
-        p = subprocess.run(a, capture_output=True, text=True)
-        if p.returncode:
-            raise RuntimeError(f"{a[0]} failed:\n{p.stdout}{p.stderr}")
-    sh("ca65", *inc, "-o", os.path.join(d, "t.o"), src)
-    sh("ca65", "-o", os.path.join(d, "pvm.o"), os.path.join(ROOT, "src", "pvm", "pvm.s"))
-    cfg = os.path.join(ROOT, "src", "pvm", "pvm.cfg")
-    objs = [os.path.join(d, "pvm.o"), os.path.join(d, "t.o")]
-    sh("ld65", "-C", cfg, "-S", "0", "-Ln", os.path.join(d, "t.lbl"), "-o", os.path.join(d, "t.0"), *objs)
-    sh("ld65", "-C", cfg, "-S", "256", "-o", os.path.join(d, "t.1"), *objs)
-    sh("python3", os.path.join(ROOT, "tools", "cx.py"), os.path.join(d, "t.0"), os.path.join(d, "t.1"),
-       os.path.join(d, "t.lbl"), os.path.join(d, "t.cx"))
-    return os.path.join(d, "t.cx")
+    pvmlink.sh("ca65", "-I", os.path.join(ROOT, "include"), "-I", os.path.join(ROOT, "src", "pvm"),
+               "-o", os.path.join(d, "t.o"), src)
+    return pvmlink.link_prog(os.path.join(d, "t.cx"), lib_dir(), [os.path.join(d, "t.o")])
 
 
 def build_run(body, d):
-    return run("t", [], path=build_cx(body, d))
+    return run("t", [], path=build_cx(body, d), libs={pvmlink.LIBPATH: os.path.join(lib_dir(), "pvm")})
 
 
 def words(b):
@@ -136,7 +135,7 @@ class PVM(unittest.TestCase):
         self.assertEqual(r.exit, 0)
         # main returned to native code with the eval stack holding its one result and the
         # 6502 stack as the program got it, less the one JSR level the prelude is in
-        self.assertEqual(r.mem[0x39], 10, "eval stack index after main")
+        self.assertEqual(r.mem[0x3A], 10, "eval stack index after main")
         return r
 
     def test_loop(self):
@@ -188,7 +187,7 @@ f_main: P_FUNC
         P_OP PO_RET
 """)
         self.assertEqual(words(r.out), [20100])
-        self.assertEqual(r.mem[0x3a], 0xFF, "6502 stack balanced")
+        self.assertEqual(r.mem[0x3B], 0xFF, "6502 stack balanced")
 
     def test_arith(self):
         ops = [("-7", "3", "PO_MUL", -21), ("-7", "2", "PO_DIV", -3), ("-7", "2", "PO_MOD", -1),
@@ -293,7 +292,7 @@ f_main: P_FUNC
         P_OP PO_RET
 """)
         self.assertEqual(words(r.out), [7260, 1000])
-        self.assertEqual(r.mem[0x3a], 0xFF, "6502 stack balanced")
+        self.assertEqual(r.mem[0x3B], 0xFF, "6502 stack balanced")
 
     def test_spill_with_zero_and_two_results(self):
         # PLASMA's #0 and #2 functions: four pending values force a spill at ENTER; LEAVE must put
@@ -382,7 +381,7 @@ f_main: P_FUNC
         P_OP PO_RET
 """ % depth, d)
                 self.assertEqual(r.exit, 12)
-                g = r.mem[0x3b] | r.mem[0x3c] << 8
+                g = r.mem[0x3C] | r.mem[0x3D] << 8
                 self.assertEqual(r.mem[g:g + 2], [0xA5, 0xA5], "canary below the frame stack")
 
     def test_eval_stack_push_guard(self):
@@ -464,7 +463,7 @@ f_main: P_FUNC
                 self.assertEqual(r.exit, status)
                 if status == 0:
                     self.assertEqual(words(r.out), [depth * (depth + 1) // 2])
-                g = r.mem[0x3b] | r.mem[0x3c] << 8
+                g = r.mem[0x3C] | r.mem[0x3D] << 8
                 self.assertEqual(r.mem[g:g + 2], [0xA5, 0xA5], "canary below the frame stack")
 
     def test_pdec(self):

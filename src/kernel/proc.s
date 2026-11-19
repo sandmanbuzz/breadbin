@@ -6,7 +6,7 @@
 ; the process's save area, then restores another process the same way and
 ; returns (plp/rts) into *that* process's call to sched.
 .include "k.inc"
-.import pbuf
+.import pbuf, p_lib, lib_unref
 
 .segment "BSS"
 p_state:  .res MAXPROC
@@ -445,6 +445,9 @@ proc_exit:
         lda p_mpage,x
         ldy p_mlen,x
         jsr page_free
+        ldx cur
+        lda p_lib,x             ; and its shared library's reference
+        jsr lib_unref
         ; reparent children to init (slot of pid 1)
         jsr find_init
         stx tmp2

@@ -137,3 +137,4 @@ size: all
 	python3 tools/size.py
 
 -include mk/modules.mk
+-include mk/pvm.mk

@@ -7,10 +7,11 @@
 .importzp fb, pp
 .import f_done, p_pslot, new_slot, proc_entry, con_file
 .import nm_dev, nm_ino, p_uid, pbuf
-.export mod_load, mod_unload, mod_list, mod_busy
+.export mod_load, mod_unload, mod_list, mod_busy, p_lib, lib_unref
 .import check_signal, con_release
 .import kapi_hash
 NMOD = 4
+NLIB = 2                ; shared libraries resident at once (CX format 3)
 
 MAXARGS = 16
 
@@ -27,6 +28,17 @@ nrel:     .res 2
 argsz:    .res 2
 nargs:    .res 1
 ld_hi:    .res 1        ; cx_load: 1 = allocate from the top of the pool
+ld_mask:  .res 1        ; cx_load: the formats accepted, bit n for CX version n
+radd:     .res 1        ; relocate: the page added (the image's, or its library's)
+ext:      .res 20       ; format 2: library reloc count (2), library id (2), library path (16)
+sp_lib:   .res 1        ; the library this spawn attached: slot + 1, 0 for none
+asave:    .res 2
+lib_base: .res NLIB     ; resident libraries: first page (0 = free slot),
+lib_np:   .res NLIB     ; page count,
+lib_ref:  .res NLIB     ; processes using it (freed at 0),
+lib_dev:  .res NLIB     ; and the file it came from
+lib_ino:  .res NLIB
+p_lib:    .res MAXPROC  ; per process: its library's slot + 1, 0 for none
 mod_base: .res NMOD     ; loaded kernel modules: first page (0 = free slot),
 mod_np:   .res NMOD     ; page count,
 mod_cls:  .res NMOD     ; class byte from the module header
@@ -119,8 +131,11 @@ spawn_common:
         bcs @sr
         lda #0
         sta ld_hi
+        sta sp_lib
+        lda #%0110          ; a program: format 1, or 2 (importing a library)
+        sta ld_mask
         jsr cx_load
-        bcs @sr
+        bcs @unl
         jsr zero_bss
         jsr copy_args
         bit sp_flags
@@ -128,14 +143,23 @@ spawn_common:
         jmp exec_commit     ; the point of no return, below
 @new:   jsr setup_proc
         clc
+        rts
+@unl:   pha                 ; failed after attaching a library: let it go
+        lda sp_lib
+        jsr lib_unref
+        pla
+        sec
 @sr:    rts
 
-; cx_load: r0 = path, argsz already set. ld_hi = 0 takes pages from the bottom of the pool
-; (processes), 1 from the top (kernel modules). Loads and relocates the CX image: base,
-; npages, img_sz, bss_sz. Carry set on error (A = errno), nothing left allocated.
+; cx_load: r0 = path, argsz and ld_mask already set. ld_hi = 0 takes pages from the bottom of the
+; pool (processes), 1 from the top (kernel modules, libraries). Loads and relocates the CX image:
+; base, npages, img_sz, bss_sz. Carry set on error (A = errno), nothing left allocated but the
+; library a format 2 program attached (sp_lib: the caller lets it go). cx_load_nm: namei done.
 cx_load:
         jsr namei_r0
-        bcs @r
+        bcc cx_load_nm
+        rts
+cx_load_nm:
         ldx nm_dev
         lda dev_type,x      ; programs run from c64fs and UCI, not CBM disks
         beq @c64
@@ -176,9 +200,35 @@ cx_load:
         lda hdr+1
         cmp #'X'
         bne @noexec
+        ldx hdr+2           ; A = 1 << version: one of the formats asked for?
+        cpx #8              ; (rol is a 9-bit rotate: 9 would come back round to 1)
+        bcs @noexec
+        lda #0
+        sec
+@fm:    rol a
+        dex
+        bpl @fm
+        and ld_mask
+        beq @noexec
         lda hdr+2
-        cmp #1
-        beq @hok
+        cmp #2
+        bne @hok
+        lda #<ext           ; format 2: the library part of the header
+        sta fb
+        lda #>ext
+        sta fb+1
+        lda #20
+        sta f_cnt
+        jsr fs_read         ; f_cnt+1 is still 0
+        bcs @r
+        lda f_done
+        cmp #20
+        bne @noexec
+        lda sp_lib
+        bne @hok
+        jsr lib_attach
+        bcs @r
+        jmp cx_load         ; again from the top: the library's load used the same state
 @noexec:
         lda #ENOEXEC
         sec
@@ -221,12 +271,9 @@ cx_load:
         sec
         rts
 @mem:   sta base
-        ; load the image
-        lda #9
-        sta f_off
+        sta radd
+        ; load the image: f_off is past the header (9 bytes, or 29 for format 2)
         lda #0
-        sta f_off+1
-        sta f_off+2
         sta fb
         lda base
         sta fb+1
@@ -244,7 +291,19 @@ cx_load:
         bne @bad
         jsr relocate
         bcs @fail
-        clc
+        lda hdr+2
+        cmp #2
+        bne @ok
+        lda ext             ; the library relocations follow: they add the library's page
+        sta nrel
+        lda ext+1
+        sta nrel+1
+        ldx sp_lib
+        lda lib_base-1,x
+        sta radd
+        jsr relocate
+        bcs @fail
+@ok:    clc
         rts
 @bad:   lda #ENOEXEC
 @fail:  pha
@@ -255,7 +314,7 @@ cx_load:
         sec
         rts
 
-; relocate: read nrel offsets after the image; base[off] += base page
+; relocate: read nrel offsets at f_off; base[off] += radd
 relocate:
 @chunk: lda nrel
         ora nrel+1
@@ -294,7 +353,7 @@ relocate:
         ldy #0
         lda (p1),y
         clc
-        adc base
+        adc radd
         sta (p1),y
         inx
         inx
@@ -499,6 +558,8 @@ setup_proc:
         sta p_mpage,x
         lda npages
         sta p_mlen,x
+        lda sp_lib
+        sta p_lib,x
         lda cur
         sta p_pslot,x
         cmp #$ff
@@ -680,6 +741,11 @@ exec_commit:
         ldy p_mlen,x
         jsr page_free           ; the old image goes back to the pool
         ldx cur
+        lda p_lib,x             ; the old image's library: the new one took its own reference
+        jsr lib_unref
+        ldx cur
+        lda sp_lib
+        sta p_lib,x
         lda base
         sta p_mpage,x
         lda npages
@@ -717,6 +783,8 @@ mod_load:
         lda #0
         sta argsz
         sta argsz+1
+        lda #%0010          ; format 1
+        sta ld_mask
         lda #1
         sta ld_hi
         jsr cx_load
@@ -826,3 +894,118 @@ mod_list:
         clc
         rts
 
+
+; ---- shared libraries (CX format 3): one copy at the top of the pool, shared by the processes
+; whose format 2 images import it (tools/cx.py), freed when the last of them exits or execs.
+
+; lib_attach: for a format 2 header in hdr/ext, find the library resident (same file) or load it,
+; check its id against the program's, and take a reference: sp_lib = slot + 1. Carry set on
+; error: ENOEXEC (no such library, or another id), ENOMEM. Clobbers the loader's state.
+lib_attach:
+        lda #<(ext+4)
+        sta pp
+        lda #>(ext+4)
+        sta pp+1
+        jsr namei
+        bcc @fnd
+        cmp #ENOENT         ; no such library: not a program we can run; other errors stand
+        beq @nx
+        sec
+        rts
+@fnd:   ldx #NLIB
+@f:     lda lib_base-1,x
+        beq @n
+        lda lib_dev-1,x
+        cmp nm_dev
+        bne @n
+        lda lib_ino-1,x
+        cmp nm_ino
+        beq @have
+@n:     dex
+        bne @f
+        ldx #NLIB           ; not resident: a free slot
+@e:     lda lib_base-1,x
+        beq @load
+        dex
+        bne @e
+        lda #EAGAIN         ; every library slot taken
+        .byte $2C           ; bit abs: skip the next lda
+@nx:    lda #ENOEXEC
+        sec
+        rts
+@load:  stx sp_lib
+        lda argsz
+        sta asave
+        lda argsz+1
+        sta asave+1
+        lda #0
+        sta argsz
+        sta argsz+1
+        lda #1
+        sta ld_hi
+        lda #%1000          ; format 3
+        sta ld_mask
+        jsr cx_load_nm
+        ldx asave           ; back to the program's load; ldx keeps A and carry
+        stx argsz
+        ldx asave+1
+        stx argsz+1
+        ldx #0
+        stx ld_hi
+        ldx #%0110
+        stx ld_mask
+        bcs @none
+        ldx sp_lib
+        lda base
+        sta lib_base-1,x
+        lda npages
+        sta lib_np-1,x
+        lda nm_dev
+        sta lib_dev-1,x
+        lda nm_ino
+        sta lib_ino-1,x
+        lda #0
+        sta lib_ref-1,x
+        beq @chk
+@have:  stx sp_lib
+@chk:   lda lib_base-1,x    ; the id: image bytes 0-1
+        sta p1+1
+        ldy #0
+        sty p1
+        lda (p1),y
+        cmp ext+2
+        bne @mis
+        iny
+        lda (p1),y
+        cmp ext+3
+        bne @mis
+        inc lib_ref-1,x
+        clc
+        rts
+@mis:   lda lib_ref-1,x     ; just loaded for this program: unload it
+        bne @noex
+        txa
+        jsr lib_free
+@noex:  lda #ENOEXEC
+@none:  ldx #0
+        stx sp_lib
+        sec
+        rts
+
+; lib_unref: A = a library's slot + 1 (0: none). Drops one reference, frees it at the last.
+lib_unref:
+        tax
+        beq @r
+        dec lib_ref-1,x
+        beq @f
+@r:     rts
+@f:     txa
+lib_free:               ; A = slot + 1: give its pages back
+        tax
+        lda lib_base-1,x
+        pha
+        lda #0
+        sta lib_base-1,x
+        pla
+        ldy lib_np-1,x
+        jmp page_free

@@ -27,14 +27,16 @@
 ; - ENTER spills the caller's pending eval-stack entries to the frame stack when fewer than
 ;   ESRESERVE would be free, LEAVE restores them under any number of results; an eval stack
 ;   index out of range at a call or return traps (exit ENOMEM).
-; - SYS n (opcode $C6): a Breadbin syscall, the eval stack saved around it.
-; - no module loader, no cmd, no IINTERP; the image starts with JMP pvm_main.
+; - SYS n (opcode $C6): a Breadbin syscall, the eval stack saved around it (on the frame stack).
+; - no module loader, no cmd, no IINTERP. The VM is a shared library (CX format 3, /lib/pvm): pure
+;   code, every byte of state in the process's zero page or frame stack; the image starts with the
+;   library id, which tools/cx.py writes and every importing program carries.
 ; The opcode numbers and their semantics are upstream's, so PLASMA's compiler output runs (within
 ; the limits in docs/design/pvm.md section 5).
 
 .include "../../include/breadbin.inc"
-.export pvm_init, pvm_interp, pvm_errno
-.import pvm_main
+.export pvm_init, pvm_interp
+.exportzp pvm_errno
 
 ; ---- zero page ----
 ESGUARD = $08           ; 2 bytes the indexed-indirect loads use below TOS
@@ -56,19 +58,16 @@ JMPTMP  = ESP + 1       ; JMP abs; TMP is its operand
 TMP     = JMPTMP + 1
 DVSIGN  = TMP + 2
 SRC     = DVSIGN + 1
-.assert SRC + 2 <= $39, error, "VM zero page overlaps the program's"
+flim    = SRC + 2       ; the bottom of the frame stack (pvm_init)
+pvm_errno = flim + 2    ; the last SYS's errno, 0 on success
+.assert pvm_errno = $39, error, "VM zero page overlaps the program's ($3A-$3F)"
 
 OP_SYS  = $C6
 
-.segment "BSS"
-esave:     .res ESTKSZ
-pvm_errno: .res 1
-flim:      .res 2       ; the bottom of the frame stack (pvm_init)
-
-; The PVM segment starts the image (src/pvm/pvm.cfg): the entry jump, handlers up to a page,
-; the opcode table page-aligned (JMP (OPTBL) puts the opcode in the low byte), more handlers.
+; The image (src/pvm/pvm.cfg): the library id, handlers up to a page, the opcode table
+; page-aligned (JMP (OPTBL) puts the opcode in the low byte), more handlers. No BSS: shared.
 .segment "PVM"
-        jmp pvm_main
+        .word 0                 ; the library id: tools/cx.py writes it
 
 ; pvm_init: A/Y = top of the frame stack (lo/hi), r0 = its bottom (at least $0100: one allocation
 ; is at most 255 bytes, so the check in fsalloc cannot wrap). Returns X = eval stack index; native
@@ -1323,7 +1322,8 @@ JUMP:   iny
 
 ; SYS n: syscall n (bits 0-4). Pops TOS into A (low) and X (high); with bit 7 set, then pops
 ; TOS-1's low byte into Y. r0-r2 are set beforehand with stores to $02-$07. Pushes A | X << 8,
-; or -1 with the errno in pvm_errno. The syscall clobbers $08-$1F: the eval stack is saved.
+; or -1 with the errno in pvm_errno. The syscall clobbers $08-$1F: the eval stack is saved on
+; the frame stack (ESTKSZ bytes, through fsalloc, so a full frame stack exits with ENOMEM).
 SYS:    iny
         lda (IP),y
         sty IPY
@@ -1335,9 +1335,11 @@ SYS:    iny
         sta TMP
         lda #>SYS_BASE
         sta TMP+1
+        lda #ESTKSZ
+        jsr fsalloc
         ldy #ESTKSZ-1
 @s:     lda ESTKH,y
-        sta esave,y
+        sta (IFP),y
         dey
         bpl @s
         stx ESP
@@ -1356,11 +1358,17 @@ SYS:    iny
         sta TMP
         stx TMP+1
         ldy #ESTKSZ-1
-@r:     lda esave,y
+@r:     lda (IFP),y
         sta ESTKH,y
         dey
         bpl @r
-        ldx ESP
+        lda IFP
+        clc
+        adc #ESTKSZ
+        sta IFP
+        bcc :+
+        inc IFP+1
+:       ldx ESP
         dex
         plp
         lda #0                  ; errno 0 on success, so a result of -1 is unambiguous

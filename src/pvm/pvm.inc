@@ -1,7 +1,8 @@
 ; pvm.inc - p-code for the Breadbin VM (src/pvm/pvm.s) as ca65 macros. The opcode numbers are
 ; PLASMA's (docs/design/pvm.md). A bytecode function starts with P_FUNC; addresses are emitted as
 ; .word so the CX relocation sees them; branch offsets are relative to the offset word.
-.import pvm_init, pvm_interp, pvm_errno
+.import pvm_init, pvm_interp
+.importzp pvm_errno
 
 .macro P_FUNC
         jsr pvm_interp

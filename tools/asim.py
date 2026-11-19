@@ -55,20 +55,34 @@ class Result:
         self.mem = None              # the 64 KB memory at exit, for tests that look at the program's variables
 
 
-def cx_load(data, page):
-    """(image bytes with relocations applied, bss size, header dict) of a CX file loaded at `page`."""
-    assert data[:3] == b"CX\x01", "not a CX file"
+LIB_PAGE = 0xB0                   # where a format 2 program's library is loaded (below argv)
+
+
+def cx_load(data, page, lib_page=None, formats=(1, 2)):
+    """(image bytes with relocations applied, bss size, header dict) of a CX file loaded at `page`.
+    Format 2 (tools/cx.py) adds lib_page to its library relocations; the header names the library
+    (path, id). Format 3 is a library."""
+    assert data[:2] == b"CX" and data[2] in formats, "not a CX file of format %s" % (formats,)
+    fmt = data[2]
     img, bss, nrel = (int.from_bytes(data[3 + 2 * i:5 + 2 * i], "little") for i in range(3))
-    out = bytearray(data[9:9 + img])
-    rel = data[9 + img:9 + img + 2 * nrel]
-    for i in range(nrel):
+    hdr = {"format": fmt, "image": img, "bss": bss, "relocs": nrel}
+    start = 9
+    if fmt == 2:
+        hdr["lib_relocs"] = int.from_bytes(data[9:11], "little")
+        hdr["lib_id"] = int.from_bytes(data[11:13], "little")
+        hdr["lib"] = data[13:29].split(b"\0")[0].decode()
+        start = 29
+    out = bytearray(data[start:start + img])
+    rel = data[start + img:]
+    for i in range(nrel + hdr.get("lib_relocs", 0)):
         off = rel[2 * i] | rel[2 * i + 1] << 8
-        out[off] = (out[off] + page) & 0xFF
-    return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
+        out[off] = (out[off] + (page if i < nrel else lib_page)) & 0xFF
+    return bytes(out), bss, hdr
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None):
+def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None, libs=None):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
+    A format 2 program's library is loaded at LIB_PAGE from libs[its path] (a host file) or build/root.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
     fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_create=path makes a write-open of that path fail with EIO; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs).
     cooked=True makes a read of fd 0 stop after the first LF, as the console's cooked mode does (a read at the end of stdin returns 0 bytes).
@@ -77,13 +91,20 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
     if MPU is None:
         raise RuntimeError("py65 not installed")
     with open(path or os.path.join(ROOT, "build", "root", "bin", prog), "rb") as f:
-        image, bss, header = cx_load(f.read(), BASE_PAGE)
+        image, bss, header = cx_load(f.read(), BASE_PAGE, LIB_PAGE)
     res = Result()
     res.header = header
     res.files = dict(files or {})
     mem = [0] * 65536
     base = BASE_PAGE << 8
     mem[base:base + len(image)] = list(image)
+    if header["format"] == 2:         # the library, from libs (its path -> a host file) or build/root
+        lp = (libs or {}).get(header["lib"]) or os.path.join(ROOT, "build", "root", header["lib"].lstrip("/"))
+        with open(lp, "rb") as f:
+            limage, lbss, _ = cx_load(f.read(), LIB_PAGE, formats=(3,))
+        assert lbss == 0 and limage[0] | limage[1] << 8 == header["lib_id"], "library id mismatch"
+        assert base + len(image) + bss <= LIB_PAGE << 8, "program overlaps the library"
+        mem[LIB_PAGE << 8:(LIB_PAGE << 8) + len(limage)] = list(limage)
     for off, b in (poke or {}).items():
         mem[base + off:base + off + len(b)] = list(b)
     # argv: strings and the pointer array well above the program (the real layout puts them at the
