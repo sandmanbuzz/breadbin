@@ -1,6 +1,7 @@
 # L0: the p-code VM (E1, `docs/roadmap.md`)
 
-Status: L0, 2026-11-18: decision made and the port running under the host simulator (§6). The owner's direction (roadmap E1): a compact p-code VM,
+Status: L0 landed 2026-11-18 (decision, and the port running under the host simulator); L1 in
+progress: speed measured, frame stack bounded (§3, §6). The owner's direction (roadmap E1): a compact p-code VM,
 not an LLVM-like toolchain scaled down; the BASIC and the mini C compile to it; memory is king,
 I/O second; fixed point in the MVP, floating point allowed for and not committed.
 
@@ -52,12 +53,30 @@ each runtime unless said:
 
 PLASMA bytecode is 2.9 times as dense as cc65 and 7.6 times as dense as `cc.py`. The VM pays for
 itself after about 2 KB of `cc.py` output, which the shell's own utilities exceed; once it is
-shared (E2) it pays from the first program. Speed has not been measured yet: that is L1.
+shared (E2) it pays from the first program.
 
-The port (§4) is 2,490 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
-with 2 bytes of alignment padding, an assert keeping it under 8) plus 23 bytes of BSS. The
-benchmark linked with it is a 3,257-byte CX file and runs in 139,259 instructions under
-`tools/asim.py` (py65; instructions, not cycles, so not yet a speed figure).
+**Speed** (L1), 6502 cycles for the whole benchmark, each less an empty program's under the same
+harness (`python3 tools/pvm_bench.py`, which prints these and checks every result is 469, for
+cc65 only its low byte, the exit status being 8 bits; C
+source `src/pvm/test/bench.c`):
+
+| | cycles | speed relative to the VM |
+|---|---|---|
+| PLASMA bytecode on the port (`tools/asim.py`) | 471,285 | 1 |
+| `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 609,107 | 0.77 |
+| cc65 `-Oirs` native (`sim65 -c`) | 146,347 | 3.22 |
+
+The VM runs this benchmark faster than our own native compiler and at about a third of cc65's
+speed; its bytecode is a third of cc65's code size (above), the 2,493-byte VM not counted, which
+pays for itself only across programs once it is shared (E2). It executes 8,358 ops, 56 cycles an op on
+average. The simulators count documented cycles and do not model badlines, so these are CPU
+ratios: on a C64 the badlines and the interrupt slow all three alike. cc65's start-up clears the
+program's BSS (220 bytes here, not in the empty program), so its figure carries a few thousand
+cycles the others do not, under 2 %. Before the
+frame-stack check (§5) the VM figure was 463,755.
+
+The port (§4) is 2,493 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
+with 5 bytes of alignment padding, an assert keeping it under 8) plus 25 bytes of BSS.
 
 The C64 VM (`src/vmsrc/c64/plvmc64.s`, upstream commit `f209e30`, 2026-11-03) has no KERNAL
 calls in its core: the loader and `cmd` around it do. Opcodes are even, `$00–$C4`; `$C6–$FE`
@@ -91,8 +110,11 @@ Ported changes, each forced by §1:
    that function). Frameless functions (no `ENTER`) do not spill. The eval stack index is
    checked at every call and return; out of range, the process exits with status 12 (`ENOMEM`).
    A wrap that comes back into range before then (one expression deeper than the free entries)
-   is **not** caught and corrupts silently. Checking every push would catch it at a speed cost:
-   an L1 measurement, then the owner's call.
+   is **not** caught and corrupts silently. Checking every push (`dex; bmi trap`) would catch it
+   before the write: measured on the §3 benchmark, 3,331 pushes, so 6,662 cycles (1.4 %), and
+   about 36 bytes (15 push sites, trap stubs within branch range). It guards pushes only: a pop
+   past empty is still caught only at the next call or return. The owner's call; the
+   recommendation is to take it, since PLASMA's own compiler does not check depth.
 3. **Relocation.** Our front ends emit bytecode as ca65 `.byte` and `.word` lines in the program's
    source, linked with the VM as an ordinary CX program. No PLASMA module loader.
 4. **Syscalls**: one opcode, `SYS n` (`$C6`, the first free one), instead of a native shim per
@@ -130,9 +152,12 @@ Rules for our front ends, found while porting:
   expression deeper than the free entries (8 at a framed function's entry) corrupts silently
   where upstream's 16 would run, unless the wrap is still out of range at the next call or
   return. Our front ends check depth at compile time; PLASMA's compiler does not.
-- **Frame stack overflow is not checked**, as upstream: the program sizes its frame stack
-  (`pvm_init`), and running past it corrupts whatever is below. L1 decides whether `ENTER`
-  checks a limit.
+- **Frame stack size.** The program sizes its frame stack: `pvm_init` takes the top in `A/Y`
+  and the bottom in `r0` (at least `$0100`). Every allocation (a return IP, `ENTER`'s spill,
+  count and frame) goes through `fsalloc`, which exits with `ENOMEM` before writing below the
+  bottom; upstream does not check. Cost: 1.6 % on the §3 benchmark, 3 code bytes (the five
+  inline allocations became one routine; `pvm_init` copies `r0`) and 2 of BSS. Nothing checks
+  the caller's `r0`: a caller that forgets it gets an arbitrary bound.
 - **Zero page shared with `lib.s`.** The VM's `$34–$35` and the program's `$39–$3B` are also the
   user library's `lp3`, `lt3` and `lval`; a p-code program must not link those users. Nothing
   enforces it yet (`src/pvm/pvm.cfg` says so).
@@ -150,7 +175,11 @@ Rules for our front ends, found while porting:
   at every level (spilling), spills under `#0` and `#2` functions, the overflow trap, `NATV` from a called function, and the benchmark
   as upstream's compiler emits it (`src/pvm/test/bench.s`, result 469, checked independently).
 - **L1**: the ported VM as a CX program under VICE; size and speed of the §3 benchmark against
-  `cc.py` and cc65 recorded here; the eval-stack overflow trap tested.
+  `cc.py` and cc65 recorded here (done); the eval-stack overflow trap tested (done in L0); the
+  frame stack bounded and its trap tested at the boundary (204 levels of plain recursion fit the
+  test's 1 KB, 205 trap), with nothing written below it, and under VICE (`tests/test_pvm_machine.py`) (done). No Makefile
+  rule builds p-code programs yet: with no front end there is nothing to build but tests; L2
+  adds one with the first compiler.
 
 ## 7. Sources
 

@@ -87,7 +87,7 @@ tools/ci/run.sh test-only T="tests.test_system.Exec tests.test_system.Modules"
 
 When you add a test, put it in a shard (`tools/ci/shards.txt`, by cost) and run `bash tools/ci/sharded.sh --check` and the fast gate before you land: a test in no shard or in two fails both.
 
-Classes: `tests/test_system.py` has `Boot` (28 tests, split in two halves for the shards), `Persistence`, `REU`, `REURoot` (the REU as root device, no drive: `mkimage.py reu`, `make run-reu-root`), `Cache` (9: warm boot, new disk or label discards, write-through, pristine image after writes), `Pool`, `Modules`, `Exec`, `Drives` (mount and format CBM disks, the module-is-not-a-program case), `Pipes` (tee, tail, sort), `Touch`; `tests/test_console.py`, `tests/test_keyboard.py`, and `tests/test_compiled.py` (`Compiled`: programs written in C, compiled on the host by `tools/cc.py`, assembled and run on the machine).
+Classes: `tests/test_system.py` has `Boot` (28 tests, split in two halves for the shards), `Persistence`, `REU`, `REURoot` (the REU as root device, no drive: `mkimage.py reu`, `make run-reu-root`), `Cache` (9: warm boot, new disk or label discards, write-through, pristine image after writes), `Pool`, `Modules`, `Exec`, `Drives` (mount and format CBM disks, the module-is-not-a-program case), `Pipes` (tee, tail, sort), `Touch`; `tests/test_console.py`, `tests/test_keyboard.py`, and `tests/test_compiled.py` (`Compiled`: programs written in C, compiled on the host by `tools/cc.py`, assembled and run on the machine), and `tests/test_pvm_machine.py` (`PCode`: bytecode programs linked with the p-code VM on the host and run on the machine).
 
 ## Which tests for which change
 
@@ -109,6 +109,7 @@ By test name; refine this as we learn what actually catches what.
 | A single command in `src/bin/` | the test that uses it (`grep -n <name> tests/test_system.py`): `tee`, `tail` and `sort` have `Pipes`, `touch` has `Touch` |
 | The assembler (`as.s`) | `tools/test_as.py` (host: `as` runs under py65 via `tools/asim.py`, 0.1 s per program), then `Boot.test_19` and `test_27` |
 | The compiler (`tools/cc.py`, through slice 3) | `tools/test_cc.py`, `tools/test_cc_run.py` (host; programs run on a 6502 simulator), then `tests.test_compiled.Compiled` on the machine |
+| The p-code VM (`src/pvm/`) | `tools/test_pvm.py` (host, py65, run from `tools/`), `python3 tools/pvm_bench.py` for speed against `cc.py` and cc65, then `tests.test_pvm_machine.PCode` on the machine |
 | Image tools, key tables (`tools/`) | `make test-host` |
 | UCI v1 (`src/mod/uci.s` = `/lib/km/uci`, the stubs in `src/kernel/uci.s`, the `bmi` sites in `file.s`, `fs.s`, `exec.s`, `cbm.s`) | `make test-host` with py65 (`tools/test_uci_sim.py`), plus `Drives`, `REU`, `Pool`, `Modules` and a smoke run in VICE |
 | 1581 volumes (`src/mod/d81.s` = `/lib/km/d81`, the hook labels `ts_rd_io`, `ts_wr_io` in `blk.s` and `open_mnt_io`, `open_dio_io` in `cbm.s`, `tools/mkimage.py d81`) | `make test-host` (`tools/test_mkimage.py`, and `tools/test_d81_sim.py` with py65: fake drives at the DOS-command level), plus `tools/ci/run.sh test-only T="tests.test_d81_vice"` (its 1581 test skips without a `dos1581*` ROM, which `tools/setup-vice-roms.sh` does not fetch) and `Drives` |

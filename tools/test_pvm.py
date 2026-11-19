@@ -13,7 +13,8 @@ from asim import MPU, run
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HAVE_TOOLS = bool(shutil.which("ca65") and shutil.which("ld65") and MPU)
 
-# native entry: init the VM with a 1 KB frame stack, call main (bytecode), exit 0
+# native entry: init the VM with a 1 KB frame stack, call main (bytecode), exit 0. Two canary
+# bytes sit below the frame stack; $3B/$3C point at them
 PRELUDE = """
 .include "breadbin.inc"
 .include "pvm.inc"
@@ -22,11 +23,23 @@ PRELUDE = """
 SYSN_WRITE = (SYS_WRITE - SYS_BASE) / 3
 SYSN_EXIT  = (SYS_EXIT - SYS_BASE) / 3
 .segment "BSS"
+fguard: .res 2
 fstk:   .res 1024
 fstk_end:
 buf:    .res 64
 .segment "CODE"
 pvm_main:
+        lda #$A5
+        sta fguard
+        sta fguard+1
+        lda #<fguard
+        sta $3b
+        lda #>fguard
+        sta $3c
+        lda #<fstk
+        sta r0
+        lda #>fstk
+        sta r0+1
         lda #<fstk_end
         ldy #>fstk_end
         jsr pvm_init
@@ -48,7 +61,45 @@ pvm_main:
 """
 
 
-def build_run(body, d):
+# pdec(n): write n (0-32767) in decimal and a newline to fd 1, in bytecode; returns write's result
+PDEC = """
+f_pdec: P_FUNC
+        P_ENTER 4, 1            ; 0: n, 2: i, the next digit's index in buf
+        P_B PO_CB, 10
+        P_W PO_SAB, buf+8
+        P_CN 8
+        P_B PO_SLW, 2
+@lp:    P_B PO_LLW, 0
+        P_CN 10
+        P_OP PO_MOD
+        P_B PO_ADDI, '0'
+        P_B PO_LLW, 2
+        P_OP PO_DECR
+        P_B PO_DLW, 2
+        P_W PO_LA, buf
+        P_OP PO_ADD
+        P_OP PO_SB
+        P_B PO_LLW, 0
+        P_CN 10
+        P_OP PO_DIV
+        P_B PO_DLW, 0
+        P_BR PO_BRTRU, @lp
+        P_CN 9
+        P_B PO_LLW, 2
+        P_OP PO_SUB
+        P_W PO_SAW, r1
+        P_W PO_LA, buf
+        P_B PO_LLW, 2
+        P_OP PO_ADD
+        P_W PO_SAW, r0
+        P_CN 1
+        P_SYS SYSN_WRITE
+        P_B PO_LEAVE, 4
+"""
+
+
+def build_cx(body, d):
+    """The CX file for PRELUDE + body, built in directory d."""
     src = os.path.join(d, "t.s")
     with open(src, "w") as f:
         f.write(PRELUDE + body)
@@ -66,7 +117,11 @@ def build_run(body, d):
     sh("ld65", "-C", cfg, "-S", "256", "-o", os.path.join(d, "t.1"), *objs)
     sh("python3", os.path.join(ROOT, "tools", "cx.py"), os.path.join(d, "t.0"), os.path.join(d, "t.1"),
        os.path.join(d, "t.lbl"), os.path.join(d, "t.cx"))
-    return run("t", [], path=os.path.join(d, "t.cx"))
+    return os.path.join(d, "t.cx")
+
+
+def build_run(body, d):
+    return run("t", [], path=build_cx(body, d))
 
 
 def words(b):
@@ -296,6 +351,89 @@ f_main: P_FUNC
         P_OP PO_RET
 """, d)
         self.assertEqual(r.exit, 12)
+
+    def test_frame_stack_overflow_traps(self):
+        # recursion past the 1 KB frame stack exits with ENOMEM and writes nothing below it: once
+        # through the spill path (a pending value per level) and once through the plain ENTER
+        for depth, pending in ((250, False), (200, True)):
+            with self.subTest(depth=depth, pending=pending), tempfile.TemporaryDirectory(prefix="pvm-") as d:
+                r = build_run("""
+f_rec:  P_FUNC
+        P_ENTER 2, 1
+        P_B PO_LLW, 0
+        P_BR PO_BRTRU, @r
+        P_CN 0
+        P_B PO_LEAVE, 2
+@r:     P_B PO_LLW, 0
+""" + ("        P_OP PO_DUP\n" if pending else "") + """        P_OP PO_DECR
+        P_W PO_CALL, f_rec
+""" + ("        P_OP PO_ADD\n" if pending else "        P_B PO_ADDLW, 0\n") + """        P_B PO_LEAVE, 2
+f_main: P_FUNC
+        P_CN 1
+        P_CN 2
+        P_CN 3
+        P_CN 4
+        P_W PO_CW, %d
+        P_W PO_CALL, f_rec
+        P_W PO_SAW, buf
+        P_CN 2
+        WRITE_BUF
+        P_CN 0
+        P_OP PO_RET
+""" % depth, d)
+                self.assertEqual(r.exit, 12)
+                g = r.mem[0x3b] | r.mem[0x3c] << 8
+                self.assertEqual(r.mem[g:g + 2], [0xA5, 0xA5], "canary below the frame stack")
+
+    def test_frame_stack_boundary(self):
+        # plain recursion, no pending values, so only the frame-stack check can trap: 2 bytes for
+        # the native-entry marker and 5 a level (return IP, spill count, 2-byte frame). 204 levels
+        # (rec(203) down to rec(0)) take 1,022 of the 1,024 bytes and run; one more level traps
+        body = """
+f_rec:  P_FUNC
+        P_ENTER 2, 1
+        P_B PO_LLW, 0
+        P_BR PO_BRTRU, @r
+        P_CN 0
+        P_B PO_LEAVE, 2
+@r:     P_B PO_LLW, 0
+        P_OP PO_DECR
+        P_W PO_CALL, f_rec
+        P_B PO_ADDLW, 0
+        P_B PO_LEAVE, 2
+f_main: P_FUNC
+        P_W PO_CW, %d
+        P_W PO_CALL, f_rec
+        P_W PO_SAW, buf
+        P_CN 2
+        WRITE_BUF
+        P_CN 0
+        P_OP PO_RET
+"""
+        for depth, status in ((203, 0), (204, 12)):
+            with self.subTest(depth=depth), tempfile.TemporaryDirectory(prefix="pvm-") as d:
+                r = build_run(body % depth, d)
+                self.assertEqual(r.exit, status)
+                if status == 0:
+                    self.assertEqual(words(r.out), [depth * (depth + 1) // 2])
+                g = r.mem[0x3b] | r.mem[0x3c] << 8
+                self.assertEqual(r.mem[g:g + 2], [0xA5, 0xA5], "canary below the frame stack")
+
+    def test_pdec(self):
+        # the decimal printer tests/test_pvm_machine.py uses on the C64
+        r = self.go(PDEC + """
+f_main: P_FUNC
+        P_CN 0
+        P_W PO_CALL, f_pdec
+        P_OP PO_DROP
+        P_W PO_CW, 469
+        P_W PO_CALL, f_pdec
+        P_OP PO_DROP
+        P_W PO_CW, 32767
+        P_W PO_CALL, f_pdec
+        P_OP PO_RET
+""")
+        self.assertEqual(r.out, b"0\n469\n32767\n")
 
     def test_natv_returns_from_the_function(self):
         # NATV in a function reached by CALL: the native tail's RTS returns to the caller, as

@@ -46,6 +46,7 @@ class Result:
         self.err = b""
         self.files = {}
         self.steps = 0
+        self.cycles = 0
         self.conmodes = []            # the mode argument of each CONMODE call, in order
         self.marks = []               # len(out) at each read of fd 0 (stdin=...)
         self.header = None            # the CX header of the program's image, for inspection
@@ -297,5 +298,6 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
         if n > limit:
             raise RuntimeError("no exit after %d steps, pc $%04X" % (n, cpu.pc))
     res.steps = n
+    res.cycles = cpu.processorCycles  # 6502 cycles, the modelled syscalls excluded
     res.mem = mem
     return res
