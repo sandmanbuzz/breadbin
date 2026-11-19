@@ -45,11 +45,11 @@ In priority order. Each epic has stories; each story is done when its acceptance
 - **Numbers:** BASIC needs decimals. **Fixed point** for the MVP; **floating point** is allowed for in the instruction set (reserved opcodes) but not committed.
 - `basic.s` is replaced, not grown.
 
-**Sources to mine** (record source, author, licence and evidence in the file header and in `docs/design/fast-io.md`, as the licence policy in `CLAUDE.md` asks; that policy's "adoptable" list names original work and demoscene code, so third-party MIT code needs the owner's word before the first import):
+**Sources to mine.** MIT code may be used literally or adapted (licence policy in `CLAUDE.md`): keep its copyright notice, link the source, and record source, author, licence and evidence in the file header and in `docs/design/fast-io.md`.
 
-- **Microsoft BASIC for 6502**, version 1.1 (1978), released by Microsoft under the **MIT** licence (`github.com/microsoft/BASIC-M6502`); it includes the PET configuration and the floating-point package. Code may be adapted from it where it beats our own on size; it is unlikely to meet our compactness bar unchanged. **Only that source**: Commodore's BASIC ROM is proprietary and is never copied or disassembled for this.
-- **PLASMA** (David Schmenk, **MIT**, `github.com/dschmenk/PLASMA`): a 6502 bytecode VM and language with a module system; the closest prior art for the VM, the calling convention and relocatable modules.
-- **Lawless Legends** (`github.com/badvision/lawless-legends`, **Apache-2.0**): a large game built on PLASMA with its own extensions and module-based memory management. Ideas first; importing code brings Apache-2.0 terms (licence text, NOTICE), so ask the owner before the first import.
+- **Microsoft BASIC for 6502**, version 1.1 (1978), released by Microsoft under the **MIT** licence (`github.com/microsoft/BASIC-M6502`); it includes the PET configuration and the floating-point package. Take what beats our own code on size; it is unlikely to meet our compactness bar unchanged. **Only that source**: Commodore's BASIC ROM is proprietary and is never copied or disassembled for this.
+- **PLASMA** (David Schmenk, **MIT**, `github.com/dschmenk/PLASMA`): a 6502 bytecode VM and language with a module system; the closest prior art for the VM, the calling convention and relocatable modules. Base PLASMA may be adopted if it is the solution L0 selects.
+- **Lawless Legends** (`github.com/badvision/lawless-legends`, **Apache-2.0**): a large game built on PLASMA with its own extensions and module-based memory management. Apache-2.0 is the outer limit of what we take: ideas only, code only if backed into a corner (owner's call), and we do not ask for a re-licence.
 
 **Stories:**
 
