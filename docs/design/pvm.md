@@ -50,12 +50,13 @@ each runtime unless said:
 | PLASMA (`xplasm -AO`, bytecode) | 83 | 42 | 51 | 47 | **223** | VM 2,226 bytes; +3 bytes per function entry |
 | cc65 `-Oirs` (native) | 247 | 106 | 188 | 106 | 647 | cc65 runtime not counted |
 | `tools/cc.py` (native, ours) | 699 | 212 | 494 | 300 | 1,705 | 501 |
-| `tools/cc.py --pcode` (bytecode, ours, L2) | 117 | 49 | 80 | 60 | 306 | the VM; 23 bytes of native entry, and no native helper in this program |
+| `tools/cc.py --pcode` (bytecode, ours, L3a) | 114 | 48 | 78 | 59 | 299 | the VM; 23 bytes of native entry, and no native helper in this program |
 
 PLASMA bytecode is 2.9 times as dense as cc65 and 7.6 times as dense as `cc.py`. `cc.py --pcode`
-(L2) is 1.4 times PLASMA's size and 5.6 times as dense as its own native output: the gap to
-PLASMA is the frame set-up every function pays and the `NEG` after each compare (the VM's
-compares give -1 for true, and C's is 1). The VM pays for itself after about 2 KB of `cc.py`
+is 1.3 times PLASMA's size and 5.7 times as dense as its own native output: the gap to PLASMA is
+the frame set-up every function pays and the `NEG` after a compare whose value is used (the VM's
+compares give -1 for true, and C's is 1; since L3a a compare that only decides a branch has no
+`NEG`, which took L2's 306 bytes to 299 and its 623,913 cycles to 576,337). The VM pays for itself after about 2 KB of `cc.py`
 output, which the shell's own utilities exceed; once it is shared (E2) it pays from the first
 program.
 
@@ -68,10 +69,10 @@ source `src/pvm/test/bench.c`):
 |---|---|---|
 | PLASMA bytecode on the port (`tools/asim.py`) | 472,160 | 1 |
 | `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 614,521 | 0.77 |
-| `tools/cc.py --pcode` on the port (L2) | 623,913 | 0.76 |
+| `tools/cc.py --pcode` on the port (L3a) | 576,337 | 0.82 |
 | cc65 `-Oirs` native (`sim65 -c`) | 146,347 | 3.23 |
 
-`cc.py --pcode` is 1.32 times PLASMA's time and 1.02 times its own native output's. Its `int`
+`cc.py --pcode` is 1.22 times PLASMA's time and 0.94 times its own native output's. Its `int`
 is signed, so its compares and `/` are the VM's own ops (the unsigned-compare helpers that
 used to cost about 93,000 cycles are gone); the native output's runtime grew with the signed
 compare and divide.

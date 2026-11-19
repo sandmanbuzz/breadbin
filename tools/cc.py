@@ -10,8 +10,11 @@ software stack and stored in each function's static parameter slots), local vari
 `- * &`, `+ - == != < > <= >=`, indexing `a[i]`, calls, `if`/`else`, `while`, `for`, `return`,
 blocks, decimal and 0x numbers, and `puts("...")` (the one builtin: prints a string literal).
 
-Not in this slice: `* /` as binary operators (`*` is only the dereference), globals, pointers to
-pointers, `char` return types, `#include`, recursion (static locals), `&&` `||` `!`.
+`* /` binary, globals, string literals as char pointers (docs/design/s14-compiler.md, slice 3).
+Not in this back end: pointers to pointers, `char` return types, `#include`, recursion (static
+locals). The native back end is frozen at this language: `%`, `&&` `||` `!`, `break`, `continue`,
+the syscall builtins and `extern` are p-code only (`--pcode`, tools/cc_pcode.py) and refused
+here by name. Character literals are numbers to the lexer, so both back ends take them.
 
 Emitted code: `as` syntax (labels, .byte, .res, `#<`, `(zp),y`); symbols at most 14 characters.
 Calling convention: the value of an expression is in `acc` (16 bit, lo then hi); a binary
@@ -22,7 +25,9 @@ slots, then calls. Pointers are dereferenced through `cc_ptr`, which is in zero 
 import re
 import sys
 
-KEYWORDS = {"int", "char", "if", "else", "while", "for", "return"}
+KEYWORDS = {"int", "char", "if", "else", "while", "for", "return", "break", "continue", "extern"}
+SYSCALLS = ("read", "write", "open", "close", "exit")    # builtins of the p-code back end
+PCODE_ONLY = "is p-code only (cc.py --pcode): the native back end is frozen at the L2 language"
 MAX_DEPTH = 32                       # values pushed at once: cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
 LINE_BYTES = 16                      # .byte values per emitted line (as keeps at most 254 characters a line)
@@ -33,11 +38,12 @@ TOKEN = re.compile(r"""
     (?P<ws>\s+) | (?P<lc>//[^\n]*) | (?P<bc>/\*.*?\*/) |
     (?P<num>0[xX][0-9a-fA-F]+|[0-9]+) |
     (?P<str>"(?:\\.|[^"\\\n])*") |
+    (?P<chr>'(?:\\.|[^'\\\n])') |
     (?P<id>[A-Za-z_][A-Za-z_0-9]*) |
-    (?P<op>==|!=|<=|>=|[-+*/<>=(){};,&\[\]])
+    (?P<op>==|!=|<=|>=|&&|\|\||[-+*/%<>=!(){};,&\[\]])
 """, re.X | re.S)
 
-ESCAPES = {"n": 10, "t": 9, "r": 13, "0": 0, "\\": 92, '"': 34}
+ESCAPES = {"n": 10, "t": 9, "r": 13, "0": 0, "\\": 92, '"': 34, "'": 39}
 
 
 class CompileError(Exception):
@@ -58,6 +64,8 @@ def lex(src):
             toks.append(("num", v, line))
         elif kind == "str":
             toks.append(("str", unescape(text[1:-1], line), line))
+        elif kind == "chr":                     # 'A': a number, as in C
+            toks.append(("num", unescape(text[1:-1], line, nul=True)[0], line))
         elif kind == "id":
             toks.append(("kw" if text in KEYWORDS else "id", text, line))
         elif kind == "op":
@@ -68,26 +76,26 @@ def lex(src):
     return toks
 
 
-def unescape(body, line):
+def unescape(body, line, nul=False):
     out, i = [], 0
     while i < len(body):
         c = body[i]
         if c == "\\":
             i += 1
             if i >= len(body) or body[i] not in ESCAPES:
-                raise CompileError(f"line {line}: bad escape in string literal")
+                raise CompileError(f"line {line}: bad escape in {'character' if nul else 'string'} literal")
             out.append(ESCAPES[body[i]])
         else:
             if ord(c) > 255:
                 raise CompileError(f"line {line}: string literal characters must be Latin-1 (as stores 8 bits)")
             out.append(ord(c))
         i += 1
-    if 0 in out:
+    if 0 in out and not nul:
         raise CompileError(f"line {line}: a \\0 in a string would end it early; not in this slice")
     return bytes(out)
 
 
-LEVELS = [("==", "!="), ("<", ">", "<=", ">="), ("+", "-"), ("*", "/")]
+LEVELS = [("||",), ("&&",), ("==", "!="), ("<", ">", "<=", ">="), ("+", "-"), ("*", "/", "%")]
 TYPES = ("int", "char")
 
 
@@ -121,7 +129,14 @@ class Parser:
     def program(self):
         funcs, globs = [], []
         while not self.at("eof"):
-            if self.is_function():
+            if self.at("kw", "extern"):
+                line = self.take()[2]
+                if not self.is_function():
+                    raise CompileError(f"line {line}: extern declares a function: extern int name(...);")
+                name, params, _, _ = self.function(body=False)
+                self.expect("op", ";")
+                funcs.append((name, params, None, line))     # no body: a native routine, linked in
+            elif self.is_function():
                 funcs.append(self.function())
             else:
                 d = self.decl()
@@ -137,7 +152,7 @@ class Parser:
             return False            # the file ends here: decl() reports what is missing
         return self.t[j + 1][:2] == ("op", "(")
 
-    def function(self):
+    def function(self, body=True):
         self.expect("kw", "int")
         name, line = self.expect("id")[1], self.peek()[2]
         self.expect("op", "(")
@@ -157,7 +172,7 @@ class Parser:
                     break
                 self.take()
         self.expect("op", ")")
-        return name, params, self.block(), line
+        return name, params, self.block() if body else None, line
 
     def block(self):
         self.expect("op", "{")
@@ -234,6 +249,10 @@ class Parser:
             return ("while", cond, self.stmt(), line)
         if self.at("kw", "for"):
             return self.for_stmt(line)
+        if self.at("kw", "break") or self.at("kw", "continue"):
+            kind = self.take()[1]
+            self.expect("op", ";")
+            return (kind, line)
         if self.at("kw", "return"):
             self.take()
             value = None if self.at("op", ";") else self.expr()
@@ -246,7 +265,8 @@ class Parser:
         return s
 
     def for_stmt(self, line):
-        """for (init; cond; step) body  ==  { init; while (cond) { body; step; } }"""
+        """for (init; cond; step) body  ==  { init; for (cond; step) body }: the loop node keeps
+        the step apart so that `continue` runs it."""
         self.take()
         self.expect("op", "(")
         init = None
@@ -267,8 +287,7 @@ class Parser:
             step = self.simple()
         self.expect("op", ")")
         body = self.stmt()
-        inner = [body] + ([step] if step else [])
-        loop = ("while", cond, ("block", inner, line), line)
+        loop = ("for", cond, body, step, line)
         return ("block", ([init] if init else []) + [loop], line)
 
     def paren_expr(self):
@@ -290,6 +309,9 @@ class Parser:
         return left
 
     def unary(self):
+        if self.at("op", "!"):
+            line = self.take()[2]
+            return ("not", self.unary(), line)
         if self.at("op", "-"):
             line = self.take()[2]
             return ("neg", self.unary(), line)
@@ -688,6 +710,9 @@ class Gen:
             raise CompileError("no function main")
         if self.params["main"]:
             raise CompileError(f"line {self.funcs['main']}: main takes no parameters (start passes none)")
+        for name, _, body, line in funcs:
+            if body is None:
+                raise CompileError(f"line {line}: extern {PCODE_ONLY}")
         for d in globs:
             self.global_var(d)
         self.lab("start")
@@ -895,6 +920,11 @@ class Gen:
             self.stmt(body)
             self.ins(f"jmp {top_l}")
             self.lab(end_l)
+        elif kind == "for":
+            _, cond, body, step, line = s
+            self.stmt(("while", cond, ("block", [body] + ([step] if step else []), line), line))
+        elif kind in ("break", "continue"):
+            raise CompileError(f"line {s[1]}: {kind} {PCODE_ONLY}")
         elif kind == "block":
             for x in s[1]:
                 self.stmt(x)
@@ -1011,6 +1041,8 @@ class Gen:
             return (t[0], False)
         if kind == "bin":
             return self.binary(e)
+        if kind == "not":
+            raise CompileError(f"line {e[2]}: ! {PCODE_ONLY}")
         raise CompileError(f"internal: unknown expression {kind}")
 
     def addr_of(self, e):
@@ -1032,6 +1064,8 @@ class Gen:
 
     def binary(self, e):
         _, op, a, b, line = e
+        if op in ("%", "&&", "||"):
+            raise CompileError(f"line {line}: {op} {PCODE_ONLY}")
         ta = self.expr(a)
         self.push()
         tb = self.expr(b)
@@ -1050,6 +1084,8 @@ class Gen:
         return ("int", False)
 
     def call(self, name, args, line):
+        if name not in self.funcs and name in SYSCALLS:
+            raise CompileError(f"line {line}: the builtin {name} {PCODE_ONLY}")
         if name not in self.funcs:
             raise CompileError(f"line {line}: undefined function {name}")
         params = self.params[name]

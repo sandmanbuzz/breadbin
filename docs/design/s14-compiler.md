@@ -13,7 +13,8 @@ before S17 (self-host or stay in assembly) is decided. `tools/test_cc.py` is its
 - Pointers to `int` or `char` (one level), arrays of `int` or `char` (local, static storage),
   unary `*` and `&`, indexing `a[i]`; pointer `+` and `-` scale by the element. Pointers are read
   through `cc_ptr` ($2b, zero page).
-- `for (init; cond; step) body`, desugared to a `while` in the parser.
+- `for (init; cond; step) body`, a `while` with the step after the body (the parser keeps the
+  step apart, for the p-code back end's `continue`).
 - Locals declared with `int name = expr;`. They have static storage (`v_<fn>_<name>`, 2 bytes),
   so there is no recursion yet.
 - Statements: declaration, assignment, expression, `if`/`else`, `while`, `return`, blocks.
@@ -31,8 +32,15 @@ Slice 3 adds:
 - A string literal is the address of its bytes (a char pointer); a char array takes a string,
   its size inferred when left out (a local copies it in each time the declaration runs).
 
-Not yet: pointers to pointers, `char` return types, `#include`, `&&` `||` `!`, arrays of pointers
+Not yet: pointers to pointers, `char` return types, `#include`, arrays of pointers
 and string arrays of pointers (use char arrays), `*` on pointers (`p * 2` is refused).
+
+**The native back end is frozen at this language** (L3, `docs/design/basic.md` section 4). What
+the language gained since is p-code only (`cc.py --pcode`, `tools/cc_pcode.py`), and this back
+end refuses each by name ("... is p-code only"): `%`, `&&`, `||`, `!`, `break`, `continue`, the
+syscall builtins (`read`, `write`, `open`, `close`, `exit`) and `extern`. Character literals
+(`'A'`, with the string escapes and `\'`) are numbers to the lexer, so both back ends take them;
+`break`, `continue` and `extern` became keywords for both.
 
 ## Emitted shape
 

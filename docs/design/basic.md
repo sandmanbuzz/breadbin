@@ -70,6 +70,12 @@ The BASIC compiler needs more than `cc.py` has today:
   ops;
 - a way to call native runtime helpers, declared `extern`.
 
+**Done (2026-11-19):** all of it, in `cc.py --pcode` (the module docstring of
+`tools/cc_pcode.py` has the contract: syscall results, the `extern` calling convention).
+String literals were already `char *` values in L2. Tests: `tools/test_cc_pcode.py`, classes
+`L3a` and `L3aRefused`, including random expressions over every operator checked against a
+model in both value and branch contexts.
+
 Nothing more until the compiler asks. **The native back end is frozen at the L2 language:**
 new features are p-code only, and the native back end refuses them by name. The p-code back
 end is the mini C's future; the native one stays as a reference and as the benchmark row.
