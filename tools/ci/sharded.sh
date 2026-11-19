@@ -138,14 +138,24 @@ snap=$(mktemp -d "${TMPDIR:-/tmp}/shard-tree.XXXXXX")
 sampler=
 declare -A pid
 names=()
-# Ctrl-C, TERM and HUP stop every shard (background jobs started without job control ignore SIGINT, so
-# their own traps never fire: signal each shard's children by parent pid) and then the driver itself.
+# Ctrl-C, TERM and HUP stop every shard. Background jobs started without job control ignore
+# SIGINT; each GNU timeout runs its command in a separate process group, so signal that group
+# (including run.sh and its descendants), not just the timeout wrapper.
 stop_all() {
-    local n
+    local n child child_pgid driver_pgid
     [ -n "$sampler" ] && kill "$sampler" 2>/dev/null
+    driver_pgid=$(ps -o pgid= -p "$" 2>/dev/null | tr -d ' ')
     for n in "${names[@]}"; do
         [ -n "${pid[$n]:-}" ] || continue
-        pkill -TERM -P "${pid[$n]}" 2>/dev/null
+        while IFS= read -r child; do
+            [ -n "$child" ] || continue
+            child_pgid=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' ')
+            if [ -n "$child_pgid" ] && [ "$child_pgid" != "$driver_pgid" ]; then
+                kill -TERM -- "-$child_pgid" 2>/dev/null
+            else
+                kill -TERM "$child" 2>/dev/null
+            fi
+        done < <(pgrep -P "${pid[$n]}" 2>/dev/null || :)
         kill -TERM "${pid[$n]}" 2>/dev/null
     done
 }
