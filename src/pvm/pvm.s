@@ -224,7 +224,13 @@ _DIV:   sty IPY
         sta TMP
         sta TMP+1
         sta DVSIGN
-        lda ESTKH+1,x
+        lda ESTKL,x             ; a zero divisor: x / 0 and x % 0 are 0 (the normalising loop would
+        ora ESTKH,x             ; give a value that depends on x's bit count)
+        bne @dv
+        sta ESTKL+1,x           ; the quotient; A is 0, and TMP and DVSIGN are 0 already
+        sta ESTKH+1,x
+        beq @ex                 ; Z is the ORA's
+@dv:    lda ESTKH+1,x
         bpl @pos
         inx
         jsr _NEG

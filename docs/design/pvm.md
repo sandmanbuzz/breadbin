@@ -49,15 +49,15 @@ each runtime unless said:
 |---|---|---|---|---|---|---|
 | PLASMA (`xplasm -AO`, bytecode) | 83 | 42 | 51 | 47 | **223** | VM 2,226 bytes; +3 bytes per function entry |
 | cc65 `-Oirs` (native) | 247 | 106 | 188 | 106 | 647 | cc65 runtime not counted |
-| `tools/cc.py` (native, ours) | 699 | 212 | 494 | 300 | 1,705 | 421 |
-| `tools/cc.py --pcode` (bytecode, ours, L2) | 120 | 50 | 82 | 61 | 313 | the VM; 23 bytes of native entry and 55 of unsigned-compare helpers |
+| `tools/cc.py` (native, ours) | 699 | 212 | 494 | 300 | 1,705 | 501 |
+| `tools/cc.py --pcode` (bytecode, ours, L2) | 117 | 49 | 80 | 60 | 306 | the VM; 23 bytes of native entry, and no native helper in this program |
 
 PLASMA bytecode is 2.9 times as dense as cc65 and 7.6 times as dense as `cc.py`. `cc.py --pcode`
-(L2) is 1.4 times PLASMA's size and 5.4 times as dense as its own native output: the gap to
-PLASMA is mostly the unsigned comparisons (`cc.py`'s `int` is unsigned; the VM compares signed,
-so each `<` is a 3-byte `CALL` to a native helper) and the frame set-up every function pays. The VM pays for
-itself after about 2 KB of `cc.py` output, which the shell's own utilities exceed; once it is
-shared (E2) it pays from the first program.
+(L2) is 1.4 times PLASMA's size and 5.6 times as dense as its own native output: the gap to
+PLASMA is the frame set-up every function pays and the `NEG` after each compare (the VM's
+compares give -1 for true, and C's is 1). The VM pays for itself after about 2 KB of `cc.py`
+output, which the shell's own utilities exceed; once it is shared (E2) it pays from the first
+program.
 
 **Speed** (L1), 6502 cycles for the whole benchmark, each less an empty program's under the same
 harness (`python3 tools/pvm_bench.py`, which prints these and checks every result is 469, for
@@ -67,17 +67,17 @@ source `src/pvm/test/bench.c`):
 | | cycles | speed relative to the VM |
 |---|---|---|
 | PLASMA bytecode on the port (`tools/asim.py`) | 472,160 | 1 |
-| `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 609,107 | 0.78 |
-| `tools/cc.py --pcode` on the port (L2) | 669,451 | 0.71 |
+| `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 614,521 | 0.77 |
+| `tools/cc.py --pcode` on the port (L2) | 623,913 | 0.76 |
 | cc65 `-Oirs` native (`sim65 -c`) | 146,347 | 3.23 |
 
-`cc.py --pcode` is 1.42 times PLASMA's time and 1.10 times its own native output's. About
-93,000 of its cycles are the unsigned-compare helpers: with the VM's signed compares (an
-experiment, wrong for `cc.py`'s unsigned `int`) it is 576,337. A signed `int` in the mini C
-front end would take that back without a VM change.
+`cc.py --pcode` is 1.32 times PLASMA's time and 1.02 times its own native output's. Its `int`
+is signed, so its compares and `/` are the VM's own ops (the unsigned-compare helpers that
+used to cost about 93,000 cycles are gone); the native output's runtime grew with the signed
+compare and divide.
 
 The VM runs this benchmark faster than our own native compiler and at about a third of cc65's
-speed; its bytecode is a third of cc65's code size (above), the 2,544-byte VM not counted: it is
+speed; its bytecode is a third of cc65's code size (above), the 2,556-byte VM not counted: it is
 a shared library (§4 item 3), loaded once for every p-code process. It executes 8,358 ops, about 57 cycles an op on
 average. The simulators count documented cycles and do not model badlines, so these are CPU
 ratios: on a C64 the badlines and the interrupt slow all three alike. cc65's start-up clears the
@@ -86,9 +86,10 @@ cycles the others do not, under 2 %. The VM figure was 463,755 before the frame-
 (§5), 471,285 before the push guards (§4 item 2), 472,248 before `LEAVE`'s checks and 472,875
 before the VM became a library (the code moved, so the change is layout).
 
-The port (§4) is 2,544 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
+The port (§4) is 2,556 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
 with no alignment padding left, an assert keeping it under 8) and no BSS: the library file
-`/lib/pvm` is 2,801 bytes, 12 blocks, 10 pages when loaded.
+`/lib/pvm` is 2,813 bytes, 12 blocks, 10 pages when loaded. Before the divide-by-zero guard (§6
+L2) they were 2,544 and 2,801; the guard's 12 bytes still fit the 10 pages.
 
 The C64 VM (`src/vmsrc/c64/plvmc64.s`, upstream commit `f209e30`, 2026-11-03) has no KERNAL
 calls in its core: the loader and `cmd` around it do. Opcodes are even, `$00–$C4`; `$C6–$FE`
@@ -237,7 +238,11 @@ Rules for our front ends, found while porting:
 
 - **L2**: `cc.py --pcode` (`tools/cc_pcode.py`) emits p-code with real stack frames: every
   function `ENTER`s a frame holding its parameters and locals (arrays included), so recursion
-  and mutual recursion work. Every program in `tools/test_cc_run.py` runs on both back ends with
+  and mutual recursion work. `int` is signed on both back ends: `<` `>` `<=` `>=` are the VM's
+  signed compares (each followed by a `NEG`, as C's true is 1), and `/` is the VM's `DIV`, which
+  truncates toward zero. `DIV` by 0 gave a value that depended on the dividend's bit count; it
+  now gives 0 (a 12-byte guard in `_DIV`, 2,556 bytes of port, and `x % 0` is 0 too), and the
+  native back end does the same. Every program in `tools/test_cc_run.py` runs on both back ends with
   the same output (`tools/test_cc_pcode.py`, py65), plus what only the p-code back end does:
   recursion (fact, fib, even/odd), locals per call, pending values across a call, values spilled
   to frame temporaries when an expression or a call's arguments need more than the 8 entries
@@ -246,8 +251,8 @@ Rules for our front ends, found while porting:
   operand ops (`ADDI` … `IDXAW`), and frame-stack exhaustion exiting with `ENOMEM`. Under VICE,
   `tests.test_pvm_machine.CompiledC` runs `tests/test_compiled.py`'s programs as p-code, fib(12)
   and fact(7), and the exit status of runaway recursion (12). Sizes as CX files, against the
-  native image with its runtime: hello 105 (585), loop 150 (688), ops 386 (1,004), slice2 360
-  (1,396); a p-code process also holds its 1 KB frame stack (BSS) and shares the VM.
+  native image with its runtime: hello 105 (666), loop 116 (769), ops 352 (1,085), slice2 326
+  (1,477); a p-code process also holds its 1 KB frame stack (BSS) and shares the VM.
   Where it differs from the native back end: `main`'s value is the exit status; a store through
   a pointer computes the value before the address; a frame is at most 255 bytes and a call at
   most 8 arguments (both refused at compile time); an uninitialised local holds whatever the
