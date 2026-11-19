@@ -764,3 +764,7 @@ Setup: C64 Ultimate firmware 1.1.0, drive A = device 9 (JiffyDOS 1541-II ROM), J
 - Lesson for tests of timed programs: a gated screen read can take 1 to 10 s on hardware, and the game plays on meanwhile, so it may be over when the read returns. Send `q` only to a game still running (`test_31_tetris` does). A failing test must also quit the game (`_leave_game`), or the next test's keys go to it.
 - Config: the harness left drive A on `/Temp/test.d64`; remounted `/Temp/breadbin.d64` afterwards (no trap in the harness; `/v1/drives` before and after).
 - Not run: the full hardware list, JiffyDOS-ROM VICE runs, `tools/ci/run.sh test-smoke`.
+
+### 2026-11-18: the physical-1541 stall is closed (owner)
+
+Everything above about the root-mount stall, the 1581 series, `bus_acptr` and the throwaway `iec-*` branches is history. The cause was the harness's DMA reads halting the CPU mid-IEC-byte; see `docs/design/io-attack-log.md` ("2026-11-18: closed"). The hardware rule that follows: never read memory over REST while the bus is moving, and use the gate.

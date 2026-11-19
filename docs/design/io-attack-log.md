@@ -393,3 +393,13 @@ The VICE write halt arm on 46f5957, one commit before the 2x-only refinement: 24
 One pre-existing hazard is documented, not fixed: a cut command that still parses ("U1:2 0 19 ") is accepted silently.
 
 Main has been merged into the branch (236a044; the test_29 conflict was resolved to keep both sides). The full suite is running exclusively on that tip, and hater round 4 is in progress.
+
+## 2026-11-18: closed (owner)
+
+The physical-1541 stall is closed. Cause: the test harness. Every REST memory read halts the 6510 (a DMA). The sender (the drive) cannot know the C64 paused, so a halt inside an IEC byte loses clock edges and the transfer overruns into a hang. VICE and the Ultimate's emulated drives are not halted by a DMA call, so they never showed it.
+
+Evidence, all above: the causal arm (block 2b: DMA 60 retries in 264 block reads, 8 of 8 boots; no DMA 0 in 594, 18 boots; Fisher p < 1e-6); the measured 1-2 ms halt per 1000-byte read; session 5 with the gate on an idle bus (0 failures in W 300, B 300, R 50 on a physical JiffyDOS 1541; `io-trial-protocol.md`). The bounded waits, retries and the IO release stay as defence, not as the fix.
+
+Superseded by this entry: the "mitigated, not root-caused" wording (CLAUDE.md, roadmap, why-this-fork, feature-priority, wip) and the "H11 doubtful for class S" and "does not yet explain failures with no DMA" lines above, which were written before the causal arm and the session-5 gate. The older entries stay as history.
+
+Not part of this closure: a "2x" status read from the Ultimate's emulated drive A that ends the tries without a retry (`io-trial-protocol.md`, "Session 5, fresh media"). It is a separate follow-up, not the old stall. New IO failures are new evidence against a passed gate; check the harness's `gate_races` first.

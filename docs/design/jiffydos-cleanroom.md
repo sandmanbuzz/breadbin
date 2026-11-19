@@ -79,4 +79,4 @@ Not needed. `blk.s` reads blocks, the LOAD protocol skips the load address and h
 1. Safe window on a PAL/NTSC C64 with the screen on: wait for a raster line, or blank for the transfer? The device waits indefinitely at S2, so waiting for a safe line costs time but not correctness; the decision is empirical.
 2. Do we keep the jiffy clock (`$A0..$A2`) and keyboard scan accurate across a window? Interrupts are off for ~60 us per byte, which is invisible, but the per-byte setup (about 150 us) adds up over a block; at 256 bytes that is 40 ms with interrupts off between windows if we do not re-enable them. Re-enable between bytes (`cli`/`sei` pair) or accept a 50 ms stall per block (the same trade the original JiffyDOS makes).
 3. EOI / error encodings: settle with the trace.
-4. The physical-1541 stall (hardware session, in progress); the probe must not make it worse.
+4. The old physical-1541 stall is closed (harness DMA, `docs/design/io-attack-log.md`). The lesson carries over: a halt mid-byte breaks any bit-timed protocol, so a probe must never be driven by a harness that reads memory during a transfer.
