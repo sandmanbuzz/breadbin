@@ -62,21 +62,21 @@ source `src/pvm/test/bench.c`):
 
 | | cycles | speed relative to the VM |
 |---|---|---|
-| PLASMA bytecode on the port (`tools/asim.py`) | 471,285 | 1 |
-| `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 609,107 | 0.77 |
-| cc65 `-Oirs` native (`sim65 -c`) | 146,347 | 3.22 |
+| PLASMA bytecode on the port (`tools/asim.py`) | 472,875 | 1 |
+| `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 609,107 | 0.78 |
+| cc65 `-Oirs` native (`sim65 -c`) | 146,347 | 3.23 |
 
 The VM runs this benchmark faster than our own native compiler and at about a third of cc65's
-speed; its bytecode is a third of cc65's code size (above), the 2,493-byte VM not counted, which
-pays for itself only across programs once it is shared (E2). It executes 8,358 ops, 56 cycles an op on
+speed; its bytecode is a third of cc65's code size (above), the 2,533-byte VM not counted, which
+pays for itself only across programs once it is shared (E2). It executes 8,358 ops, about 57 cycles an op on
 average. The simulators count documented cycles and do not model badlines, so these are CPU
 ratios: on a C64 the badlines and the interrupt slow all three alike. cc65's start-up clears the
 program's BSS (220 bytes here, not in the empty program), so its figure carries a few thousand
-cycles the others do not, under 2 %. Before the
-frame-stack check (§5) the VM figure was 463,755.
+cycles the others do not, under 2 %. The VM figure was 463,755 before the frame-stack check
+(§5), 471,285 before the push guards (§4 item 2) and 472,248 before `LEAVE`'s checks.
 
-The port (§4) is 2,493 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
-with 5 bytes of alignment padding, an assert keeping it under 8) plus 25 bytes of BSS.
+The port (§4) is 2,533 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
+with no alignment padding left, an assert keeping it under 8) plus 25 bytes of BSS.
 
 The C64 VM (`src/vmsrc/c64/plvmc64.s`, upstream commit `f209e30`, 2026-11-03) has no KERNAL
 calls in its core: the loader and `cmd` around it do. Opcodes are even, `$00–$C4`; `$C6–$FE`
@@ -108,13 +108,21 @@ Ported changes, each forced by §1:
    than 8 would be free, and `LEAVE` puts them back under the results (none for `#0`, two for
    `#2`), so that code recurses as deep as the frame stack allows (about 7 bytes a level for
    that function). Frameless functions (no `ENTER`) do not spill. The eval stack index is
-   checked at every call and return; out of range, the process exits with status 12 (`ENOMEM`).
-   A wrap that comes back into range before then (one expression deeper than the free entries)
-   is **not** caught and corrupts silently. Checking every push (`dex; bmi trap`) would catch it
-   before the write: measured on the §3 benchmark, 3,331 pushes, so 6,662 cycles (1.4 %), and
-   about 36 bytes (15 push sites, trap stubs within branch range). It guards pushes only: a pop
-   past empty is still caught only at the next call or return. The owner's call; the
-   recommendation is to take it, since PLASMA's own compiler does not check depth.
+   checked at every call and return, and **every push is guarded** (`dex; bmi`, the owner's
+   decision of 2026-11-18): a 12th entry exits with status 12 (`ENOMEM`) before it is written,
+   instead of wrapping and coming back into range with wrong values. Twelve push sites are
+   guarded (the pushes in `DIVMOD`, `_DIV` and `SYS` follow at least as many pops), through four
+   `jmp pvm_overflow` stubs within branch range: 36 bytes, less the 5 bytes of table padding
+   they absorbed. The §3 benchmark makes 3,336 guarded pushes, 6,672 cycles (1.4 %); the
+   measured net change was +963 cycles, as the moved code crosses pages differently, so the
+   net figure is layout luck. `LEAVE` checks both limits before it puts spilled entries back
+   under the results (9 bytes): more results than fit above them would be a 12th entry, which
+   the shift wrote into page 1, and an index past empty (the callee popped more than it pushed)
+   less the spill count could land back in range, where `RET` would not see it. Pops are not
+   guarded: a pop past empty is caught at the next call or return, but a push before then
+   writes `$20`, the low byte of argv. A native callee may return any
+   index; the next push, call or return catches it.
+   Cheaper guards are open for later.
 3. **Relocation.** Our front ends emit bytecode as ca65 `.byte` and `.word` lines in the program's
    source, linked with the VM as an ordinary CX program. No PLASMA module loader.
 4. **Syscalls**: one opcode, `SYS n` (`$C6`, the first free one), instead of a native shim per
@@ -149,9 +157,9 @@ Rules for our front ends, found while porting:
 - **Speed.** A bytecode VM is several times slower than native code; the I/O path is unaffected
   (syscalls are native). L1 measures it; hot routines can be `NATV` or library code.
 - **Eval stack depth 11.** PLASMA's compiler assumes 16. Spilling covers recursion; a single
-  expression deeper than the free entries (8 at a framed function's entry) corrupts silently
-  where upstream's 16 would run, unless the wrap is still out of range at the next call or
-  return. Our front ends check depth at compile time; PLASMA's compiler does not.
+  expression deeper than the free entries (8 at a framed function's entry) exits with `ENOMEM`
+  where upstream's 16 would run (the push guards, §4 item 2). Our front ends check depth at
+  compile time; PLASMA's compiler does not.
 - **Frame stack size.** The program sizes its frame stack: `pvm_init` takes the top in `A/Y`
   and the bottom in `r0` (at least `$0100`). Every allocation (a return IP, `ENTER`'s spill,
   count and frame) goes through `fsalloc`, which exits with `ENOMEM` before writing below the
@@ -175,7 +183,8 @@ Rules for our front ends, found while porting:
   at every level (spilling), spills under `#0` and `#2` functions, the overflow trap, `NATV` from a called function, and the benchmark
   as upstream's compiler emits it (`src/pvm/test/bench.s`, result 469, checked independently).
 - **L1**: the ported VM as a CX program under VICE; size and speed of the §3 benchmark against
-  `cc.py` and cc65 recorded here (done); the eval-stack overflow trap tested (done in L0); the
+  `cc.py` and cc65 recorded here (done); the eval-stack overflow trap tested (done in L0), and
+  the push guards, through every guarded op, each guard's removal failing the test (done); the
   frame stack bounded and its trap tested at the boundary (204 levels of plain recursion fit the
   test's 1 KB, 205 trap), with nothing written below it, and under VICE (`tests/test_pvm_machine.py`) (done). No Makefile
   rule builds p-code programs yet: with no front end there is nothing to build but tests; L2
