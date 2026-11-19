@@ -41,6 +41,7 @@ def toolong(path):
 class Result:
     def __init__(self):
         self.exit = None
+        self.mem = b""                 # the 64 KB at exit
         self.out = b""
         self.err = b""
         self.files = {}
@@ -65,10 +66,13 @@ def cx_load(data, page):
     return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=()):
+def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
-    fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_create=path makes a write-open of that path fail with EIO; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs)."""
+    fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_create=path makes a write-open of that path fail with EIO; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs).
+    cooked=True makes a read of fd 0 stop after the first LF, as the console's cooked mode does (a read at the end of stdin returns 0 bytes).
+    poke maps an offset in the program image (a link address, e.g. a label from build/p/<prog>.lbl) to bytes written there before the first instruction: a board or a table to start from.
+    kbd=True models the keyboard and clock a game polls: KEYCNT ($C6) is 1 while stdin has bytes left, the jiffy clock ($A0-$A2, big-endian) starts at jiffy0 and each YIELD advances it by yield_jiffies, and TIME answers it (A/X/Y = lo/mid/hi)."""
     if MPU is None:
         raise RuntimeError("py65 not installed")
     with open(path or os.path.join(ROOT, "build", "root", "bin", prog), "rb") as f:
@@ -79,6 +83,8 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
     mem = [0] * 65536
     base = BASE_PAGE << 8
     mem[base:base + len(image)] = list(image)
+    for off, b in (poke or {}).items():
+        mem[base + off:base + off + len(b)] = list(b)
     # argv: strings and the pointer array well above the program (the real layout puts them at the
     # end of the process's run; only the pointers matter to the program)
     top = 0xC000
@@ -95,6 +101,13 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
         mem[top + 2 * i + 1] = p >> 8
     mem[0x20], mem[0x21], mem[0x22] = top & 0xFF, top >> 8, len(ptrs)
     cpu = MPU(memory=mem, pc=base)
+    jf = [jiffy0]
+
+    def sync():
+        if kbd:
+            mem[0xC6] = 1 if stdin else 0
+            mem[0xA0], mem[0xA1], mem[0xA2] = (jf[0] >> 16) & 0xFF, (jf[0] >> 8) & 0xFF, jf[0] & 0xFF
+    sync()
     fds = {}
     writes = [0]
     renames = [0]
@@ -128,6 +141,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
             fd = cpu.a
             if name == "EXIT":
                 res.exit = cpu.a
+                res.mem = bytes(mem)
                 break
             elif name == "OPEN":
                 path_, flags = cstr(r(2)), cpu.a
@@ -163,10 +177,14 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
             elif name == "READ":
                 if fd == 0 and stdin is not None:
                     res.marks.append(len(res.out))
-                    data, stdin = stdin[:r(4)], stdin[r(4):]
+                    n_ = r(4)
+                    if cooked and b"\n" in stdin[:n_]:
+                        n_ = stdin.index(b"\n") + 1
+                    data, stdin = stdin[:n_], stdin[n_:]
                     addr = r(2)
                     mem[addr:addr + len(data)] = list(data)
                     mem[4], mem[5] = len(data) & 0xFF, len(data) >> 8
+                    sync()
                     ret(False, 0)
                 elif fd not in fds or fds[fd][2]:
                     ret(True, EBADF)
@@ -259,6 +277,13 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
                 ret(False, 1)
             elif name == "PROCINFO":         # no process table: the list is empty
                 ret(True)
+            elif name == "YIELD":
+                jf[0] = (jf[0] + yield_jiffies) & 0xFFFFFF
+                sync()
+                ret(False, 0)
+            elif name == "TIME":             # A/X/Y = jiffies lo/mid/hi
+                ret(False, jf[0])
+                cpu.x, cpu.y = (jf[0] >> 8) & 0xFF, (jf[0] >> 16) & 0xFF
             elif name == "PIPE":             # not modelled: a pipeline is refused, not faked
                 ret(True, 38)                # ENOSYS
             else:
