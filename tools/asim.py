@@ -2,7 +2,7 @@
 file-to-file tool needs answered in Python. For testing programs like `as` without VICE:
 there is no kernel, no scheduler, no disk, only the program's own 6502 code and the library linked
 into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, UNLINK, RENAME, EXIT, CONMODE (recorded in r.conmodes); fds 1 and 2
-collect output. With stdin=bytes, fd 0 serves those bytes (EOF after them) and `r.marks` records len(r.out)
+collect output. Every syscall overwrites $08-$1F, the kernel's scratch. With stdin=bytes, fd 0 serves those bytes (EOF after them) and `r.marks` records len(r.out)
 at every read of fd 0, so a test can see what one key made the program draw; without it fd 0 is EBADF.
 
     from asim import run
@@ -139,6 +139,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
         name = SYS.get(cpu.pc)
         if name:
             fd = cpu.a
+            mem[0x08:0x20] = [0xA5] * 0x18   # $08-$1F is the kernel's syscall scratch: a syscall may change it
             if name == "EXIT":
                 res.exit = cpu.a
                 res.mem = bytes(mem)

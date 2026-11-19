@@ -69,6 +69,8 @@ I_DIRECT = 6
 I_INDIR = 30
 
 ; ZP scratch saved per process ($08-$1F); r0-r2 are $02-$07
+; Only a syscall may clobber $08-$1F, never the IRQ path: the p-code VM keeps its eval stack
+; there and saves it around each syscall (src/pvm/pvm.s, docs/design/pvm.md).
 r3 = $08
 s0 = $0A
 s1 = $0C
