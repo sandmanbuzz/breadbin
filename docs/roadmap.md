@@ -67,7 +67,7 @@ Rules:
 - **CI covers Classic and Expanded with VICE** (including `-reu`), and Recommended through the hardware bench (S9). That keeps the common case automatically tested and the Ultimate paths tested on real hardware.
 - **Real drives.** A physical 1541 is the validation target for the IEC driver (M0-4), alongside the Ultimate's emulated drives. A 1581 is available too, but devices other than the 1541 are nice-to-have (below).
 
-**REU today.** It is optional and only backs `/tmp`; the system tests run both with and without one. It becomes de facto required for Expanded features that need fast backing store (overlays, swapping, REU-resident `/bin`). That is acceptable, because those are Expanded and Recommended features and Classic keeps working without them.
+**REU today.** It is optional and only backs `/tmp`; the system tests run both with and without one. It becomes de facto required for Expanded features that need fast backing store (overlays, swapping, REU-resident `/bin`). That is acceptable, because those are Expanded and Recommended features and Classic keeps working without them. What a full 16 MB REU could add beyond that is sketched, unscheduled, in `docs/design/large-reu.md`.
 
 **Turbo.** On the Ultimate 64, `$D031` exists only when the Turbo Mode setting in the Ultimate's menu is "U64 Turbo Registers" or "Turbo Enable Bit"; otherwise it reads `$FF`, as does a stock C64's unused VIC register space, so the probe and the write are harmless everywhere. Bits 0 to 3 are the speed index. Index 15 is the maximum on both models: 48 MHz (Ultimate 64) and 64 MHz (Ultimate 64 Elite-II). Two cautions:
 
