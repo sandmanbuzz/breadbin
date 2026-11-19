@@ -192,12 +192,14 @@ LLB:    iny
         sty IPY
         tay
         dex
+        bmi pushov0
         lda (IFP),y
         sta ESTKL,x
         lda #0
         sta ESTKH,x
         ldy IPY
         jmp NEXTOP
+pushov0:  jmp pvm_overflow       ; for the push guards in branch range
 PRETBL:
 ; ---- the opcode table ----
         .align 256
@@ -341,6 +343,7 @@ SHR:    sty IPY
 @done:  ldy IPY
         jmp DROP
 DUP:    dex
+        bmi pushov1
         lda ESTKL+1,x
         sta ESTKL,x
         lda ESTKH+1,x
@@ -384,20 +387,24 @@ LNOT:   lda ESTKL,x
 
 ; ---- constants ----
 MINUS1: dex
+        bmi pushov1
 SETTRUE: lda #$FF
         sta ESTKL,x
         sta ESTKH,x
         jmp NEXTOP
 CN:     dex                     ; A = the opcode = constant * 2
+        bmi pushov1
         lsr
         sta ESTKL,x
         lda #0
         sta ESTKH,x
         jmp NEXTOP
+pushov1:  jmp pvm_overflow       ; for the push guards in branch range
 CFFB:   lda #$FF
         .byte $2C               ; bit $00A9: skips the LDA #0
 CB:     lda #0
         dex
+        bmi pushov1
         sta ESTKH,x
         iny
         lda (IP),y
@@ -413,6 +420,7 @@ LAFIX:  tya                     ; renormalise IP
 LA:     iny
         bmi LAFIX
         dex
+        bmi pushov1
         lda (IP),y
         sta ESTKL,x
         iny
@@ -420,6 +428,7 @@ LA:     iny
         sta ESTKH,x
         jmp NEXTOP
 CW:     dex
+        bmi pushov1
         iny
         lda (IP),y
         sta ESTKL,x
@@ -428,6 +437,7 @@ CW:     dex
         sta ESTKH,x
         jmp NEXTOP
 CS:     dex                     ; push the string's address, skip it
+        bmi pushov1
         tya
         sec
         adc IP
@@ -474,6 +484,7 @@ LLA:    iny
         bmi LLAFIX
         lda (IP),y
         dex
+        bmi pushov2
         clc
         adc IFP
         sta ESTKL,x
@@ -481,11 +492,13 @@ LLA:    iny
         adc IFP+1
         sta ESTKH,x
         jmp NEXTOP
+pushov2:  jmp pvm_overflow       ; for the push guards in branch range
 LLW:    iny
         lda (IP),y
         sty IPY
         tay
         dex
+        bmi pushov2
         lda (IFP),y
         sta ESTKL,x
         iny
@@ -556,6 +569,7 @@ IDXLW:  iny
         sta ESTKH,x
         ldy IPY
         jmp NEXTOP
+pushov3:  jmp pvm_overflow       ; for the push guards in branch range
 LAB:    iny
         lda (IP),y
         sta ESTKH-2,x
@@ -564,6 +578,7 @@ LAB:    iny
         sta ESTKH-1,x
         lda (ESTKH-2,x)
         dex
+        bmi pushov3
         sta ESTKL,x
         lda #0
         sta ESTKH,x
@@ -578,6 +593,7 @@ LAW:    iny
         ldy #0
         lda (TMP),y
         dex
+        bmi pushov3
         sta ESTKL,x
         iny
         lda (TMP),y
@@ -1107,7 +1123,8 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
         sta IP+1
         ldy #0
         jmp FETCHOP
-; pvm_overflow: the eval stack wrapped (or a pop went past empty), seen at the next call or
+; pvm_overflow: a push found the eval stack full (dex; bmi pushovN after every push that can
+; overflow: a 12th entry is never written), or the index was out of range at a call or
 ; return. The process exits with status ENOMEM (12) instead of running on with wrong values.
 pvm_overflow:
         lda #ENOMEM
@@ -1201,10 +1218,14 @@ LEAVE:  iny
         lda (IFP),y             ; spill count
         beq @none
         sta TMP                 ; p. ENTER left the stack empty, so X..10 are the results
-        txa                     ; (none for a #0 function, two for #2): move them down p
+        cpx #ESDEPTH + 1        ; (none for a #0 function, two for #2): move them down p. X past
+        bcs @ovf                ; empty (the callee popped more than it pushed): trap here, as
+        txa                     ; X - p could land back in range and RET would not see it
         sec
         sbc TMP
-        sta ESP                 ; the new X
+        bcs @ok                 ; below 0: more results than fit under the spilled entries, a
+@ovf:   jmp pvm_overflow        ; 12th entry: trap before the shift writes it (into page 1)
+@ok:    sta ESP                 ; the new X
         tay
 @sh:    cpx #ESDEPTH
         bcs @shd

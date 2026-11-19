@@ -385,6 +385,54 @@ f_main: P_FUNC
                 g = r.mem[0x3b] | r.mem[0x3c] << 8
                 self.assertEqual(r.mem[g:g + 2], [0xA5, 0xA5], "canary below the frame stack")
 
+    def test_eval_stack_push_guard(self):
+        # one expression 11 entries deep (the whole eval stack) runs; a 12th push exits with ENOMEM
+        # at the push. Unguarded, the 12th wrapped and the adds came back in range with wrong values
+        for depth, status in ((11, 0), (12, 12)):
+            body = "f_main: P_FUNC\n" + "".join("        P_CN %d\n" % (i % 16) for i in range(1, depth + 1))
+            body += "        P_OP PO_ADD\n" * (depth - 1) + """
+        P_W PO_SAW, buf
+        P_CN 2
+        WRITE_BUF
+        P_CN 0
+        P_OP PO_RET
+"""
+            with self.subTest(depth=depth), tempfile.TemporaryDirectory(prefix="pvm-") as d:
+                r = build_run(body, d)
+                self.assertEqual(r.exit, status)
+                if status == 0:
+                    self.assertEqual(words(r.out), [66])
+        # the 12th push through every guarded op, in a framed function so the local loads work.
+        twelfth = ["P_OP PO_DUP", "P_OP PO_MINUS1", "P_CN 3", "P_B PO_CB, 3", "P_B PO_CFFB, 3", "P_W PO_CW, 3",
+                   'P_CS "x"', "P_W PO_LA, buf", "P_B PO_LLA, 0", "P_B PO_LLB, 0", "P_B PO_LLW, 0",
+                   "P_W PO_LAB, buf", "P_W PO_LAW, buf"]
+        for op in twelfth:
+            body = "f_main: P_FUNC\n        P_ENTER 2, 0\n" + "        P_CN 1\n" * 11
+            # the DROP brings a wrapped index back in range, so LEAVE's check cannot stand in
+            body += "        %s\n        P_OP PO_DROP\n        P_B PO_LEAVE, 2\n" % op
+            with self.subTest(op=op), tempfile.TemporaryDirectory(prefix="pvm-") as d:
+                self.assertEqual(build_run(body, d).exit, 12)
+        # LEAVE after ENTER spilled 8 pending entries: 3 results fit above them, a 4th would be a
+        # 12th entry, and the shift used to write it into page 1 ($0109/$0114) before any trap
+        for nres, status in ((3, 0), (4, 12)):
+            body = "f_res: P_FUNC\n        P_ENTER 2, 0\n" + "".join(
+                "        P_W PO_CW, $%02X%02X\n" % (0x70 + i, 0x70 + i) for i in range(nres))
+            body += "        P_B PO_LEAVE, 2\nf_main: P_FUNC\n" + "        P_CN 1\n" * 8
+            body += "        P_W PO_CALL, f_res\n" + "        P_OP PO_DROP\n" * (8 + nres)
+            body += "        P_CN 0\n        P_OP PO_RET\n"
+            with self.subTest(results=nres), tempfile.TemporaryDirectory(prefix="pvm-") as d:
+                r = build_run(body, d)
+                self.assertEqual(r.exit, status)
+                self.assertEqual([a for a in range(0x100, 0x200) if 0x70 <= r.mem[a] < 0x74], [])
+        # a callee that pops past empty traps at LEAVE whether or not ENTER spilled: with k
+        # entries spilled, X - k used to land back in range and the caller lost one silently
+        for k in (0, 4, 8, 11):
+            body = "f_res: P_FUNC\n        P_ENTER 2, 0\n        P_OP PO_DROP\n        P_B PO_LEAVE, 2\n"
+            body += "f_main: P_FUNC\n" + "        P_CN 1\n" * k + "        P_W PO_CALL, f_res\n"
+            body += "        P_OP PO_DROP\n" * k + "        P_CN 0\n        P_OP PO_RET\n"
+            with self.subTest(popped_under=k), tempfile.TemporaryDirectory(prefix="pvm-") as d:
+                self.assertEqual(build_run(body, d).exit, 12)
+
     def test_frame_stack_boundary(self):
         # plain recursion, no pending values, so only the frame-stack check can trap: 2 bytes for
         # the native-entry marker and 5 a level (return IP, spill count, 2-byte frame). 204 levels
