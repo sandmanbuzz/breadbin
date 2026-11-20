@@ -134,16 +134,16 @@ oracle for the bitmap contents.
 
 ## 6502 core (POC, 2026-11-20)
 
-`experiments/con80/con80.s` is the driver core: `c80_init`, `c80_write` (r0/r1 as
+`src/mod/con80.inc` is the driver core (moved from `experiments/con80/con80.s`): `c80_init`, `c80_write` (r0/r1 as
 `con_write`), nibble-merge single put, pair put, run collection through the kernel's
 `to_screen`, wrap, LF look-ahead scroll with per-row high-water marks. 1,132 bytes of
 code and tables plus about 130 bytes of BSS, plus the 2 KB font. It keeps `$D3`/`$D6` as
-column and row, and uses only kernel scratch (p1-p4, tmp0-tmp3). `tools/test_con80_sim.py`
+column and row, and uses only kernel scratch (p1-p4, tmp0-tmp3). The font is 808 bytes, not 2 KB (below). `tools/test_con80_sim.py`
 assembles it against the kernel image's label addresses and runs it in py65 beside the
 host model (`tools/soft80_render.py`); bitmap, high-water marks and cursor agree on random
 floods, every alignment, wraps at 80, FF, tabs, skipped codes, one-byte writes, and look-ahead
 edges (ESC, FF and BS in the buffer, 30 LFs in a row), reverse, BS, ESC = R r K C (also split across
-writes), the cursor and the colour matrix. Not yet: VIC setup, the module wrapper, a hook in `con_putc`.
+writes), the cursor and the colour matrix.
 
 Decisions the work forced:
 
@@ -175,3 +175,12 @@ scroll). The ways to buy that back, in order of cheapness: have the producers wr
 (`ls`, `cat`, pipes: check their buffer sizes); keep the high-water marks honest (short rows
 are the common case); REU DMA behind a probe (about 8,000 cycles for a full scroll); a
 self-modified absolute-addressed copy (about 10 cycles/byte instead of 13.4).
+
+## Kernel wiring (2026-11-20)
+
+- **Seam in `con.s`:** `cursor_hide`, `cursor_show`, `con_putc` and `con_write` are four consecutive `jmp` stubs (12 bytes resident) to `c40_hide`, `c40_show`, `c40_putc` and `c40_write`, the 40-column bodies. Internal callers keep the stub names. The module patches the operands (IRQ off) and puts the `c40_*` addresses back on unload. The blink in `con_cursor_tick` goes through the same stubs.
+- **`src/mod/con80.s`** (`/lib/km/con80`, class 2, name id 5): includes the core with `MODULE`, `CUR_EXT` (the kernel's `cur_vis` is the cursor flag) and `FONT` its own data (`src/mod/con80.font`, 808 bytes, from the Novaterm font, credited in the module header, evidence owner-asserted). `init` is refused unless `mod_busy`, refused as a second copy (the `con_putc` stub no longer points at `c40_putc`), claims the fixed pool pages `$20-$3F` directly in `pg_used`/`free_pages` (all 32 free, else ENOMEM), hides the 40-column cursor, runs `c80_init`, patches the stubs, then sets `$D018=$18`, `$D011=$3B`. `fini` hides the cursor, restores the stubs and `$D011=$1B`/`$D018=$16`, frees the pages, refills colour RAM and clears the screen through the restored 40-column code. `m_putc` preserves A, X, Y and p1/p2; `m_write` and `m_putc` save p3..tmp3 (11 contiguous bytes, asserted at link time) and hold `con_busy`; the blink hooks preserve X, Y, p3, tmp2.
+- **`kapi.txt`** gained 15 names (`tmp2 tmp3 con_write cursor_hide cursor_show c40_hide c40_show c40_putc c40_write con_busy cur_vis to_screen scr_color pg_used free_pages`), which changes the API hash: a reviewed ABI act.
+- **Opt-in:** `/etc/con80` present makes `init` run `mod load /lib/km/con80` before the first shell. This is the reliable path: the claim needs `$20-$3F` free, and a running `sh` usually sits across them (first fit puts it at `$13-$29`), so `mod load` from a shell can fail. The loader reports any refused `init` as ENODEV, whatever the cause.
+- **Size:** the module image is 2,197 bytes (code 1,094 + font 808 + wrapper 295), 9 pages: claim 41, pool 114. Eight pages (pool 115) needs about 149 bytes out; candidates are in `soft80-memory.md`.
+- **Test:** `tests/test_con80.py` (in shard s5) boots an image with `/etc/con80`, reads the bitmap back through the font (what the VIC would show), logs in, echoes a 78-character line, checks it, unloads (40-column text again), reloads (the pages are free again) and unloads. Hardware: not yet.
