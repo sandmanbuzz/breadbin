@@ -181,6 +181,7 @@ Static inspection of the supplied SJD image now identifies several explicit tram
 | Hook address | SJD destination | Evidence / current interpretation |
 |---|---:|---|
 | `$FB15` | `$A003` | The hook is inside the original `FORMT` routine (the format-track path around `$FB0C-$FB17`), not the LOAD path. SJD diverts this format path into the extension; exact extension behavior remains to be disassembled. |
+| `$F4D1` | `$B2F7` | Replaces `DSTRT` at the entry of the standard controller READ job. The extension searches for the requested header, reads the GCR data block through `$B2C0`, decodes it through `$B132`, then rejoins the common read completion path. |
 | `$F15C` | `$B4DD` | Replaces `NXTERR`, the disk-full path reached after the standard sector allocator exhausts its search. The extension scans tracks `$24-$28` (36-40) before returning disk-full, confirming the 40-track overflow path. |
 | `$F173` | `$B842` | Replaces `FNDNXT`, the routine that chooses the optimum next sector on the current track. The extension routine consults the sector increment and track's maximum sector, so this is the configurable interleave/gap allocator path, not a read helper. |
 | `$FA32` | `$C010` | 1541C track-zero sensor routine relocated into the C-bank, as described above. |
@@ -270,6 +271,20 @@ The E-bank output is only the reconstructed 8 KiB E000-FFFF bank, not a complete
 It makes two passes, each loading four 8 KiB files into C64 memory pages `$20`, `$40`, `$60`, `$80`, then saving 32 KiB from `$2000-$9FFF`. The first output (`.../00`) is assembled from `S80-9`, `SA0-B`, `C/C0-DF`, and `SE0-F`: four consecutive 8 KiB regions forming the 32 KiB SJD image. The second output (`.../80`) is assembled from `C/C0-DF`, `J/E0-FF`, `C/C0-DF` again, and `C/E0-FF`. The repeated common `C/C0-DF` region plus the separate JD and CBM `E0-FF` regions strongly indicates that this second 32 KiB output contains two selectable 16 KiB legacy DOS images (JD and CBM), while the first contains the 32 KiB SJD image. This interpretation fits the three-way ROM selection described in the hardware instructions; confirm the exact EPROM address-pin mapping against the wiring diagram before treating bank numbers as physical switch positions.
 
 The `41OLD-HIG` and `41OLD-LOW` generators are separate outputs for the old 1541's two-ROM configuration. Their input selection differs; do not assume the C/2 concatenation layout applies to them.
+
+## U1/U2 block-path implication
+
+The clean-room DOS source trace resolves the most important host-side question:
+
+1. The DOS block commands in `block.s` route block reads through `drtrd` and writes through `drtwrt`.
+2. `drtrd` submits a normal read job through `doit2`; the controller job dispatcher enters the standard READ handler at `$F4CA`.
+3. In stock JD, the READ handler at `$F4D1` calls `$F50A` (`DSTRT`) to find the requested header and wait for the data block.
+4. SJD changes that exact call to `JSR $B2F7`. `$B2F7` performs the SJD read path: it searches for the header, reads the GCR block via `$B2C0`, decodes it via `$B132`, and rejoins the common post-read path at `$F4F0`.
+5. Therefore ordinary U1 block reads go through the SJD GCR-to-HD path. This is not just a C64 LOAD-only protocol; it is reached from the common drive READ job. Breadbin's existing JD byte transport and U1 command can remain unchanged.
+
+The write side is different. The controller dispatches non-read jobs to `WRIGHT` at `$F56E`; the supplied SJD image leaves that routine and its `JSR $F510` header-search path byte-identical to JD. The SJD sector-allocation and format hooks do not affect a U2 write to an explicitly supplied track/sector. So static analysis establishes a read-side benefit for U1, but does **not** establish a corresponding fast-write benefit for U2. Benchmark both; do not invent a new host operation.
+
+Source path references: [DOS block commands](https://github.com/mist64/dos1541/blob/master/block.s), [direct block read/write job setup](https://github.com/mist64/dos1541/blob/master/tst4.s), [controller read path](https://github.com/mist64/dos1541/blob/master/lcc.read.s), [controller write path](https://github.com/mist64/dos1541/blob/master/lcc.wrt.s).
 
 ## Compatibility and model caveat
 
