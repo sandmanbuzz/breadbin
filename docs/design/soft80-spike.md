@@ -131,3 +131,47 @@ What it showed:
 
 Next: the 6502 `con80` put/scroll in a VICE test, with this model as the
 oracle for the bitmap contents.
+
+## 6502 core (POC, 2026-11-20)
+
+`experiments/con80/con80.s` is the driver core: `c80_init`, `c80_write` (r0/r1 as
+`con_write`), nibble-merge single put, pair put, run collection through the kernel's
+`to_screen`, wrap, LF look-ahead scroll with per-row high-water marks. 1,132 bytes of
+code and tables plus about 130 bytes of BSS, plus the 2 KB font. It keeps `$D3`/`$D6` as
+column and row, and uses only kernel scratch (p1-p4, tmp0-tmp3). `tools/test_con80_sim.py`
+assembles it against the kernel image's label addresses and runs it in py65 beside the
+host model (`tools/soft80_render.py`); bitmap, high-water marks and cursor agree on random
+floods, every alignment, wraps at 80, FF, tabs, skipped codes, one-byte writes, and look-ahead
+edges (ESC and FF in the buffer, 30 LFs in a row). Not yet: reverse, cursor, ESC, backspace,
+colour RAM, VIC setup, the module wrapper, a hook in `con_putc`.
+
+Decisions the work forced:
+
+- **Font layout is row-planar**: page I holds glyph row I of all 256 codes, so a row is
+  `lda FONT+256*I,x` with no pointer arithmetic. Same 2 KB as the glyph-major file;
+  `soft80_render.planar()` converts. Novaterm's font has capitals at screen codes 1-26 and
+  lowercase at `$41-$5A`; Breadbin's `to_screen` is the other way round, so the font is
+  swapped when loaded (`kernel_order()`), and the driver consumes `to_screen` output unchanged.
+- **Look-ahead is across lines, not just consecutive LFs.** At the bottom row, count the LFs in
+  the next 255 buffer bytes (stop at FF or ESC, cap 24), scroll that many rows at once, and put the
+  cursor n-1 rows up; the following LFs only move it. Same final bitmap as sequential
+  execution (tested), 1/n of the scrolls.
+
+Measured (py65 cycle counts, so the 6502's, not an estimate; PAL 985,248 cycles/s):
+
+| case | cycles |
+|---|---|
+| 78-char row, one write | 20,200 (about 260/char incl. run collection) |
+| one char | 707 |
+| scroll 1 line, rows ~17 columns | about 35,000 |
+| scroll 1 line, full rows | about 110,000 (copy at 13.4 cycles/byte) |
+| 200 lines (6,410 chars, 5-60 cols), 8 lines per write | 3.3 M = 3.35 s |
+| same, 1 line per write | 12.7 M = 12.9 s |
+
+So output speed is decided by how many lines arrive per `con_write`. In large writes the
+look-ahead keeps it near 60 lines/s; line-at-a-time writers (a shell echoing, `ls` if it writes per
+entry) pay a full scroll every line, 3-6 times slower than text mode today (about 13,400 cycles per
+scroll). The ways to buy that back, in order of cheapness: have the producers write whole buffers
+(`ls`, `cat`, pipes: check their buffer sizes); keep the high-water marks honest (short rows
+are the common case); REU DMA behind a probe (about 8,000 cycles for a full scroll); a
+self-modified absolute-addressed copy (about 10 cycles/byte instead of 13.4).

@@ -32,7 +32,7 @@ PALETTE = [  # Pepto's C64 palette
 ]
 
 
-def load_font(path):
+def load_font(path, kernel=True):
     with open(path, "rb") as f:
         d = f.read()
     if len(d) == 2050:
@@ -41,17 +41,45 @@ def load_font(path):
         raise ValueError(f"font must be 2048 bytes (or 2050 with load address), got {len(d)}")
     if any((b >> 4) != (b & 15) for b in d):
         raise ValueError("font is not doubled-nibble (high nibble != low nibble)")
-    return d
+    return kernel_order(d) if kernel else d
 
 
 def screen_code(ch):
-    """ASCII -> C64 screen code (letters lower/upper set; reverse = +128)."""
+    """ASCII -> Breadbin screen code (con.s to_screen: the lowercase set, a-z = 1-26).
+    None where the console prints nothing."""
     o = ord(ch)
-    if 0x40 <= o <= 0x5F:
-        return o - 0x40          # @A-Z[\]^_  -> 0-31
-    if 0x60 <= o <= 0x7F:
-        return o - 0x60 + 0x40   # `a-z{|}~   -> 64-95 (our 6502 table would differ)
-    return o                     # 0x20-0x3F identical
+    if o < 0x20:
+        return None
+    if o < 0x40 or 0x41 <= o <= 0x5A:
+        return o                 # digits, punctuation, A-Z (0x41-0x5A)
+    if o == 0x40:
+        return 0
+    if o < 0x5F:
+        return o - 0x40          # [ \ ] ^
+    if o == 0x5F:
+        return 0x64              # _
+    if o == 0x60:
+        return None
+    if o <= 0x7A:
+        return o - 0x60          # a-z
+    if o == 0x7C:
+        return 0x5D              # |
+    return 0x3F                  # { } ~ and the rest
+
+
+def kernel_order(font):
+    """Novaterm-style fonts hold capitals at 1-26 and lowercase at 0x41-0x5A; the kernel's
+    screen codes are the other way round. Swap the two blocks."""
+    f = bytearray(font)
+    for c in range(1, 27):
+        a, b = c * 8, (c + 0x40) * 8
+        f[a:a + 8], f[b:b + 8] = font[b:b + 8], font[a:a + 8]
+    return bytes(f)
+
+
+def planar(font):
+    """The 6502 driver's font: page I = glyph row I of all 256 codes."""
+    return bytes(font[c * 8 + i] for i in range(8) for c in range(256))
 
 
 class Soft80:
@@ -113,6 +141,12 @@ class Soft80:
         for r in range(ROWS - n, ROWS):
             self.clear_row(r)
 
+    def clear(self):
+        self.bitmap[:] = bytes(8000)
+        self.lastpos = [0] * ROWS
+        self.cx = self.cy = 0
+        self.writes += 8000
+
     def clear_row(self, r):
         nbytes = (self.lastpos[r] + 1) // 2 * 8
         b = self.cell(0, r)
@@ -121,35 +155,52 @@ class Soft80:
         self.lastpos[r] = 0
 
     # -- terminal -----------------------------------------------------------
+    def advance(self, rest):
+        """Next line. At the bottom, scroll for every LF still waiting in `rest` too
+        (up to 24, within 255 bytes, stopping at FF or ESC): the blank rows are made in one
+        pass and the following LFs just move the cursor down (Novaterm's look-ahead)."""
+        self.cx = 0
+        if self.cy < ROWS - 1:
+            self.cy += 1
+            return
+        n = 1
+        for ch in rest[:255]:
+            if ch in "\f\x1b":
+                break
+            if ch == "\n":
+                n += 1
+                if n == ROWS - 1:
+                    break
+        self.scroll_up(n)
+        self.cy = ROWS - n
+
     def write(self, text):
-        """Console write with look-ahead: runs of text on a row go out as one
-        put_string; LFs waiting at the bottom scroll in one pass."""
+        """Console write: runs of text on a row go out as one put_string; a scroll looks
+        ahead in the buffer (advance)."""
         i = 0
         while i < len(text):
             ch = text[i]
+            if ch == "\f":
+                self.clear(); i += 1
+                continue
+            if ch != "\n" and ch != "\t" and ord(ch) < 0x20:
+                i += 1                 # other controls: ignored
+                continue
             if ch == "\n":
                 i += 1
-                self.cx = 0
-                if self.cy == ROWS - 1:
-                    n = 1
-                    while i < len(text) and text[i] == "\n":
-                        n += 1; i += 1
-                    self.scroll_up(min(n, ROWS - 1))
-                else:
-                    self.cy += 1
+                self.advance(text[i:])
                 continue
-            j = i
-            while j < len(text) and text[j] != "\n" and j - i < COLS - self.cx:
+            j, codes = i, []
+            while j < len(text) and (text[j] == "\t" or ord(text[j]) >= 0x20) and len(codes) < COLS - self.cx:
+                c = screen_code(" " if text[j] == "\t" else text[j])
+                if c is not None:
+                    codes.append(c)
                 j += 1
-            self.put_string(self.cx, self.cy, [screen_code(c) for c in text[i:j]])
-            self.cx += j - i
+            self.put_string(self.cx, self.cy, codes)
+            self.cx += len(codes)
             i = j
             if self.cx == COLS:
-                self.cx = 0
-                if self.cy == ROWS - 1:
-                    self.scroll_up(1)
-                else:
-                    self.cy += 1
+                self.advance(text[i:])
 
     # -- output -------------------------------------------------------------
     def pixel(self, x, y):
