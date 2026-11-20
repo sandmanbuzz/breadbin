@@ -310,8 +310,11 @@ The first-stage program's literal check is `JIFFYDOS 5.0 1541`. The user confirm
 
 ## Next reverse-engineering work
 
-1. Fully disassemble the first-stage helper at drive `$0400` and the C64-side transfer routine; establish exact source ranges and the 128-page transfer mapping.
-2. Annotate the first-stage post-capture patches that produce `(C)CMD/C/C0-DF`.
-3. Disassemble the shared 138-byte helper in stages 2 and 3; identify pointer tables, source/destination spans, and transformation differences caused by their inputs.
-4. Trace the final generator's exact load/save address ranges and file offsets, then compare generated layout against the supplied SJD41 image.
-5. Keep all extracted ROM-derived files and generated images local; commit only clean-room descriptions, tests, and original Breadbin code.
+1. Map the bit-7 condition on VIA2 shift register `$1C0A` in `$B2F7`; determine when the fast read branch is selected and what triggers fallback.
+2. Fully annotate `$B2C0` and `$B132`: byte counts, timing loops, buffer layout, lookup-table semantics, and the return contract at `$F4F0`.
+3. Disassemble the remaining extension entries and the 34 changed call-site candidates; prioritize `$A003` FORMAT, `$B4DD` 40-track overflow, `$B842` FNDNXT, and `$AF00` command parsing.
+4. Trace SJD command parser `$AF00` to map the documented `sj`, `ic`, `dt`, `tk`, and `gp` settings to their state bits and call paths.
+5. Benchmark Breadbin U1 and U2 against JD41 and SJD41. Static analysis shows U1 enters the conditional SJD read dispatcher; U2 retains stock write emission/verify with a small ATN/buffer-restoration change.
+6. Resolve the remaining model/revision mismatches (`$EAD5`, `$C0AD`) if a matching 1541C/JD Stage-1 intermediate can be obtained.
+7. Continue the generator-side work as needed: disassemble the first-stage `$0400` helper, annotate the C-bank post-capture POKEs, and finish the stages 2/3 shared-helper and final EPROM layout analysis.
+8. Keep all extracted ROM-derived files and generated images local; commit only clean-room descriptions, tests, and original Breadbin code.
