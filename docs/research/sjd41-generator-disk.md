@@ -23,17 +23,47 @@ The US instructions describe six 33-block intermediate files:
 
 The first generator reads the installed JD41 ROM from the drive and writes two intermediate files. The CBM and SJD stages generate further intermediate files. The two CMD-named baseline files are copied from the starting disk. The appropriate `EP-GEN/41...` program then consumes these inputs and writes the final EPROM image(s). The instructions explicitly warn that the intermediate and final files contain copyrighted CMD JiffyDOS routines and must not be redistributed.
 
-## First-stage program observations
+## First-stage program: exact ROM capture
 
-`1.JD/E0&CBM/C0-G`:
+`1.JD/E0&CBM/C0-G` performs a real drive-memory extraction, not a file copy.
 
-- Prompts for a JiffyDOS 1541 device number and a separate destination device number.
-- Opens the drive command channel and checks the status text `JIFFYDOS 5.0 1541` before proceeding. This literal is an observed compatibility gate in this disk's program; do not silently equate it with the version string in every supplied JD image.
-- Installs a short 6502 helper in drive RAM at `$0400` using DOS `M-W` commands.
-- Repeatedly executes the helper with `M-E $0400` and transfers data to the C64. The loop uses page values 32 through 159 inclusive.
-- Builds and saves `(C)CMD/J/E0-FF` and `(C)CMD/C/C0-DF` as intermediate files. Before saving the second, it applies additional byte patches to the captured data.
+### Drive-side page copier
 
-The exact transfer direction, byte count per iteration, drive source address progression, and meaning of every patch still need instruction-level annotation. The code contains explicit DOS memory read/write commands and a drive-RAM helper; it is not merely a host-side file copier.
+The program installs this 15-byte helper at drive RAM `$0400` using DOS `M-W`:
+
+```asm
+0400  LDX #$00
+0402  LDA $8000,X
+0405  STA $0500,X
+0408  INX
+0409  BNE $0402
+040B  INC $0404
+040E  RTS
+```
+
+The operand at `$0404` is the high byte of the source address. Each `M-E $0400` copies one 256-byte page from the currently selected address `$8000-$FF00` into drive RAM `$0500-$05FF`, then increments that source high byte. The loop runs 128 times, with its page counter from 32 through 159 inclusive.
+
+### C64-side transfer routine
+
+A 134-byte routine is installed at C64 address `$C000`. For each page, it:
+
+1. LISTENs to the selected drive and opens command secondary address `$6F`.
+2. Sends DOS `M-R $0500,$80`, then reads 128 bytes from drive RAM `$0500-$057F`.
+3. Sends DOS `M-R $0580,$80`, then reads 128 bytes from drive RAM `$0580-$05FF`.
+4. Stores the received bytes through the zero-page pointer `$FB/$FC`, then UNTALKs.
+
+The BASIC loop sets `$FB/$FC` to `$2000 + page*256` before each call. Therefore the capture is an exact 32 KiB linear copy of the drive's mapped address range `$8000-$FFFF` into C64 RAM `$2000-$9FFF`. The transfer is done in 256-byte pages, with each page moved over IEC as two 128-byte M-R reads.
+
+### Which captured parts become intermediate files
+
+The subsequent BASIC setup selects the upper portions of that capture for the first-stage outputs:
+
+- `(C)CMD/J/E0-FF` corresponds to the captured drive range `$E000-$FFFF`, held at C64 `$8000-$9FFF`.
+- `(C)CMD/C/C0-DF` corresponds to drive range `$C000-$DFFF`, held at C64 `$6000-$7FFF`. Before saving, the BASIC program applies byte patches at several offsets within that buffer (including locations around C64 `$6070`, `$607E`, `$6D92`, `$7367`, and `$7CBB`).
+
+The captured `$8000-$BFFF` portion is not emitted by these two first-stage files; the final SJD image obtains its lower two 8 KiB regions from the supplied `S80-9` and `SA0-B` files. This aligns with the final generator's four-bank SJD assembly.
+
+The first-stage program checks the status text `JIFFYDOS 5.0 1541`. The user confirms that the 6.01-labelled drive ROM is byte-identical to the 5.0 drive ROM; this is therefore the expected compatibility signature, not a 5.x-only restriction.
 
 ## Second and third stages
 
