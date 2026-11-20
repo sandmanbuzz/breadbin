@@ -75,6 +75,42 @@ The first-stage program checks the status text `JIFFYDOS 5.0 1541`. The user con
 
 The output names are respectively `(C)CMD/C/E0-FF` and `(C)CMD/SE0-F/460` (the directory name is truncated by the 16-character CBM filename field). The helper's detailed pointer-walk and patch semantics remain to be annotated. The same machine-code payload appears in both BASIC generators.
 
+## Second/third-stage helper: structural disassembly
+
+The 138-byte 6502 helper embedded in both `2.CBM/E0-GENERAT` and `3.SJD/E0-GENE460` is byte-identical. The two programs therefore run the same transformation engine against different input images; the stage distinction is in the input, not a different algorithm.
+
+The helper at C64 `$C000` has two clearly separable phases:
+
+1. **Bulk copy:** it initializes source pointer `$FD/$FE = $E000` and destination pointer `$FB/$FC = $4000`, then copies 256-byte pages until the source high byte wraps. This is an 8 KiB copy from `$E000-$FFFF` to `$4000-$5FFF`.
+2. **Embedded record interpreter:** it scans memory from `$0800` upward for the first three consecutive zero bytes. After that marker, it repeatedly reads a three-byte record header:
+   - destination low byte
+   - destination high byte
+   - payload length
+
+   If all three header bytes are zero, it returns. Otherwise it advances past the header, copies that many payload bytes to the specified destination address, advances the source pointer past the payload, and reads the next record.
+
+In pseudocode, the second phase is:
+
+```text
+scan = $0800
+while memory[scan..scan+2] != 00 00 00:
+    scan += 1
+scan += 3
+
+repeat:
+    dst = word(memory[scan], memory[scan+1])
+    len = memory[scan+2]
+    if dst == 0 and len == 0:
+        return
+    scan += 3
+    copy memory[scan .. scan+len-1] to dst
+    scan += len
+```
+
+This is a small table-driven patch/relocation engine, not a byte-for-byte ROM diff routine. The records carry their own destination and payload, so the same 6502 helper can apply different patch sets to the CBM and SJD variants.
+
+**Still unresolved:** the BASIC loader's KERNAL LOAD parameters, the exact memory mapping under `$E000-$FFFF` while the helper reads it, the location of the zero marker/record stream, and the precise destination ranges used by the embedded records. The BASIC program sets the KERNAL call parameters and later saves a 8 KiB output range, but the relationship between the helper's initial `$4000-$5FFF` copy and that saved range needs to be traced from the actual C64 memory map and record contents. Do not yet describe the record stream as a specific set of ROM hooks.
+
 ## Final EPROM generator: 1541C / 1541-II
 
 `EP-GEN/41C&2(NEW` defines the following input files in its REM header:
