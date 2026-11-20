@@ -159,11 +159,11 @@ The first three are the key extension-bank entries for further analysis, but the
 
 ## Next implementation gates
 
-1. Resolve the nine E000-FFFF byte differences and the C000-DFFF source discrepancy; obtain a full, model-correct captured input if needed.
-2. Disassemble the changed SJD41 drive-ROM regions against the exact captured JD/CBM baseline, mapping new routines, hooks, and call paths.
-3. Separate SJD's transparent DOS optimizations from optional features Breadbin does not need.
-4. Benchmark U1 and U2 separately. U1 statically enters the SJD read dispatcher and conditional GCR decode path; U2 retains stock write emission/verify with a small ATN/buffer-restoration change.
-5. Only if U1/U2 need an additional operation, define a Breadbin-specific ABI and byte-verified hooks. Keep the existing JiffyDOS host byte protocol unchanged.
-6. Build private images and test them in VICE, then the C64 Ultimate emulated drive, before physical hardware.
-
+1. Test the transparent 32 KiB read-hook smoke image in VICE or the C64 Ultimate; confirm bank mapping and identical U1 behavior before adding real extension code.
+2. Benchmark U1 and U2 separately against JD41 and SJD41 using identical disk images and checksums. U1 enters the conditional SJD GCR-read path; U2 keeps stock write emission/verify with the small ATN/buffer-restoration change.
+3. Map the `$1C0A` bit condition in `$B2F7`, then fully annotate `$B2C0`/`$B132` (read timing, buffer layout, decode tables, fallback contract).
+4. Disassemble the other extension entries: `$A003` format path, `$B4DD` 40-track disk-full fallback, `$B842` sector allocator, and the remaining changed call-site candidates from `crossrefs.py`.
+5. Resolve the remaining model/revision mismatches (`$EAD5` in the E-bank and `$C0AD` in the C-bank). If a matching 1541C/JD setup is available, the most useful artifact is Stage-1 `(C)CMD/C/C0-DF` PRG (8192-byte payload with `$6000` load address).
+6. Only if testing proves a missing host operation, define a Breadbin-specific ABI and byte-verified hooks. Keep the existing JiffyDOS host byte protocol unchanged.
+7. Keep all extracted ROM-derived files and generated images local; commit only clean-room descriptions, tests, and original Breadbin code.
 The intended transport boundary remains unchanged: preserve JiffyDOS's existing IEC bus routines and Breadbin's host-side byte transport. SJD41 itself is designed to retain that transport. A Breadbin-specific drive command is a separate design choice, not something to assume from SJD41.
