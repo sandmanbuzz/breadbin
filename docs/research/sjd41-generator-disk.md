@@ -280,7 +280,7 @@ The clean-room DOS source trace resolves the most important host-side question:
 2. `drtrd` submits a normal read job through `doit2`; the controller job dispatcher enters the standard READ handler at `$F4CA`.
 3. In stock JD, the READ handler at `$F4D1` calls `$F50A` (`DSTRT`) to find the requested header and wait for the data block.
 4. SJD changes that exact call to `JSR $B2F7`. `$B2F7` performs the SJD read path: it searches for the header, reads the GCR block via `$B2C0`, decodes it via `$B132`, and rejoins the common post-read path at `$F4F0`.
-5. Therefore ordinary U1 block reads go through the SJD GCR-to-HD path. This is not just a C64 LOAD-only protocol; it is reached from the common drive READ job. Breadbin's existing JD byte transport and U1 command can remain unchanged.
+5. Therefore ordinary U1 block reads enter the SJD read dispatcher. `$B2F7` tests bit 7 of `$1C0A`: one branch falls back to the stock sync/read path, while the other uses `$B2C0` plus `$B132` for the GCR-to-HD path. The exact meaning/control of that bit still needs mapping, but this is not a C64-only LOAD protocol; the dispatcher is reached from the common drive READ job. Breadbin's existing JD byte transport and U1 command can remain unchanged.
 
 The write side is different. The controller dispatches non-read jobs to `WRIGHT` at `$F56E`; the supplied SJD image leaves that routine and its `JSR $F510` header-search path byte-identical to JD. The SJD sector-allocation and format hooks do not affect a U2 write to an explicitly supplied track/sector. So static analysis establishes a read-side benefit for U1, but does **not** establish a corresponding fast-write benefit for U2. Benchmark both; do not invent a new host operation.
 
