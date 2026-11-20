@@ -72,6 +72,15 @@ class PatchTableTests(unittest.TestCase):
         self.assertEqual(result[0x1CBB:0x1CD9], bytes(range(30, 60)))
         self.assertEqual(result[0], 0xAA)
 
+    def test_loads_stage1_c000_intermediate_prg(self):
+        payload = bytes([0x5A]) * 0x2000
+        result = module.load_c000_intermediate(bytes.fromhex("00 60") + payload)
+        self.assertEqual(result, payload)
+
+    def test_rejects_wrong_c000_intermediate_load_address(self):
+        with self.assertRaisesRegex(ValueError, "load address"):
+            module.load_c000_intermediate(bytes.fromhex("00 80") + bytes(0x2000))
+
     def test_rejects_wrong_load_address(self):
         with self.assertRaisesRegex(ValueError, "load address"):
             module.parse_table(bytes.fromhex("00 20 07 08 0A 00 99 00 00 00 00 00"))
