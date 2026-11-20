@@ -187,7 +187,7 @@ python3 tools/sjd41/generator_records.py \
   --summary-only
 ```
 
-The output file is only the reconstructed 8 KiB E000-FFFF bank, not a complete drive ROM. The tool reports the nine-byte comparison discrepancy and the 101-byte spill separately. Parser tests live in `tests/test_sjd41_generator_records.py`.
+The E-bank output is only the reconstructed 8 KiB E000-FFFF bank, not a complete drive ROM. When a live C-bank capture is supplied, the tool also emits/compares the patched 8 KiB C000-DFFF bank. It reports the remaining E-bank mismatches and the 101-byte spill separately. Parser and C-bank decoder tests live in `tests/test_sjd41_generator_records.py`.
 
 
 
