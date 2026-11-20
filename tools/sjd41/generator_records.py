@@ -124,7 +124,7 @@ def basic_data_values(prg: bytes) -> list[int]:
         next_pos = nxt - load + 2
         if next_pos <= pos + 4 or next_pos > len(prg):
             raise ValueError(f"invalid BASIC link ${nxt:04X} at {pos}")
-        line_end = prg.find(b"\\0", pos + 4, next_pos)
+        line_end = prg.find(b"\0", pos + 4, next_pos)
         if line_end < 0:
             raise ValueError(f"unterminated BASIC line at {pos}")
         line = prg[pos + 4:line_end]
