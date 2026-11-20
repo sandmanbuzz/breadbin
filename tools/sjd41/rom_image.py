@@ -14,7 +14,7 @@ def vectors(image):
  b=image[-ROM16:]
  return {'nmi':b[0x3ffa]|b[0x3ffb]<<8,'reset':b[0x3ffc]|b[0x3ffd]<<8,'irq':b[0x3ffe]|b[0x3fff]<<8}
 def inspect(path):
- raw=path.read_bytes(); print(f'file: {path}\\nbytes: {len(raw)}\\nsha256: {sha256(raw)}')
+ raw=path.read_bytes(); print(f'file: {path}\nbytes: {len(raw)}\nsha256: {sha256(raw)}')
  if len(raw) not in (ROM16,2*ROM16): print('error: expected 16384 or 32768 bytes',file=sys.stderr); return 2
  print('mapping: '+('16 KiB JD bank at $C000-$FFFF' if len(raw)==ROM16 else '32 KiB image; upper bank at $C000-$FFFF'))
  print('vectors: '+' '.join(f'{k.upper()}=${v:04X}' for k,v in vectors(raw).items()))
