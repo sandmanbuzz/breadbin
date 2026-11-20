@@ -56,7 +56,7 @@ The output names are respectively `(C)CMD/C/E0-FF` and `(C)CMD/SE0-F/460` (the d
 4. `(C)CMD/C/E0-FF**`
 5. `(C)CMD/J/E0-FF**`
 
-It loads four 8 KiB regions to C64 memory pages `$20`, `$40`, `$60`, `$80` from file-name entries 0, 1, 2, 3 respectively, then saves a 32 KiB image at `$2000-$9FFF` in two 16 KiB halves. The first half is saved under the `$00` output name and the second under `$80`. This matches the physical 32 KiB 1541C/1541-II image organization: extension `$8000-$BFFF` followed by DOS `$C000-$FFFF`, subject to the ROM's bank/address wiring.
+It makes two passes, each loading four 8 KiB files into C64 memory pages `$20`, `$40`, `$60`, `$80`, then saving 32 KiB from `$2000-$9FFF`. The first output (`.../00`) is assembled from `S80-9`, `SA0-B`, `C/C0-DF`, and `SE0-F`: four consecutive 8 KiB regions forming the 32 KiB SJD image. The second output (`.../80`) is assembled from `C/C0-DF`, `J/E0-FF`, `C/C0-DF` again, and `C/E0-FF`. The repeated common `C/C0-DF` region plus the separate JD and CBM `E0-FF` regions strongly indicates that this second 32 KiB output contains two selectable 16 KiB legacy DOS images (JD and CBM), while the first contains the 32 KiB SJD image. This interpretation fits the three-way ROM selection described in the hardware instructions; confirm the exact EPROM address-pin mapping against the wiring diagram before treating bank numbers as physical switch positions.
 
 The `41OLD-HIG` and `41OLD-LOW` generators are separate outputs for the old 1541's two-ROM configuration. Their input selection differs; do not assume the C/2 concatenation layout applies to them.
 
