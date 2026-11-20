@@ -83,8 +83,22 @@ NGLYPH = 101                     # screen codes 0-$64: all that to_screen return
 
 
 def glyphs(font):
-    """The 6502 driver's font: the first NGLYPH glyphs, 8 bytes each, in code order."""
-    return bytes(font[:NGLYPH * 8])
+    """The 6502 driver's font: the first NGLYPH glyphs in code order, 4 bytes each: byte j holds
+    row j in the high nibble and row j+4 in the low (the doubled-nibble input has one nibble a row)."""
+    out = bytearray()
+    for c in range(NGLYPH):
+        g = font[c * 8:c * 8 + 8]
+        out += bytes((g[j] & 0xF0) | (g[j + 4] & 0x0F) for j in range(4))
+    return bytes(out)
+
+
+def unglyphs(packed):
+    """Inverse of glyphs(): NGLYPH * 4 bytes -> NGLYPH * 8 doubled-nibble bytes."""
+    out = bytearray()
+    for c in range(NGLYPH):
+        g = packed[c * 4:c * 4 + 4]
+        out += bytes((b & 0xF0) | (b >> 4) for b in g) + bytes((b << 4 & 0xF0) | (b & 0x0F) for b in g)
+    return bytes(out)
 
 
 class Soft80:

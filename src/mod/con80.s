@@ -13,7 +13,7 @@
 ; screen codes by tools/soft80_render.py. Source: novaterm-source.tgz at
 ; zimmers.net/pub/cbm/c64/comm/Novaterm/. Evidence for adopting it: owner-asserted public release
 ; of the source by its author, 2026-11-20; the tarball has no licence text. Credit: Novaterm's
-; author, and greetings to the Novaterm scene.
+; author Nick Rossi (public release c. 2000), and greetings to the Novaterm scene.
 MODULE  = 1
 CUR_EXT = 1
 FONT    = fontdata

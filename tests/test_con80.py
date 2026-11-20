@@ -24,7 +24,7 @@ from vicetest import Vice  # noqa: E402
 
 IMAGE = os.path.join(ROOT, "build", "breadbin.d64")
 with open(os.path.join(ROOT, "src", "mod", "con80.font"), "rb") as f:
-    FONT = f.read()
+    FONT = m.unglyphs(f.read())
 BY_GLYPH = {}
 for _a in range(0x20, 0x7f):
     _c = m.screen_code(chr(_a))

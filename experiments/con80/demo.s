@@ -5,7 +5,7 @@
 .include "con80.inc"
 
 .segment "FONTSEG"
-        .incbin "font_glyph.bin"        ; 808 bytes (101 glyphs), written by the tool; the code follows it
+        .incbin "font_glyph.bin"        ; 404 bytes (101 glyphs, 4 bytes each), written by the tool; the code follows it
 
 .segment "GLUE"
 sptr    = $60

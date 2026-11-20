@@ -66,7 +66,7 @@ class Con80(unittest.TestCase):
     def setUp(self):
         s = self.sim
         s.mem.b[CODE:CODE + len(self.bin)] = self.bin
-        s.mem.b[FONT:FONT + m.NGLYPH * 8] = m.glyphs(self.font)
+        s.mem.b[FONT:FONT + m.NGLYPH * 4] = m.glyphs(self.font)
         s.lbl.update(self.lab)
         s.mem.b[0x286], s.mem.b[0xD021], s.mem.b[0xC7], s.mem.b[0xD020] = 1, 6, 0, 0
         s.call("c80_init")

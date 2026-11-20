@@ -6,9 +6,9 @@
 ; Bank 0 layout (the kernel will choose; constants here for the POC):
 ;   BMP   $2000-$3F3F  bitmap, VIC cell order (40x25 cells x 8 bytes); the BSS sits in the
 ;                      192 bytes after it ($3F40-$3FFF), which c80_clear zeroes with the bitmap
-;   FONT  808 bytes    glyph-major, 8 bytes per screen code 0-$64 (what to_screen returns), the 4
-;                      pixel columns in the high nibble AND the low nibble of every byte; FONT is
-;                      page aligned (a glyph pointer is code*8, its low byte alone)
+;   FONT  404 bytes    glyph-major, 4 bytes per screen code 0-$64 (what to_screen returns): byte j =
+;                      row j in the high nibble, row j+4 in the low (4 pixel columns a nibble);
+;                      gp unpacks a glyph into a doubled-nibble 8-byte buffer
 ; Stock zero page keeps its meaning: $D3 = column (0-79 here), $D6 = row.
 ; Scratch: p1/p2 (the con_write buffer), p3/p4 and tmp0-tmp3, all the kernel's.
 ;
@@ -39,8 +39,6 @@ COLD = $d3
 ROWD = $d6
 dp   = p3                       ; destination pointer into the bitmap
 sp   = p4                       ; source pointer for scroll copies
-src1   = p4                       ; put: first source (shares sp: scroll and draw never overlap)
-qq   = tmp0                     ; put: second source (tmp0/tmp1)
 nl   = tmp2                     ; scratch
 xv   = tmp3                     ; put: the nibbles to flip for reverse video
 REV  = $c7
@@ -408,9 +406,9 @@ draw:   jsr cellp
         ldx #0
         bcc @pairs
         lda rb                  ; odd column: the first char is the right half of its cell
-        ldx #qq
+        ldx #8
         jsr gp
-        ldx #src1
+        ldx #0
         jsr cpdp
         lda #$0f
         jsr sx
@@ -427,10 +425,10 @@ draw:   jsr cellp
         lda rb+1,x
         pha
         lda rb,x
-        ldx #src1
+        ldx #0
         jsr gp
         pla
-        ldx #qq
+        ldx #8
         jsr gp
         lda #$ff
         jsr sx
@@ -443,9 +441,9 @@ draw:   jsr cellp
         beq @hw                 ; none left
         ldx di
         lda rb,x
-        ldx #src1
+        ldx #0
         jsr gp
-        ldx #qq
+        ldx #8
         jsr cpdp
         lda #$f0
         jsr sx
@@ -466,43 +464,69 @@ sx:     ldx REV
 @r:     sta xv
         rts
 
-; put: (dp)[0..7] = (src1 & $f0) | (qq & $0f), then ^ xv, the eor form so that a half can come from the old
-; cell itself (pointing src1 or qq at dp)
+; put: (dp)[0..7] = (gl & $f0) | (gq & $0f), then ^ xv: gl and gq are 8-byte glyph or old-cell buffers
 put:    ldy #7
-@l:     lda (qq),y
-        eor (src1),y
+@l:     lda gq,y
+        eor gl,y
         and #$0f
-        eor (src1),y
+        eor gl,y
         eor xv
         sta (dp),y
         dey
         bpl @l
         rts
 
-; gp: A = screen code, X = zero page pointer -> that pointer = FONT + A*8
-gp:     sta 0,x
+; gp: A = screen code, X = buffer (0 = gl, 8 = gq) <- that glyph, doubled. The font holds 4 bytes a
+; glyph: byte j = row j in the high nibble, row j+4 in the low; each nibble is doubled into both
+; halves of a buffer byte, so a half cell can be picked with a mask. (X, Y trashed)
+gp:     sta sp
         lda #0
-        asl 0,x
-        rol a
-        asl 0,x
-        rol a
-        asl 0,x
-        rol a
-        pha
-        lda 0,x
+        sta sp+1
+        asl sp
+        rol sp+1
+        asl sp
+        rol sp+1                ; code*4
+        lda sp
         clc
         adc #<FONT
-        sta 0,x
-        pla
+        sta sp
+        lda sp+1
         adc #>FONT
-        sta 1,x
+        sta sp+1
+        ldy #0
+@u:     lda (sp),y
+        sta nl
+        and #$f0
+        sta xv
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora xv
+        sta gl,x
+        lda nl
+        and #$0f
+        sta xv
+        asl a
+        asl a
+        asl a
+        asl a
+        ora xv
+        sta gl+4,x
+        inx
+        iny
+        cpy #4
+        bne @u
         rts
 
-; cpdp: X = zero page pointer -> that pointer = dp
-cpdp:   lda dp
-        sta 0,x
-        lda dp+1
-        sta 1,x
+; cpdp: X = buffer (0 / 8) <- the 8 bytes at (dp), the old cell
+cpdp:   ldy #0
+@l:     lda (dp),y
+        sta gl,x
+        inx
+        iny
+        cpy #8
+        bne @l
         rts
 
 ; setp: A = row, X = zero page pointer -> that pointer = BMP + row*320 (= (row*5)<<6)
@@ -652,6 +676,8 @@ ssrc    = srow+1
 cnt     = ssrc+1
 esc_st  = cnt+1                 ; escape sequence state (as con.s)
 erow    = esc_st+1
+gl      = erow+2                ; glyph buffers (gl, gq = gl+8; erow+1 is cur_vis when standalone)
+gq      = gl+8
 .ifndef CUR_EXT
 cur_vis = erow+1                ; cursor drawn (the kernel's own flag in the module: the IRQ blink reads it)
 .endif
