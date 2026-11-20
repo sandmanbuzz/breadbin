@@ -188,6 +188,8 @@ python3 tools/sjd41/generator_records.py \
   --jd-rom /path/to/JiffyDOS_6.01-1541-and-1541-II.bin \
   --compare-sjd /path/to/S-JiffyDOS_1541C_v1.bin \
   --output /tmp/sjd-e000.bin \
+  --c000-capture /path/to/live-c000-dfff.bin \
+  --c000-output /tmp/sjd-c000.bin \
   --summary-only
 ```
 
