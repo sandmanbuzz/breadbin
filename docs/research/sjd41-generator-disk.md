@@ -172,7 +172,7 @@ The first-stage BASIC program also manually patches its captured C000-DFFF buffe
 
 Applying those literal patch locations to the C000-DFFF half of the supplied JD binary leaves 68 differences against the supplied SJD image: 67 bytes within `$C010-$C054`, plus one at `$C0AD`. The `$C010-$C048` portion is a relocated 1541C track-zero sensor routine: its instruction sequence corresponds to Wolfgang Moser's documented routine at `$FF36`, and the SJD E-bank hook at `$FA32` jumps directly to `$C010`. The `$C049-$C054` bytes are a small wrapper helper: it calls `$F259`, sets `$06=1` and `$00=$C0`, then returns. The Stage-3 output redirects a call at `$EBC2` to this helper; the caller's broader purpose remains to be mapped. The lone `$C0AD` mismatch is within the first-stage manual patch at `$C09F-$C0AD` and remains unexplained.
 
-The generator's first stage reads the live drive address space, so the authoritative C000-DFFF input is a capture from the matching 1541C/JD configuration. The inspector now supports that path: `--c000-capture` accepts a raw 8 KiB `$C000-$DFFF` capture, extracts the literal first-stage POKE data from the operator-supplied D64 (without embedding it), applies those patches, and compares the result with the supplied SJD image. `--c000-output` writes the patched bank.
+The generator's first stage reads the live drive address space, so the authoritative C000-DFFF input is a capture from the matching 1541C/JD configuration. The inspector supports two inputs: `--c000-capture` accepts a raw 8 KiB `$C000-$DFFF` capture and applies the literal first-stage POKEs extracted from the operator-supplied D64; `--c000-intermediate` accepts the Stage-1 `(C)CMD/C/C0-DF` PRG (8192-byte payload with `$6000` load address), which is already patched. Either path can be compared with the supplied SJD image, and `--c000-output` writes the resulting 8 KiB bank.
 
 ## SJD41 runtime hook map: first cross-bank pass
 
@@ -207,7 +207,7 @@ python3 tools/sjd41/generator_records.py \
   --jd-rom /path/to/JiffyDOS_6.01-1541-and-1541-II.bin \
   --compare-sjd /path/to/S-JiffyDOS_1541C_v1.bin \
   --output /tmp/sjd-e000.bin \
-  --c000-capture /path/to/live-c000-dfff.bin \
+  --c000-intermediate /path/to/C_C0-DF.prg \
   --c000-output /tmp/sjd-c000.bin \
   --summary-only
 ```
