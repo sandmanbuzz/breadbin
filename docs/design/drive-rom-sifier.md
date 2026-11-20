@@ -129,6 +129,8 @@ The supplied SJD image confirms the intended design pattern: preserve the JD DOS
 
 The `$E91D-$E998` replacement is a serial-bus/handshake path candidate, not the GCR decoder: it uses VIA/IEC-related registers and calls the `$E9xx` and `$FEF3/$FEFB` helpers. The actual GCR-to-HD decoder is in the extension bank, reached through the standard read-job hook `$F4D1 -> $B2F7`; `$B2F7` reads GCR through `$B2C0`, decodes through `$B132`, then rejoins the common read completion path. The nearby `$E781-$E7A1` patch also reconfigures VIA registers and appears related to serial/controller signaling.
 
+Other confirmed replacements align with SJD's documented feature set: `$E6D1` redirects `BCDDEC` to the three-digit error formatter; `$EBFC` redirects `PARSXQ` to the extension command parser; `$EE3D` redirects `FORMAT`; `$EF28` redirects `AVCK`; `$EF3A` redirects `SETBPT`; `$EF4F` redirects `NUMFRE`; and `$EFC5` redirects the disk-full check. These are the expected hooks for error reporting, SJD commands, format, and extended BAM/track geometry. The complete candidate inventory is in the research note; the raw scanner deliberately marks unverified byte patterns as candidates.
+
 The first three are the key extension-bank entries for further analysis, but they are not all read paths. `$A003` is reached from FORMAT; `$B4DD` is the 40-track disk-full fallback; `$B842` is the next-sector allocator. The GCR-to-HD LOAD optimization is a separate in-place routine at `$E91D-$E998`. This corrects the earlier tentative classification of `$FB15` as a fast-load hook. Do not bake guessed behavior into Breadbin's implementation. See the hook table and evidence in `docs/research/sjd41-generator-disk.md`.
 
 ## Next implementation gates
