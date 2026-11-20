@@ -68,12 +68,14 @@ def screen_code(ch):
 
 
 def kernel_order(font):
-    """Novaterm-style fonts hold capitals at 1-26 and lowercase at 0x41-0x5A; the kernel's
-    screen codes are the other way round. Swap the two blocks."""
+    """Novaterm-style fonts hold graphics at 1-26, lowercase at 0x41-0x5A and capitals at
+    0x61-0x7A; the kernel's screen codes want lowercase at 1-26 and capitals at 0x41-0x5A
+    (what to_screen returns). Rotate the three blocks; graphics go to 0x61."""
     f = bytearray(font)
     for c in range(1, 27):
-        a, b = c * 8, (c + 0x40) * 8
-        f[a:a + 8], f[b:b + 8] = font[b:b + 8], font[a:a + 8]
+        f[c * 8:c * 8 + 8] = font[(c + 0x40) * 8:(c + 0x40) * 8 + 8]
+        f[(c + 0x40) * 8:(c + 0x40) * 8 + 8] = font[(c + 0x60) * 8:(c + 0x60) * 8 + 8]
+        f[(c + 0x60) * 8:(c + 0x60) * 8 + 8] = font[c * 8:c * 8 + 8]
     return bytes(f)
 
 

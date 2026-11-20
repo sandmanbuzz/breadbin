@@ -1,0 +1,177 @@
+@clear
+# BREADBIN soft 80-column console: hires bitmap, 4x8 glyphs, font from Novaterm.
+# This is a scripted demo of the new driver. The shell is not wired to it yet,
+# so the 'commands' below are typed by the demo and the output is canned text.
+# Everything that lands on the screen goes through the real 6502 console code.
+@wait 60
+$ ruler
+         1         2         3         4         5         6         7         8
+12345678901234567890123456789012345678901234567890123456789012345678901234567890
+@snap ruler
+@wait 120
+# 80 columns. The 40-column text screen cannot do that.
+@wait 60
+$ charset
+ !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNO
+PQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+ !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_
+`abcdefghijklmnopqrstuvwxyz{|}~
+@snap charset
+@wait 150
+# Legibility check: lowercase, digits, punctuation at 4x8 pixels per glyph.
+@wait 30
+$ cat README
+Breadbin is a Unix-like operating system for the Commodore 64. It has processes,
+pipes, a shell, a filesystem and a block cache, and it replaces the KERNAL
+entirely: the interrupt entry, keyboard, screen, serial bus and channels are its
+own. Programs are written in 6502 assembly today; a compact VM and a small
+compiled BASIC and C are planned. The target machines are a stock C64 with a
+1541, an expanded one with a REU, and an Ultimate, in that order of ambition.
+@snap readme
+@wait 200
+@clear
+# Wrapping: one 200-character line with no newlines in it.
+@wait 40
+$ wrap
+0123456789abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij
+@snap wrap
+@wait 150
+@clear
+# Scrolling, many lines in ONE write: the driver sees the line feeds coming
+# and scrolls them all in a single pass.
+@wait 40
+$ seq 1 60
+line  1  the quick brown fox jumps over the lazy dog
+line  2  the quick brown fox jumps over the lazy dog
+line  3  the quick brown fox jumps over the lazy dog
+line  4  the quick brown fox jumps over the lazy dog
+line  5  the quick brown fox jumps over the lazy dog
+line  6  the quick brown fox jumps over the lazy dog
+line  7  the quick brown fox jumps over the lazy dog
+line  8  the quick brown fox jumps over the lazy dog
+line  9  the quick brown fox jumps over the lazy dog
+line 10  the quick brown fox jumps over the lazy dog
+line 11  the quick brown fox jumps over the lazy dog
+line 12  the quick brown fox jumps over the lazy dog
+line 13  the quick brown fox jumps over the lazy dog
+line 14  the quick brown fox jumps over the lazy dog
+line 15  the quick brown fox jumps over the lazy dog
+line 16  the quick brown fox jumps over the lazy dog
+line 17  the quick brown fox jumps over the lazy dog
+line 18  the quick brown fox jumps over the lazy dog
+line 19  the quick brown fox jumps over the lazy dog
+line 20  the quick brown fox jumps over the lazy dog
+line 21  the quick brown fox jumps over the lazy dog
+line 22  the quick brown fox jumps over the lazy dog
+line 23  the quick brown fox jumps over the lazy dog
+line 24  the quick brown fox jumps over the lazy dog
+line 25  the quick brown fox jumps over the lazy dog
+line 26  the quick brown fox jumps over the lazy dog
+line 27  the quick brown fox jumps over the lazy dog
+line 28  the quick brown fox jumps over the lazy dog
+line 29  the quick brown fox jumps over the lazy dog
+line 30  the quick brown fox jumps over the lazy dog
+line 31  the quick brown fox jumps over the lazy dog
+line 32  the quick brown fox jumps over the lazy dog
+line 33  the quick brown fox jumps over the lazy dog
+line 34  the quick brown fox jumps over the lazy dog
+line 35  the quick brown fox jumps over the lazy dog
+line 36  the quick brown fox jumps over the lazy dog
+line 37  the quick brown fox jumps over the lazy dog
+line 38  the quick brown fox jumps over the lazy dog
+line 39  the quick brown fox jumps over the lazy dog
+line 40  the quick brown fox jumps over the lazy dog
+line 41  the quick brown fox jumps over the lazy dog
+line 42  the quick brown fox jumps over the lazy dog
+line 43  the quick brown fox jumps over the lazy dog
+line 44  the quick brown fox jumps over the lazy dog
+line 45  the quick brown fox jumps over the lazy dog
+line 46  the quick brown fox jumps over the lazy dog
+line 47  the quick brown fox jumps over the lazy dog
+line 48  the quick brown fox jumps over the lazy dog
+line 49  the quick brown fox jumps over the lazy dog
+line 50  the quick brown fox jumps over the lazy dog
+line 51  the quick brown fox jumps over the lazy dog
+line 52  the quick brown fox jumps over the lazy dog
+line 53  the quick brown fox jumps over the lazy dog
+line 54  the quick brown fox jumps over the lazy dog
+line 55  the quick brown fox jumps over the lazy dog
+line 56  the quick brown fox jumps over the lazy dog
+line 57  the quick brown fox jumps over the lazy dog
+line 58  the quick brown fox jumps over the lazy dog
+line 59  the quick brown fox jumps over the lazy dog
+line 60  the quick brown fox jumps over the lazy dog
+@snap seq
+@wait 120
+# Now the same kind of output, but one line per write call: every line pays for
+# a full scroll by itself. This is the slow case the driver has to get better at.
+@wait 60
+$ seq 1 60 | slow
+@each
+line  1  the quick brown fox jumps over the lazy dog
+line  2  the quick brown fox jumps over the lazy dog
+line  3  the quick brown fox jumps over the lazy dog
+line  4  the quick brown fox jumps over the lazy dog
+line  5  the quick brown fox jumps over the lazy dog
+line  6  the quick brown fox jumps over the lazy dog
+line  7  the quick brown fox jumps over the lazy dog
+line  8  the quick brown fox jumps over the lazy dog
+line  9  the quick brown fox jumps over the lazy dog
+line 10  the quick brown fox jumps over the lazy dog
+line 11  the quick brown fox jumps over the lazy dog
+line 12  the quick brown fox jumps over the lazy dog
+line 13  the quick brown fox jumps over the lazy dog
+line 14  the quick brown fox jumps over the lazy dog
+line 15  the quick brown fox jumps over the lazy dog
+line 16  the quick brown fox jumps over the lazy dog
+line 17  the quick brown fox jumps over the lazy dog
+line 18  the quick brown fox jumps over the lazy dog
+line 19  the quick brown fox jumps over the lazy dog
+line 20  the quick brown fox jumps over the lazy dog
+line 21  the quick brown fox jumps over the lazy dog
+line 22  the quick brown fox jumps over the lazy dog
+line 23  the quick brown fox jumps over the lazy dog
+line 24  the quick brown fox jumps over the lazy dog
+line 25  the quick brown fox jumps over the lazy dog
+line 26  the quick brown fox jumps over the lazy dog
+line 27  the quick brown fox jumps over the lazy dog
+line 28  the quick brown fox jumps over the lazy dog
+line 29  the quick brown fox jumps over the lazy dog
+line 30  the quick brown fox jumps over the lazy dog
+line 31  the quick brown fox jumps over the lazy dog
+line 32  the quick brown fox jumps over the lazy dog
+line 33  the quick brown fox jumps over the lazy dog
+line 34  the quick brown fox jumps over the lazy dog
+line 35  the quick brown fox jumps over the lazy dog
+line 36  the quick brown fox jumps over the lazy dog
+line 37  the quick brown fox jumps over the lazy dog
+line 38  the quick brown fox jumps over the lazy dog
+line 39  the quick brown fox jumps over the lazy dog
+line 40  the quick brown fox jumps over the lazy dog
+line 41  the quick brown fox jumps over the lazy dog
+line 42  the quick brown fox jumps over the lazy dog
+line 43  the quick brown fox jumps over the lazy dog
+line 44  the quick brown fox jumps over the lazy dog
+line 45  the quick brown fox jumps over the lazy dog
+line 46  the quick brown fox jumps over the lazy dog
+line 47  the quick brown fox jumps over the lazy dog
+line 48  the quick brown fox jumps over the lazy dog
+line 49  the quick brown fox jumps over the lazy dog
+line 50  the quick brown fox jumps over the lazy dog
+line 51  the quick brown fox jumps over the lazy dog
+line 52  the quick brown fox jumps over the lazy dog
+line 53  the quick brown fox jumps over the lazy dog
+line 54  the quick brown fox jumps over the lazy dog
+line 55  the quick brown fox jumps over the lazy dog
+line 56  the quick brown fox jumps over the lazy dog
+line 57  the quick brown fox jumps over the lazy dog
+line 58  the quick brown fox jumps over the lazy dog
+line 59  the quick brown fox jumps over the lazy dog
+line 60  the quick brown fox jumps over the lazy dog
+@end
+@snap slow
+@wait 150
+# Watch for tearing during scrolls: the copy is not synced to the raster yet.
+@wait 120
+# End of demo. Not done: cursor, reverse video, ESC sequences, colours, REU scroll.
+@wait 255
