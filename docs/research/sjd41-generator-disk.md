@@ -174,6 +174,23 @@ Applying those literal patch locations to the C000-DFFF half of the supplied JD 
 
 The generator's first stage reads the live drive address space, so the authoritative C000-DFFF input is a capture from the matching 1541C/JD configuration. The inspector now supports that path: `--c000-capture` accepts a raw 8 KiB `$C000-$DFFF` capture, extracts the literal first-stage POKE data from the operator-supplied D64 (without embedding it), applies those patches, and compares the result with the supplied SJD image. `--c000-output` writes the patched bank.
 
+## SJD41 runtime hook map: first cross-bank pass
+
+Static inspection of the supplied SJD image now identifies several explicit trampolines from the modified DOS bank into the added `$8000-$BFFF` extension bank. This is the architectural answer to the original "diff patch versus hook into JD" question: SJD41 does both, but its distinctive behavior is reached through hooks into new extension code.
+
+| Hook address | SJD destination | Evidence / current interpretation |
+|---|---:|---|
+| `$FB15` | `$A003` | Replaces the normal path with a jump into the extension from the `$FB0F` DOS path. This is a fast file-load path candidate; exact command conditions still need disassembly. |
+| `$F15C` | `$B4DD` | Replaces the existing routine body with an extension entry. Likely part of the read/sector path; exact semantics still open. |
+| `$F173` | `$B842` | Second extension entry from the same modified `$F15C-$F194` region; likely a helper for the accelerated read path. |
+| `$FA32` | `$C010` | 1541C track-zero sensor routine relocated into the C-bank, as described above. |
+| `$EBC2` | `$C049` | Calls a small wrapper around `$F259`, then sets zero-page state. |
+| `$DCD6` | `$C075` | Calls a short C-bank cleanup/helper routine after the modified status/job handling sequence. |
+
+The first three entries are the key SJD extension call-ins. The extension's code at `$A003`, `$B4DD`, and `$B842` is not yet assigned definitive routine names. Do not label them as "fast load", "GCR decode", or "track cache" solely from their call sites; those are hypotheses to test by following the callers, callees, zero-page usage, and VIA accesses. The upstream feature list makes fast open/load/save and GCR-to-HD decoding plausible areas, but it does not map those features to these addresses.
+
+A useful next static-analysis pass is to disassemble each trampoline's caller and the first extension routine block, then build a call graph across `$8000-$BFFF`. The host-side JiffyDOS byte transport should remain a separate question: the extension may accelerate drive-side disk operations while still using the existing JD IEC bus routines.
+
 The helper's initial copy of C64 `$E000-$FFFF` to `$4000-$5FFF` is separate from the record interpreter. The helper does not subsequently reference that copied range in its visible code; its purpose is also still open.
 
 ### Reproducible local inspector
