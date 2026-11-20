@@ -336,3 +336,36 @@ For the drive without a JiffyDOS ROM. A kernel module, so it costs the kernel no
 - **Clean room is process-only, and accepted.** The sketch author read the LGPL open-roms JiffyDOS routines (`jiffydos-cleanroom.md`); the implementing session saw only the sketch and cbmbus_doc and says so in `iec.s`. The separation is by process, not provable from the repo. The owner has accepted that under the licence policy. Any later doubt about the JiffyDOS routines is settled by rewriting them from cbmbus_doc and a bus trace by someone who has seen neither.
 - **Sprites.** A sprite on at the start of a session makes `jif_first` stay on the standard protocol for that session (follow-up commit after the landing). A sprite turned on mid-session, a RESTORE (NMI) in a byte window, or Ultimate DMA mid-byte can still shift a byte on the JiffyDOS path, which carries no checksum. Known, accepted risk; only `fast.km` checks its blocks.
 - **fast.km fallbacks on hardware: open thread.** On the Ultimate's emulated 1541-II with the JiffyDOS ROM (c64fs, drive 8), one `wc /bin/as` carried 45 blocks and fell back on 3 (`ft_ng` 142 to 187, `ft_nf` 6 to 9), against 0 fallbacks in 607 under VICE (stock and JiffyDOS ROMs). Reads were still correct and faster (16 to 17.5 s against 21.4 s). The cause is unknown (emulation timing, or a real margin problem: the receive margin is about 2 cycles). If a fallback count above zero shows up again, on hardware or in a test, pull on this thread first: capture which of the failure rule's causes fired (no answer, job error, checksum, timeout) before changing anything. fast.km does not engage on a CBM DOS mount (the real drive 9 in this run), by design; it was never exercised on the physical drive (needs a writable c64fs disk).
+
+## 18. The TFR v0.8 image: what it teaches (2026-11-20)
+
+### 18.1 Source and licence record
+
+- **What:** a 32 KB cartridge image whose banner reads "THE FINAL REPLAY V0.8" (four 8 KB banks, each at `$8000`), sha256 `f194fad1098e47442b61a937b3b432de6f5e0aed4a7fb3648857eef88243ebbe`. Supplied by the owner, who attributes it to **Oxyron**: a ground-up clean-room implementation of Final Replay / Retro Replay I/O routines, released in a community super-ROM. The image itself carries no credit, licence or provenance text; the attribution is the owner's.
+- **Basis:** the owner classes it under the **demoscene standard** (no licence stated; open use by custom; the polite return is a greeting). That is the "stated intent or evident reuse" case of the licence policy in `CLAUDE.md`. Anything adapted from it names Oxyron in the file header and points here. **Greetings to Oxyron.**
+- **Kept out of the repo:** the image and any disassembly of it. This section records findings, not code.
+
+### 18.2 What is in it (read from a disassembly; roles marked "believed" are not confirmed)
+
+- **Three stages.** (1) A few `M-W`/`M-E` commands put a small stub in the drive. (2) The stub is a **generic RAM uploader at `$0300`**: wait for the host, then repeat { receive address low, address high; if the high byte has bit 7 set, clear it and jump to the address; else receive 128 bytes into it } at the fast 2-bit rate. The host side sends every byte as four writes to `$DD00` with no per-pair handshake. (3) The large drive routines arrive through (2).
+- **Receive primitive (drive).** One byte is four steps of "wait DATA/CLK edge, sample `$1800`, shift in"; the host's mirror is four back-to-back reads of `$DD00`, two bits each, with fixed `nop` spacing and interrupts off.
+- **Reader routine.** Does not use the DOS job queue for the data: it finds the header with a ROM routine, then reads the whole raw GCR data block from VIA2 (`$1C01`, byte-ready on the V flag, 256 bytes into the sector buffer and the rest into the stack page), and sends it from the drive after two further ROM calls (roles believed to be GCR conversion and the job-completion path). It works through eight 5-bit groups per five bytes and **sends them through two 24-entry lookup tables**, so the bit pattern for `$1800` is a table fetch per step rather than shifts. A per-sector table at `$0624` marks what has been read.
+- **Writer routine.** Real: sets VIA2 to write mode (`$1C0C`, `$1C03`), writes sync (`$FF`) and data through `$1C01` under the same V-flag byte-ready wait. Next to it is a **head-step and track-write routine** (settle timer loops on `$1805`, density bits, a long `$55` run) whose purpose is not identified; it is the likely track format or test pattern and is out of scope until read further.
+- **Not the loader:** the `M-R`/`M-W`/`M-E` strings belong to the disk monitor, and bank 2 and 3 go through the KERNAL.
+
+### 18.3 What it means for us
+
+| Our state | What TFR does differently | Worth building? |
+|---|---|---|
+| `fast.km` runs DOS jobs per block, one `M-E` per block (17.2) | Reads GCR straight from VIA2, no job queue per block; table-driven sender | **Yes, as an experiment:** a drive routine that reads the next wanted sector as it passes, with `fast.km`'s checksum and fallback rule kept. Expect more than the 1.65x of 17.2, and more risk |
+| Upload by `M-W` in 32-byte chunks | Generic fast uploader (address, 128-byte pages, execute flag) | **Maybe, later:** only helps if the drive code grows; today's upload is small and once per mount |
+| `fast.km` refuses the physical 1541 at the buffer probe (`docs/wip.md`) | Does not rely on the DOS buffer map; takes memory by fixed address | **Yes, in the experiment:** it removes the probe |
+| Writes go through the DOS job queue and verify | Direct GCR write | **Not first.** Direct writes can destroy a disk; only with a read-back verify, on a scratch disk, after the read path is proven |
+
+### 18.4 Order proposed
+
+1. Document the protocol and timing from the disassembly in our own words (the host windows in cycles, the drive loop cycle counts), and check them against `tools/test_fast_timing.py` style host checks.
+2. New drive routine for GCR reads, written in our ca65 for the existing `fast.km` framing, tested under VICE (stock and JiffyDOS drive ROMs) and then on the physical 1541 under the `ultimate`/bench locks.
+3. Fast uploader and direct writes only if step 2 shows the gain.
+
+Not run: nothing here was executed on a drive; the cycle figures and the roles marked "believed" above are hypotheses until step 1 and 2.
