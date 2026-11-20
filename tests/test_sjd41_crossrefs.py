@@ -1,10 +1,12 @@
 import importlib.util
+import sys
 from pathlib import Path
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "sjd41" / "crossrefs.py"
 SPEC = importlib.util.spec_from_file_location("sjd41_crossrefs", SCRIPT)
 module = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = module
 SPEC.loader.exec_module(module)
 
 
