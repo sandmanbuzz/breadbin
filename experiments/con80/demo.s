@@ -1,8 +1,8 @@
 ; con80 tech demo: a standalone PRG that runs the con80 core on a bare C64 and plays a script
-; (built by tools/con80_demo.py, which also generates kernel_syms.inc and the font/script data).
+; (the driver is src/mod/con80.inc; built by tools/con80_demo.py, which also generates kernel_syms.inc and the font/script data).
 ; It takes the machine over: SEI, VIC bank 0, hires bitmap at $2000, colour matrix at $0400.
 ; No KERNAL, no IEC, no disk. `to_screen` below is con.s's, copied (the kernel's is not linked here).
-.include "con80.s"
+.include "con80.inc"
 
 .segment "FONTSEG"
         .incbin "font_glyph.bin"        ; 808 bytes (101 glyphs), written by the tool; the code follows it

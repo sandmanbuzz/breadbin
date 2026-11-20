@@ -33,7 +33,7 @@ BORDER, COLOUR = 14, (14 << 4) | 6      # light blue on blue
 CFG = """MEMORY {
   FNT: start = $4000, size = $1000, file = %O, fill = yes;
   GL:  start = $5000, size = $4800, file = %O;
-  B:   start = $3F40, size = $00C0, file = "";
+  B:   start = $0340, size = $0040, file = "";     # the glue's own variables, not the driver's (they are in the bitmap tail)
 }
 SEGMENTS { FONTSEG: load = FNT, type = ro; CODE: load = FNT, type = ro; RODATA: load = FNT, type = ro;
            BSS: load = B, type = bss; GLUE: load = GL, type = ro; }
@@ -142,7 +142,7 @@ def build(font, ops, tmp):
         f.write(encode(ops))
     with open(os.path.join(tmp, "d.cfg"), "w") as f:
         f.write(CFG)
-    subprocess.run(["ca65", "--bin-include-dir", tmp, "-I", tmp, "-I", SRC, "-o", os.path.join(tmp, "d.o"),
+    subprocess.run(["ca65", "--bin-include-dir", tmp, "-I", tmp, "-I", os.path.join(ROOT, "src", "mod"), "-I", SRC, "-o", os.path.join(tmp, "d.o"),
                     os.path.join(SRC, "demo.s")], check=True)
     subprocess.run(["ld65", "-C", os.path.join(tmp, "d.cfg"), "-Ln", os.path.join(tmp, "d.lbl"),
                     "-o", os.path.join(tmp, "d.bin"), os.path.join(tmp, "d.o")], check=True)

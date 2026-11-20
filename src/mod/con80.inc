@@ -26,10 +26,11 @@ MATRIX = $0400
 .ifndef FONT
 FONT = $4000
 .endif
-.assert <FONT = 0, error, "FONT must be page aligned"
+.ifndef MODULE
 .include "kernel_syms.inc"      ; test-generated: r0 r1 p1-p4 tmp0-tmp3 to_screen
+.endif
 
-.export c80_init, c80_write, c80_curshow, c80_curhide, lastpos, esc_st
+.export c80_init, c80_write, c80_go, c80_curshow, c80_curhide, lastpos, esc_st
 
 COLD = $d3
 ROWD = $d6
@@ -41,7 +42,6 @@ nl   = tmp2                     ; scratch
 xv   = tmp3                     ; put: the nibbles to flip for reverse video
 REV  = $c7
 
-.segment "CODE"
 ; c80_init: colour matrix, then c80_clear
 c80_init:
         jsr matrix
@@ -99,7 +99,8 @@ c80_write:
         sta p2
         lda r1+1
         sta p2+1
-        jsr c80_curhide
+; c80_go: p1 = buffer, p2 = count
+c80_go: jsr c80_curhide
 @next:  lda p2
         ora p2+1
         beq @done
@@ -473,7 +474,7 @@ put:    ldy #7
         bpl @l
         rts
 
-; gp: A = screen code, X = zero page pointer -> that pointer = FONT + A*8 (FONT page aligned)
+; gp: A = screen code, X = zero page pointer -> that pointer = FONT + A*8
 gp:     sta 0,x
         lda #0
         asl 0,x
@@ -482,7 +483,13 @@ gp:     sta 0,x
         rol a
         asl 0,x
         rol a
-        adc #>FONT              ; (carry is clear: A was under 32)
+        pha
+        lda 0,x
+        clc
+        adc #<FONT
+        sta 0,x
+        pla
+        adc #>FONT
         sta 1,x
         rts
 
@@ -628,17 +635,18 @@ fill:   ldx cnt
         bne @c
 @d:     rts
 
-.segment "BSS"                  ; link at BMP+8000 (the tail of the bitmap's last page)
-lastpos: .res 25                ; first: c80_clear zeroes it with the bitmap
-.assert lastpos = BMP+8000, error, "lastpos must be the first byte after the bitmap"
-rb:     .res 80                 ; the run being drawn, as screen codes
-rn:     .res 1
-rlim:   .res 1
-di:     .res 1
-scn:    .res 1
-srow:   .res 1
-ssrc:   .res 1
-cnt:    .res 1
-esc_st: .res 1                  ; escape sequence state (as con.s)
-erow:   .res 1
-cur_vis: .res 1
+; BSS: the 192 bytes after the bitmap (c80_clear zeroes them with it); lastpos must come first
+lastpos = BMP+8000
+rb      = lastpos+25            ; the run being drawn, as screen codes (80)
+rn      = rb+80
+rlim    = rn+1
+di      = rlim+1
+scn     = di+1
+srow    = scn+1
+ssrc    = srow+1
+cnt     = ssrc+1
+esc_st  = cnt+1                 ; escape sequence state (as con.s)
+erow    = esc_st+1
+.ifndef CUR_EXT
+cur_vis = erow+1                ; cursor drawn (the kernel's own flag in the module: the IRQ blink reads it)
+.endif
