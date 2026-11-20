@@ -58,14 +58,19 @@ stride is forced, and the stride is forced only by the row-planar layout. Done i
 Font and code are 1,534 bytes of the 1,536 in 6 pages: no slack. Not worth it: a single-nibble font
 (shifts per row for 400 bytes), 24 rows (320 bytes, breaks 25-row programs), colour RAM as storage.
 
-**Not yet in the driver, and it will grow:** the kernel console also has a cursor (blink, in the
-IRQ), backspace, reverse video, `ESC =` addressing, `ESC K`, `ESC C` colours, and `con_write` is the
-buffer-level entry to hook. Estimate (not measured): +200-250 bytes, so 7 pages, 39 in all.
+**Console parity (measured, 672cd9b):** the driver now has the kernel console's reverse video, backspace,
+`ESC = R r K C`, a cursor (XOR of the half cell, `c80_curshow`/`c80_curhide` for the IRQ blink)
+and the colour matrix fill (from `$0286` and `$D021`); `BS` also ends the look-ahead scan (an LF
+after a BS may not scroll). Code 726 -> **1,094 bytes**, font 808: 1,902 bytes = 7.4 pages, so
+**8 pages, 40 claimed, pool 115**. One page (to 7 pages, 39, pool 116) needs 110 bytes out of the
+code; known candidates: `ESC K` as a loop over `clrh` (about -20), merging the pair/single draw
+paths, dropping `rlim`/`rn` state. It is a size-pass item, not worth doing before the wiring shows
+what the module wrapper costs. Reverse costs one `eor` per put byte (`xv`), +3 cycles x 8 per cell.
 
 ## Result for the tiers
 | tier | cost |
 |---|---|
-| Classic | pool 155 -> 117 pages (29.9 K) with the partial driver, about 116 once the console features are in; the fork started at 120. Fits `sh` + `edit` + `as` together. Realistic as "Classic, if you want it" |
+| Classic | pool 155 -> **115 pages** (29.4 K) with console parity (116 if the driver drops 110 bytes); the fork started at 120. Fits `sh` + `edit` + `as` together. Realistic as "Classic, if you want it" |
 | Expanded / Recommended | identical: the REU cannot hold the live bitmap. It helps nothing here, so there is no "REU recommended" lever for this feature |
 
 ## What is still open

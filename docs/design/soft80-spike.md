@@ -142,18 +142,18 @@ column and row, and uses only kernel scratch (p1-p4, tmp0-tmp3). `tools/test_con
 assembles it against the kernel image's label addresses and runs it in py65 beside the
 host model (`tools/soft80_render.py`); bitmap, high-water marks and cursor agree on random
 floods, every alignment, wraps at 80, FF, tabs, skipped codes, one-byte writes, and look-ahead
-edges (ESC and FF in the buffer, 30 LFs in a row). Not yet: reverse, cursor, ESC, backspace,
-colour RAM, VIC setup, the module wrapper, a hook in `con_putc`.
+edges (ESC, FF and BS in the buffer, 30 LFs in a row), reverse, BS, ESC = R r K C (also split across
+writes), the cursor and the colour matrix. Not yet: VIC setup, the module wrapper, a hook in `con_putc`.
 
 Decisions the work forced:
 
-- **Font layout is row-planar**: page I holds glyph row I of all 256 codes, so a row is
-  `lda FONT+256*I,x` with no pointer arithmetic. Same 2 KB as the glyph-major file;
-  `soft80_render.planar()` converts. Novaterm's font has capitals at screen codes 1-26 and
+- **Font layout is glyph-major**: 101 glyphs (screen codes 0-$64, all `to_screen` returns), 8
+  bytes each, page aligned, so a glyph pointer is `code*8` (808 bytes; the row-planar layout of the
+  first cut is gone, see `soft80-memory.md`). Novaterm's font has capitals at screen codes 1-26 and
   lowercase at `$41-$5A`; Breadbin's `to_screen` is the other way round, so the font is
   swapped when loaded (`kernel_order()`), and the driver consumes `to_screen` output unchanged.
 - **Look-ahead is across lines, not just consecutive LFs.** At the bottom row, count the LFs in
-  the next 255 buffer bytes (stop at FF or ESC, cap 24), scroll that many rows at once, and put the
+  the next 255 buffer bytes (stop at FF, ESC or BS, cap 24), scroll that many rows at once, and put the
   cursor n-1 rows up; the following LFs only move it. Same final bitmap as sequential
   execution (tested), 1/n of the scrolls.
 
