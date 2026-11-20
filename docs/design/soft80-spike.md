@@ -10,17 +10,34 @@ Feasible on every platform tier, as a loadable module, not in the base kernel. T
 - **One font table with each glyph stored in both nibbles of every byte** (2 KB for 256 glyphs). Drawing the left character is `(font & $F0) | (screen & $0F)`, the right one `(font & $0F) | (screen & $F0)`: no shifting, no glyph cache.
 - Colour is **per 8x8 cell, so per pair of characters** (the hires colour matrix); there is no true per-character colour.
 
-Costs for us: about **32 pool pages** (the bitmap), 8 for the font, a page or two of code. Scrolling is the weak spot (about 100 ms per line on a stock machine, *est.*; about 16 ms with an REU). Two kernel changes are needed first: a console output vector and a geometry query (D3). Gate on the IEC stall work (see Risks).
+Costs for us: about **32 pool pages** (the bitmap), 8 for the font, a page or two of code. Scrolling is the weak spot (about 100 ms per line on a stock machine, *est.*; about 16 ms with an REU). Two kernel changes are needed first: a console output vector and a geometry query (D3). Nothing else gates it: the physical-1541 stall is closed (harness DMA, 2026-11-18), so VIC and raster tricks are fair game.
 
 ## Survey
 
 | Source | What it is | Licence / adoptable? | Technique worth taking |
 |---|---|---|---|
 | **ACE-64 `acesoft80.s`** | 6510 driver of Craig Bruce's ACE OS; read in full | `ace16.txt` (same directory as the source) says "This system is Public Domain Software." Adoptable; record the source and author in the file header | pair-aligned `put` (odd leading right char, even body in whole bytes, odd trailing left char); char backing store; XOR masks for reverse; underline flag; IRQ cursor; REU as memmove for scroll and fill; screen-save blank |
-| **Novaterm 9.6** `80col.default`, `80col.fast-REU`, `font80.*`, `font81.*` | Terminal program's loadable drivers (1.8 KB each) plus fonts; disassembled, not fully traced | "public domain release" per the task brief; the disk carries no licence file, so the evidence is the release notice at the download site. Confirm before adopting | same nibble-mask font; row high-water array so clears and scrolls only touch used cells; same stock zero page as us (`$D1/$D2` row pointer, `$D3` column, `$D6` row, `$C7` reverse); swappable fonts as 2 KB files |
+| **Novaterm 9.6** `v9.6/80col/*.src`, `misc/font80.*`, `font81.*` (in `novaterm-source.tgz`, the author's source release; read, not assembled) | Terminal program's loadable 80-column drivers, 900-1,000 lines of source each, plus fonts | **Owner asserts it adoptable (2026-11-20)**: the author released the source free, and the C64OS author (a commercial project) includes NovaText from it. The tarball has no licence text (checked), so this assertion is the whole evidence: say so in each adopted file's header, credit the author | see "The Novaterm family" below: the nibble-mask font, per-row high-water marks, **look-ahead scroll**, a sprite cursor, an REU variant, and a clean driver ABI |
 | **Screen-80** (Compute's Gazette, Sep 1984) | Magazine type-in, about 3 KB, hooks CHROUT; read from the article and the disk image, only partly disassembled | Copyrighted magazine listing: **not adoptable**, ideas only | hires screen at `$E000` under the KERNAL; one colour for the whole screen (what you get without a matrix); `Custom-80` joystick font editor is a good font-tool idea |
 | **Color80** (Richvale, 1983) | Commercial product, the copy in the brief is a crack ("broken by Mr. Unprotector") | **Proprietary: do not copy, do not adopt.** Not studied beyond the loader (`$01=$34`, copies code to `$A000`) | per-character colour is its selling point; it needs a different layout (not traced). Out of scope |
 | **SOFT80** (Lampton, 1984, CP/M) | 6510 side of a CP/M cartridge patch; docs read, binary only glanced at | "unlimited **non-commercial** distribution": **not compatible with an MIT repo**, ideas only | VIC bank 3: bitmap at `$E000`, colour matrix at `$D000`, code at `$D400`, all RAM under ROM and I/O; ESC sequences for cursor/colour/underline |
+
+## The Novaterm family (source)
+
+Novaterm ships one driver per hardware case behind one jump-table ABI (`jmp` slots at fixed offsets: `init80`/`enter80`, `outchr`, `blcrsr` (cursor blink), `calcloc`, `scroll`, `insert`, `erase`, `putchar`, then `clrtoeol`, `clrfrombol`, `setattr`, `specattr`, `saveattr`/`restattr`; data slots for `sctop`, `scbot`, `lines`, `under`, `color80`, `border80`, `scrlahd`). Variants, by diff against `default.src` (all share the `$CF` mask and the stock zero page):
+
+| Driver | What differs |
+|---|---|
+| `default.src` | Reference. Bitmap at `$A000` (rows `$140` apart) in VIC bank 2, colour matrix and per-row colour arrays, CPU banks with `$01=$36` while drawing |
+| `default-sprite.src` | The cursor is a hardware sprite (position from the column/row, doubled in X and Y, one 24x21 shape) instead of an XOR into pixel row 7: no bitmap write per blink, no read-modify-write race with output |
+| `reu80.src` | Same screen, but scroll, erase and colour moves are REU DMA (the `$DF00` registers, with the address-control register for a fixed-address fill, then `reu_length` and `reu_command` repeated per chunk); address control and chunk sizes not traced |
+| `scpu80.src`, `ss80.src` | SuperCPU speed-ups (mirroring, the `-p2` assembler pass); ss80 is a copy with the same comment line. Irrelevant to us |
+| `vdc*.src` | The C128's VDC chip: a different problem, nothing to take |
+
+Two techniques in `default.src` that I had not seen in ACE, and that matter more than the blit:
+
+1. **Look-ahead scroll (`scrlahd`).** When a line feed would scroll, the driver counts the line feeds already waiting in the receive buffer (`recbuf` between `rhead` and `rtail`) and scrolls up to 12 lines in **one** pass. A pass costs about the same whatever the count, so a screenful of output scrolls about as fast as one line. For us the "buffer" is the argument of `con_write` (`r0`/`r1`), which we already hold whole: counting `$0A` in it needs no backing store, so this beats my earlier "backing store and deferred scroll" idea on cost. Keep the 8 pages for the backing store only if redraw needs it.
+2. **Per-row high-water mark (`lastpos`).** Each text row remembers the right-most pixel cell it ever drew; a scroll copies `max(lastpos of the source, lastpos of the destination)` bytes of each pixel row (a 32-byte unrolled `lda (next),y / sta (loc),y / iny` body, about 13 cycles a byte), not 320. Real output is mostly short lines, so the typical copy is a fraction of the 7,680-byte worst case. This answers the scroll worry in the numbers below.
 
 What I verified myself: in `font80.novaterm` all 2,048 data bytes have equal nibbles (the blit is mask-and-merge, `lda (font),y; and $CF`, with `$CF` = `$F0` or `$0F`); ACE's left/right echo routines use the same two masks; Novaterm's cursor XORs the same mask into pixel row 7 (an underline); `$D018 = $3C` selects the colour matrix and bitmap. Not traced: how Novaterm's fast-REU variant scrolls, and how its scroll routine is built.
 
@@ -36,7 +53,7 @@ What I verified myself: in `font80.novaterm` all 2,048 data bytes have equal nib
 
 **Adapt**
 - **Backing store of characters (2,000 bytes).** ACE keeps one. It gives `$D1/$D2` a real meaning (start of the cursor row in a char array) which keeps the zero-page rule, lets redraw and font swaps work, and is what lets us defer scrolling. Cost 8 pool pages. Decide after a first measurement; the base design works without it.
-- **Deferred scroll.** With a backing store, a burst of line feeds shifts the char array and the bitmap once (the pass costs about the same whatever the line count), not once per line. Likely the largest practical speedup on a stock machine; adds state, so a second step.
+- **Look-ahead scroll** (Novaterm `scrlahd`, above) in place of a deferred-scroll design: count the line feeds in the `con_write` buffer and scroll that many lines in one pass. Likely the largest practical speedup on a stock machine, with no backing store.
 - **Colour matrix.** Two characters share one colour byte. Take the text colour from the global colour (`$0286`, as `scr_color` does), keep `ESC C` working for the whole screen only, and drop per-cell colour. Matches how the 40-column console works today.
 
 **Skip**
@@ -73,7 +90,7 @@ A scrolling full-speed listing runs at about 8-9 lines per second on a stock mac
 
 ## Risks and unknowns
 
-- **IEC timing.** The JiffyDOS windows (`jif_safe`: no bad lines, no sprites) and the open physical-1541 stall work (`docs/wip.md`) both depend on VIC state. A bitmap screen has the same bad-line pattern as text, but it is a VIC change on the same bus; D19's rule applies: do this after the stall is understood, and run the disk and bus tests with the mode on.
+- **IEC timing.** The physical-1541 stall is closed (the test harness's REST DMA halted the CPU mid-byte; owner, 2026-11-18), so VIC changes are not blocked by it. One real rule remains: the JiffyDOS windows need no bad lines and no sprites (`jif_first` reads `$D015` and stays on the standard protocol if a sprite is on). A bitmap screen has the text screen's bad-line pattern; a **sprite cursor** (the `default-sprite` idea) would silently drop JiffyDOS transfers to the standard protocol while it shows, so either hide it across disk I/O or keep the XOR cursor. Run the disk and bus tests with the mode on. The harness rule stands: never DMA during a transfer.
 - **Legibility.** A 4x8 cell leaves a 3x5 or 3x7 glyph. Composite and CRT shows it badly; on the Ultimate's HDMI it is usable. Needs a look on real hardware, not assumed.
 - **Font source.** Not decided. Options: an ACE or Novaterm font (both stated public domain; check the licence evidence before adopting), or draw our own to include `{ } ~ \ | ^ _` for the S14 compiler (D17). Never derive it from the character ROM (repo rule).
 - **Bitmap read-back.** Reading a glyph back from the bitmap is not needed with a backing store; without one `edit`'s screen restore would be impossible, a third reason to weigh the 8 pages.
@@ -84,6 +101,6 @@ A scrolling full-speed listing runs at about 8-9 lines per second on a stock mac
 1. **Host proof**, no hardware: a script in `tools/` that renders a text file through a candidate font and the nibble-merge algorithm to a PNG, so we can judge the font and the cell shape. Cheap, and it settles the font question.
 2. **D3 + D9 first** (geometry query, page claim); they are useful on their own and the soft-80 module needs both.
 3. **`con80` module in VICE**: blit, cursor, scroll without an REU. Measure cycles with the host tools, then decide on the backing store and deferred scroll.
-4. **REU scroll** behind a probe, and a hardware run (legibility, IEC with the mode on) once the stall is closed.
+4. **Look-ahead scroll and row high-water marks** in the first driver; **REU scroll** behind a probe afterwards. Then a hardware run (legibility, IEC with the mode on).
 
-Sources: ACE `acesoft80.s` and `ace16.txt` (csbruce.com archive); Compute's Gazette, Sep 1984, "80 Columns For The 64" and its disk image; SOFT80.txt and SOFT80.com, Color80, the same set on mikenaberezny.com; Novaterm 9.6C (zimmers.net).
+Sources: ACE `acesoft80.s` and `ace16.txt` (csbruce.com archive); Compute's Gazette, Sep 1984, "80 Columns For The 64" and its disk image; SOFT80.txt and SOFT80.com, Color80, the same set on mikenaberezny.com; Novaterm 9.6C binaries and `novaterm-source.tgz` (zimmers.net, `pub/cbm/c64/comm/Novaterm/`).

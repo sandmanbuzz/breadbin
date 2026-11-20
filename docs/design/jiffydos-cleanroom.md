@@ -16,7 +16,7 @@ Sketch: in the ATN byte loop, at bit 7 (the last) of a command byte whose high b
 
 Cost: +400 us per TALK/LISTEN. Our protocol already pays about 1.8 ms per byte, so the overhead is noise. The side effect is harmless to non-JiffyDOS devices by the spec (the standard protocol only fixes a minimum delay).
 
-**Bench caveat** (corrected 2026-10-31): the hardware session first reported that every device number answers ATN, then retracted it (the test sent nothing on the bus). The open item is a stall on the physical 1541, not yet localised. A false JiffyDOS positive is still possible with a noisy DATA line, so the rule stands: the session flag is set only if the *device also acknowledged the command byte normally* (the existing present check), and the first real transfer must succeed; any error in a jiffy transfer clears the flag and retries once on the standard protocol.
+**Bench caveat** (corrected 2026-10-31): the hardware session first reported that every device number answers ATN, then retracted it (the test sent nothing on the bus). The stall on the physical 1541 that was open then is closed (harness DMA, 2026-11-18). A false JiffyDOS positive is still possible with a noisy DATA line, so the rule stands: the session flag is set only if the *device also acknowledged the command byte normally* (the existing present check), and the first real transfer must succeed; any error in a jiffy transfer clears the flag and retries once on the standard protocol.
 
 ## 3. Byte send (LISTEN session, controller to device)
 
