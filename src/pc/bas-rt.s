@@ -20,10 +20,10 @@
 
 .export n_ldv, n_ldk, n_stv, n_dup, n_add, n_sub, n_mul, n_div, n_neg, n_abs, n_int, n_sgn
 .export n_fromi, n_toi, n_cmp, n_tst
-.export rt_mark, rt_go, rt_ln
+.export rt_mark, rt_go, rt_ln, xtab
 .export c_ldv, c_stv, c_dup, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_mac, c_fmt
 .export c_throw, c_err, c_curip, c_nclr, c_crunch, c_find
-.export c_sp, c_digit, c_letter, c_tok, c_ult, c_emit, c_room, c_op1, c_opw, c_ncall
+.export c_sp, c_digit, c_letter, c_tok, c_ult, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 
 NDEPTH  = 16
 ESTKSZ  = P_ESTKL - P_ESTKH + 11 ; both halves, contiguous
@@ -399,7 +399,7 @@ n_ldv:  lda P_ESTKL,x           ; push the number at an address
         lda P_ESTKH,x
         sta ptr+1
 ldv2:   inx
-        stx sx
+ldv3:   stx sx
         ldy #3
 :       lda (ptr),y
         sta acc,y
@@ -415,7 +415,7 @@ n_stv:  lda P_ESTKL,x           ; pop the number to an address
         sta ptr+1
         inx
         stx sx
-        jsr popa
+stv2:   jsr popa
         ldy #3
 :       lda acc,y
         sta (ptr),y
@@ -1276,7 +1276,72 @@ c_ncall: lda #3
         sta g_straight
         sta g_straight+1
         jmp ret0
+; c_xop(b): an XOP with no operand. c_xopw(b, w): one with a word operand. Like CALL, an XOP
+; has the VM renormalise IP, so straight-line counting starts over. 0.
+c_xop:  lda #1
+        jsr roomb
+        lda P_ESTKL,x
+        jsr emitb
+        jmp xstr
+c_xopw: lda #3
+        jsr roomb
+        lda P_ESTKL+1,x
+        jsr emitb
+        jsr word
+        inx
+xstr:   lda #0
+        sta g_straight
+        sta g_straight+1
+        jmp ret0
 word:   lda P_ESTKL,x
         jsr emitb
         lda P_ESTKH,x
         jmp emitb
+
+; ---- XOPs (pvm.md, "XOP"): bas's own one-byte opcodes, $C8 + 2 * the index in xtab ----
+; The VM calls these as it does a native callee (X the eval stack index), but they keep their
+; operands in the code: P_IP and P_IPY say where, and an operand routine advances P_IPY past them.
+; Those that are plain n_ routines (no operand) are in xtab as themselves.
+
+xw:     ldy P_IPY               ; the word operand to ptr
+        iny
+        lda (P_IP),y
+        sta ptr
+        iny
+        lda (P_IP),y
+        sta ptr+1
+        sty P_IPY
+        rts
+x_ldv:  jsr xw                  ; XLDV a: push the number at a
+        jmp ldv3
+x_stv:  jsr xw                  ; XSTV a: pop the number to a
+        stx sx
+        jmp stv2
+x_ldk:  lda P_IPY               ; XLDK b0..b3: push the four bytes after the op
+        sec                     ; (ptr = IP + IPY + 1)
+        adc P_IP
+        sta ptr
+        lda P_IP+1
+        adc #0
+        sta ptr+1
+        lda P_IPY
+        clc
+        adc #4
+        sta P_IPY
+        jmp ldv3
+x_ln:   lda P_IPY               ; XLN: rt_ln, with the op after this one as the position
+        sec
+        adc P_IP
+        sta curip
+        lda P_IP+1
+        adc #0
+        sta curip+1
+x_nop:  rts
+
+xtab:   .word x_ldv, x_stv, x_ldk, x_ln                 ; C8 CA CC CE
+        .word n_add, n_sub, n_mul, n_div                 ; D0 D2 D4 D6
+        .word n_neg, n_cmp, n_int, n_abs                 ; D8 DA DC DE
+        .word n_sgn, n_fromi, n_toi, n_tst               ; E0 E2 E4 E6
+        .repeat 12
+        .word x_nop                                      ; E8 .. FE: unused
+        .endrepeat

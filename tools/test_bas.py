@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src", "pc", "bas.c")
 RT = os.path.join(ROOT, "src", "pc", "bas-rt.s")
 _built = {}
-FREE = "16384 BYTES FREE\n"
+FREE = "16128 BYTES FREE\n"
 LINE = ":".join(['?"A";'] * 26)       # 155 bytes stored (? is one token), 185 of code with the line's rt_ln
 LISTED = LINE.replace("?", "PRINT")
 
@@ -78,10 +78,11 @@ class Bas(unittest.TestCase):
         self.assertEqual(self.out('?"A";\nFOO\n'), "A\n?SYNTAX ERROR\n")
 
     def test_immediate_mode_after_a_large_run(self):
-        # 47 lines of 161 bytes of text (with the header) and 185 of code leave 109 bytes free: a
-        # typed line that does not fit after the code is compiled in its place, and RUN still works
-        out = self.out(BIG(47) + 'RUN\n?"' + "X" * 150 + '"\nRUN\n', limit=400_000_000)
-        self.assertEqual(out, "A" * 26 * 47 + "X" * 150 + "\n" + "A" * 26 * 47)
+        # 46 lines (161 bytes of text each, with the header, and their code) leave less than
+        # another line's worth free (47 do not run at all): a typed line that does not fit after
+        # the code is compiled in its place, and RUN still works
+        out = self.out(BIG(46) + 'RUN\n?"' + "X" * 150 + '"\nRUN\n', limit=400_000_000)
+        self.assertEqual(out, "A" * 26 * 46 + "X" * 150 + "\n" + "A" * 26 * 46)
 
     def test_line_store_sorts_replaces_and_deletes(self):
         out = self.out('30 ?"C"\n10 ?"A"\n20 ?"B"\n20 ?"BB"\n40 ?"D"\n30\n35\nLIST\nRUN\n')
@@ -165,20 +166,28 @@ class Bas(unittest.TestCase):
         want = "".join(s + str(n) for n in range(1, 11)) + "\n" + "".join(chr(65 + i) for i in range(26)) + "\n"
         self.assertEqual(self.out(prog + "RUN\n"), want)
 
+    def test_a_long_line_of_xops_with_operands_runs_straight_on(self):
+        # XLDK, XLDV and XSTV carry operand bytes: a line of 8 such statements is over 100 bytes
+        # of code (a 160-character line is the most); each op must leave IP renormalised
+        parts = ["A=A+%d.5:B=A*2" % i for i in range(8)]
+        out = self.out("10 " + ":".join(parts) + "\n20 ?A;B\nRUN\n")
+        a = sum(i + 0.5 for i in range(8))
+        self.assertEqual(out, " %g  %g \n" % (a, a * 2))
+
     def test_out_of_memory(self):
-        # text, code and variables share the 16384-byte arena. The text: a line of 150 Ys is 159
-        # bytes (2 + 1 + 2 of header, 153 of text, a 0), so 103 fit; the rest are refused and the store is unhurt
+        # text, code and variables share the 16128-byte arena. The text: a line of 150 Ys is 159
+        # bytes (2 + 1 + 2 of header, 153 of text, a 0), so 101 fit; the rest are refused and the store is unhurt
         prog = "".join('%d ?"%s"\n' % (n, "Y" * 150) for n in range(1, 110))
-        out = self.out(prog + "LIST 1\nLIST 103\nLIST 104\n", limit=400_000_000)
-        self.assertEqual(out, "?OUT OF MEMORY ERROR\n" * 6 + '1 PRINT"' + "Y" * 150 + '"\n103 PRINT"' + "Y" * 150 + '"\n')
+        out = self.out(prog + "LIST 1\nLIST 101\nLIST 102\n", limit=400_000_000)
+        self.assertEqual(out, "?OUT OF MEMORY ERROR\n" * 8 + '1 PRINT"' + "Y" * 150 + '"\n101 PRINT"' + "Y" * 150 + '"\n')
 
     def test_out_of_memory_compiling(self):
-        # the code: 60 lines leave room for 36 lines' code; the error names the line being
+        # the code: 60 lines leave room for 35 lines' code; the error names the line being
         # compiled, and a typed line still runs
         out = self.out(BIG(60) + 'RUN\n?"STILL"\nLIST 60\n', limit=400_000_000)
-        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 37\nSTILL\n60 " + LISTED + "\n")
-        # the variables: 46 lines leave 455 bytes, and each new variable takes 6 and its
-        # assignment 10 bytes of code
+        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 36\nSTILL\n60 " + LISTED + "\n")
+        # the variables: 46 lines leave too little (45 leave enough) for 26 new variables (6 bytes each) and their
+        # assignments (5 bytes of code each: a constant, then XSTV)
         out = self.out(BIG(46) + "47 " + ":".join("A%s=0" % chr(65 + i) for i in range(26)) + "\nRUN\n",
                        limit=400_000_000)
         self.assertEqual(out, "?OUT OF MEMORY ERROR IN 47\n")
