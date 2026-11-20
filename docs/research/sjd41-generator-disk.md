@@ -119,6 +119,63 @@ That leaves a concrete unresolved discrepancy: the helper's first phase reads `$
 
 The exact record destinations and their payloads still need to be extracted from a controlled runtime memory image. Do not yet describe the record stream as a specific set of ROM hooks.
 
+## Embedded patch-record tables: decoded
+
+The 138-byte helper is a generic patch-table interpreter. Its table is not in the BASIC `DATA` statements: each generator PRG has a binary payload appended immediately after the BASIC program terminator.
+
+The marker is the final BASIC line's zero terminator followed by the two-byte zero link pointer. The helper scans upward from `$0800` for three consecutive zero bytes, skips those three bytes, and begins reading the appended records.
+
+Each record is:
+
+| Field | Meaning |
+|---|---|
+| byte 0 | destination low |
+| byte 1 | destination high |
+| byte 2 | payload length |
+| following bytes | payload copied to destination |
+
+A length byte of zero means 256 bytes: the helper uses an 8-bit Y index and the copy loop terminates only when Y wraps back to zero. An all-zero three-byte header terminates the table.
+
+The same helper bytes occur in all three generator programs. Their embedded record tables are different:
+
+| Generator | Records | Payload bytes | Record destination span |
+|---|---:|---:|---|
+| Stage 1: `1.JD/E0&CBM/C0-G` | 33 | 463 | `$8781-$9F5A` |
+| Stage 2: `2.CBM/E0-GENERAT` | 67 | 1,992 | `$65B7-$7FE5` |
+| Stage 3: `3.SJD/E0-GENE460` | 82 | 625 | `$65B7-$8064` |
+
+### What the tables actually patch
+
+- **Stage 1** applies its 33 records to the captured E000-FFFF bank while that bank is still at C64 addresses `$8000-$9FFF`. Those C64 addresses map to drive ROM addresses `$E000-$FFFF`. Consequently, `(C)CMD/J/E0-FF` is not a raw ROM dump: it is the captured JD bank after the Stage 1 record table has been applied.
+- **Stage 2** loads that intermediate at C64 `$6000`, applies its own 67 records, and saves the resulting 8 KiB as `(C)CMD/C/E0-FF` (the CBM E000-FFFF bank).
+- **Stage 3** loads the same Stage 1 intermediate at `$6000`, applies its 82 records, and saves the resulting 8 KiB as `(C)CMD/SE0-F/460` (the SJD E000-FFFF bank).
+
+This explains why applying only the Stage 3 records to the original JD image was insufficient: Stage 1's 33 records are part of the input-generation process.
+
+### Reconstruction against the supplied ROM images
+
+A clean-room interpreter was run against the supplied D64 and ROM binaries, without copying any patch payload bytes into the repository. Using the supplied JD image's E000-FFFF half, then applying Stage 1 followed by Stage 3, produces an 8 KiB E000-FFFF bank that differs from the supplied SJD 1541C image in just nine bytes:
+
+- `$EAD5`
+- `$EBC3-$EBC4`
+- `$FA32-$FA37`
+
+The generated bank SHA-256 is `3f7151c402d60a00308d1a0a10b34c28bbe5bad3b1c5851e1435a84c85d37f97`. This is a strong confirmation of the record format and stage ordering, but not yet an exact reproduction of the supplied SJD image. The nine bytes remain an open discrepancy; do not paper over them with guessed patches.
+
+One Stage 3 record starts at C64 address `$7FFF` and is 102 bytes long, so the interpreter writes through `$8064`. The generator subsequently saves only `$6000-$7FFF` as the 8 KiB output file. Only the first byte of that record is therefore in the saved bank; the remaining 101 bytes are written beyond it. The purpose of this spill is not yet established and should be investigated rather than silently discarded.
+
+### C000-DFFF bank caveat
+
+The first-stage BASIC program also manually patches its captured C000-DFFF buffer at C64 addresses around `$6070`, `$609F`, `$6D92`, `$7367`, and `$7CBB`, then saves `(C)CMD/C/C0-DF`.
+
+Applying those literal patch locations to the C000-DFFF half of the supplied JD binary does **not** reproduce the supplied SJD image's C000-DFFF bank: 68 bytes still differ (67 bytes in `$C010-$C054`, plus one at `$C0AD`). The generator's first stage reads the live drive address space, so the supplied 16 KiB JD file may not be the complete source for that captured bank, or the image/model mapping still needs another correction. The actual C000-DFFF capture is the authoritative input; this discrepancy remains open.
+
+The helper's initial copy of C64 `$E000-$FFFF` to `$4000-$5FFF` is separate from the record interpreter. The helper does not subsequently reference that copied range in its visible code; its purpose is also still open.
+
+### Reproducible local inspector
+
+`tools/sjd41/generator_records.py` parses the supplied 35-track D64, finds the three PRGs, extracts record metadata without printing payload bytes, applies Stage 1 and Stage 3 to a user-supplied JD image, and optionally compares/writes the resulting E000-FFFF bank. No ROM bytes or extracted patch payloads are embedded in the tool.
+
 ## Final EPROM generator: 1541C / 1541-II
 
 `EP-GEN/41C&2(NEW` defines the following input files in its REM header:
