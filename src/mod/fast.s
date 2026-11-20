@@ -52,7 +52,8 @@ A_DAT   = $20
 
 DRV     = $0300         ; where the drive code runs (buffers 0 and 1)
 DBUF    = $0500         ; buffer 2, the kernel's own "#" buffer: the sector
-D2      = $0650         ; EXPERIMENT: more drive code (the BAM buffer)
+D2      = $078a         ; the rest of the drive code
+RB2     = DBUF + 325    ; the second raw sector of a pass (to $078A: the rest of buffer 3 and 4, and the BAM's)
 PB      = $1800         ; the drive's serial port (VIA 1 port B)
 OP_RD   = $80           ; the job codes
 OP_WR   = $90
@@ -84,6 +85,8 @@ g_o:    .res 4
 g_c:    .res 1
 g_e:    .res 1
 g_cs:   .res 1
+g_h:    .res 1
+g_x:    .res 1
 ft_pt:  .res 1          ; the last block's track and sector (for hint)
 ft_ps:  .res 1
 ft_nf:  .res 1          ; blocks that fell back to the standard path (tests/test_fast.py reads both)
@@ -246,9 +249,14 @@ ft_start:
         sta cmdbuf+3
         lda #>d_go
         sta cmdbuf+4
-        jsr tcodes              ; cmdbuf+8-11: the track as the disk spells it (the last byte is not a CR)
-        jsr hint                ; cmdbuf+12: the sector to take next on this track, or $ff
-        lda #13
+        jsr tcodes              ; cmdbuf+8, 9: the track as the disk spells it
+        lda sct
+        jsr senc                ; cmdbuf+10, 11: the sector, and byte 3 of its header
+        stx cmdbuf+10
+        ora cmdbuf+8
+        sta cmdbuf+11
+        jsr hint                ; cmdbuf+12-14: the pass: how to read, and the guess for the next sector
+        lda #15
         sta cmdlen
         jsr cmd_send
         bcs @bus
@@ -280,11 +288,12 @@ ft_start:
 ; one lies past the last (c64fs blocks carry no link, so the disk cannot say). Only a guess on
 ; the same track counts; the drive takes it while the host is busy and the next request is
 ; served from it if it was right.
-hint:   lda #$ff
-        sta cmdbuf+12
+hint:   lda #0
+        sta cmdbuf+14           ; 0: the DOS reads it (the head may be elsewhere)
         lda ft_pt
         cmp trk
         bne @n
+        inc cmdbuf+14           ; 1: the head is on this track: read the sector raw
         lda sct
         sec
         sbc ft_ps
@@ -292,17 +301,46 @@ hint:   lda #$ff
         beq @n
         clc
         adc sct
-        sta g_e
+        sta g_h
         jsr h_spt
-        cmp g_e
+        cmp g_h
         beq @n
         bcc @n
-        lda g_e
-        sta cmdbuf+12
+        lda g_h
+        jsr senc
+        stx cmdbuf+12
+        ora cmdbuf+8
+        sta cmdbuf+13
+        inc cmdbuf+14           ; 2: and the guessed one in the same pass
 @n:     lda trk
         sta ft_pt
         lda sct
         sta ft_ps
+        rts
+
+; senc: A = a sector; X = the low nibble of the header's byte 2 for it, A = the high six bits
+; of byte 3 (the GCR codes of its two digits, run together).
+senc:   pha
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        tax
+        lda g_et,x
+        sta g_c
+        pla
+        and #$0f
+        tax
+        lda g_et,x
+        asl a
+        asl a
+        sta g_e
+        lda g_c
+        lsr a
+        tax
+        lda #0
+        ror a
+        ora g_e
         rts
 
 ; h_spt: A = the sectors on track trk (1541)
@@ -319,9 +357,8 @@ h_spt:  lda #21
         lda #17
 @r:     rts
 
-; tcodes: cmdbuf+8..11 from trk. c6, c7 = the GCR codes of its two digits; T3 = c6>>3,
-; T4 = c6<<5 | c7 (the header's last two bytes), V1 = c6<<1 | c7>>4, V2 = (c7 & 15)<<4
-; (what a data block's link track reads as).
+; tcodes: cmdbuf+8, 9 from trk. c6, c7 = the GCR codes of its two digits; T3 = c6>>3,
+; T4 = c6<<5 | c7 (the header's last two bytes).
 tcodes: lda trk
         lsr a
         lsr a
@@ -348,23 +385,6 @@ tcodes: lda trk
         asl a
         ora g_e
         sta cmdbuf+9
-        lda g_c
-        asl a
-        sta cmdbuf+10
-        lda g_e
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ora cmdbuf+10
-        sta cmdbuf+10
-        lda g_e
-        and #$0f
-        asl a
-        asl a
-        asl a
-        asl a
-        sta cmdbuf+11
         rts
 
 ; mhead: "M-" and A into cmdbuf
@@ -535,7 +555,9 @@ hdec:   lda #0
         tax
         tay
 @g1:    getg rawbuf
+        stx g_x                 ; (g_nib uses X)
         jsr g_g
+        ldx g_x
         putg rawbuf
         iny
         iny
@@ -547,7 +569,9 @@ hdec:   lda #0
         tax
         bcc @g1                 ; 52 groups: X wraps after the one that reads rawbuf+255..259
 @g2:    getg rawbuf+256
+        stx g_x
         jsr g_g
+        ldx g_x
         putg rawbuf
         tya
         clc
@@ -560,7 +584,9 @@ hdec:   lda #0
         tya
         bne @g2                 ; 12 more: Y wraps to 0
         getg rawbuf+256
+        stx g_x                 ; (g_nib uses X)
         jsr g_g
+        ldx g_x
         putg rawbuf+256
         lda g_e
         bne @bad
@@ -1055,7 +1081,11 @@ d_rtab:
 .assert >d_rw = >d_recv_end, error, "fast.s: the timed part of d_recv crosses a page"
 .endif
 
-; d_go: the entry (M-E)
+
+; d_go: the entry (M-E). The command: op, track, sector, T3 T4 (the track as the header spells
+; it), e2 e3 (the sector), e2 e3 of the sector to take in the same pass, and how: 0 the DOS reads
+; it into DBUF, 1 raw, 2 raw and the second sector too. A raw block goes out as it is on the disk
+; (status 2, 325 bytes); the second one waits in RB2 for the next request.
 d_go:   sei
         tsx
         stx d_sp
@@ -1063,8 +1093,6 @@ d_go:   sei
         and #$60
         ora #$01
         sta d_exps              ; the port as send waits: host DATA low, nothing else
-        eor #$05
-        sta d_expr              ; and as recv waits: host CLK low, nothing else
         lda #$08
         sta PB                  ; running: CLK low
 @s:     lda PB                  ; the host pulls DATA: seen
@@ -1077,60 +1105,89 @@ d_go:   sei
         sta $0b
         ldy #0
         sty d_ck
-        lda $0205               ; (EXPERIMENT: reads only)
+        lda $0205
         cmp #OP_RD
         bne d_quit2
-        ; ---- read: the block taken raw after the last one (status 2: 325 raw bytes), or a job
-        lda $0b
-        jsr d_enc
-        lda d_pt
+        lda d_kt                ; the sector kept from the last pass, if it is the one asked for
+        sty d_kt                ; (it is good for one request)
         cmp $0a
-        bne @job
+        bne @cap
         lda d_k2
-        cmp d_e2
-        bne @job
+        cmp $020a
+        bne @cap
         lda d_k3
-        cmp d_e3
-        bne @job
+        cmp $020b
+        bne @cap
         inc d_nh
+        lda #<RB2
+        ldx #>RB2
+        jsr d_setp
+        lda #2
+        bne @go
+@cap:   lda #<DBUF
+        ldx #>DBUF
+        jsr d_setp
+        lda $020e
+        beq @job
+        lda $020a
+        sta d_e2
+        lda $020b
+        sta d_e3
+        jsr d_cap
+        bcs @job
+        lda $020e
+        cmp #2
+        bne @raw
+        lda #<RB2
+        ldx #>RB2
+        jsr d_setp
+        lda $020c
+        sta d_e2
+        lda $020d
+        sta d_e3
+        jsr d_cap
+        bcs @none
+        lda $0a
+        sta d_kt
+        lda $020c
+        sta d_k2
+        lda $020d
+        sta d_k3
+        jmp @raw
+@none:  inc d_nm
+@raw:   lda #<DBUF
+        ldx #>DBUF
+        jsr d_setp
         lda #2
         bne @go
 @job:   lda #OP_RD
         jsr d_job
 @go:    sta d_st
-        lda #0
-        sta d_pt
         ldy #0
-        lda d_st
         jsr d_send
         lda d_st
         cmp #1
-        beq @l
+        beq d_lp
         cmp #2
-        beq @l
+        beq d_lp
         jmp d_quit
-@l:     lda RB,y
+d_lp:
+d_l1:   lda DBUF,y
         jsr d_cksum
         jsr d_send
         iny
-        bne @l
+        bne d_l1
         lda d_st
         cmp #2
-        bne @ck
-@m:     lda RB+256,y
+        bne d_ck2
+d_l2:   lda DBUF+256,y
         jsr d_cksum
         jsr d_send
         iny
         cpy #69
-        bne @m
-@ck:    lda d_ck
+        bne d_l2
+d_ck2:  lda d_ck
         jsr d_send
-        ; the host's guess for the next block, if it gave one: take it while the host is busy
-        lda $020c
-        cmp #$ff
-        beq d_quit
-        jsr d_enc
-        jmp d_pre
 d_quit: ldx d_sp
         txs
         lda #0
@@ -1147,7 +1204,102 @@ d_job:  sta $02
         lda $02
         bmi @w
         sei
-d_rts:  rts
+        rts
+
+; d_cap: take the block whose header holds d_e2/d_e3 and the track's T3/T4, raw (325 bytes), to
+; where d_setp said. Carry set if it did not come by in two revolutions.
+d_cap:  lda #48
+        sta d_try
+@h:     jsr d_sync
+        bcs @f
+        ldy #0
+@hb:    bvc @hb
+        clv
+        lda $1c01
+        sta d_hd,y
+        iny
+        cpy #5
+        bne @hb
+        lda d_hd
+        cmp #$52
+        bne @n
+        lda d_hd+2
+        and #$0f
+        cmp d_e2
+        bne @n
+        lda d_hd+3
+        cmp d_e3
+        bne @n
+        lda d_hd+4
+        cmp $0209
+        beq @hit
+@n:     dec d_try
+        bne @h
+@f:     sec
+        rts
+@hit:   jsr d_sync
+        bcs @f
+        ldy #0
+d_d1:   bvc d_d1
+        clv
+        lda $1c01
+d_c1:   sta DBUF,y
+        iny
+        bne d_d1
+d_d2:   bvc d_d2
+        clv
+        lda $1c01
+d_c2:   sta DBUF+256,y
+        iny
+        cpy #69
+        bne d_d2
+        clc
+        rts
+
+
+d_st:   .res 1
+d_kt:   .res 1          ; the track, and the header bytes, of the sector kept in RB2 (0: none)
+d_k2:   .res 1
+d_k3:   .res 1
+d_e2:   .res 1
+d_e3:   .res 1
+d_try:  .res 1
+d_hd:   .res 5
+d_nh:   .res 1          ; (counters) sectors served from RB2, passes whose second sector missed
+d_nm:   .res 1
+d_sp:   .res 1
+d_ck:   .res 1
+d_exps: .res 1
+
+        .res (CHUNK - ((* - DRV) .mod CHUNK)) .mod CHUNK, 0
+d_end:
+.reloc
+BLOBLEN = d_end - DRV
+.assert BLOBLEN <= $200, error, "fast.s: the drive code outgrew two buffers"
+
+; ---------------------------------------------------------------------------------------
+; The rest of the drive code, above the two raw sectors (D2, the end of the BAM buffer)
+.segment "RODATA"
+blob2:
+.org D2
+.macro atn
+        bit PB
+        bpl :+
+        jmp d_quit
+:
+.endmacro
+
+; d_setp: A, X = lo, hi of where the raw sector goes (and is sent from)
+d_setp: sta d_c1+1
+        sta d_l1+1
+        sta d_c2+1
+        sta d_l2+1
+        stx d_c1+2
+        stx d_l1+2
+        inx
+        stx d_c2+2
+        stx d_l2+2
+        rts
 
 ; d_cksum: as cksum above
 d_cksum:
@@ -1162,67 +1314,6 @@ d_cksum:
         adc d_ck
         sta d_ck
         pla
-        rts
-
-d_st:   .res 1
-d_nh:   .res 1          ; (counters) blocks taken raw, prefetches missed
-d_nm:   .res 1
-d_np:   .res 1
-d_sp:   .res 1
-d_ck:   .res 1
-d_exps: .res 1
-d_expr: .res 1
-
-        .res (CHUNK - ((* - DRV) .mod CHUNK)) .mod CHUNK, 0
-d_end:
-.reloc
-BLOBLEN = d_end - DRV
-.assert BLOBLEN <= $200, error, "fast.s: the drive code outgrew two buffers"
-
-; ---------------------------------------------------------------------------------------
-; EXPERIMENT: the raw reader (more drive code, at D2). After a block has been sent, the drive
-; takes the next block of the chain straight off the disk (the header found by its sector, 325
-; raw bytes) and keeps it as it is; the host decodes. See docs/design/fast-io.md section 18
-; (the sync routine is the DOS's own sequence, and a byte loop must stay under the byte time).
-RB      = DBUF
-
-.macro atn
-        bit PB
-        bpl :+
-        jmp d_quit
-:
-.endmacro
-
-.segment "RODATA"
-blob2:
-.org D2
-; GCR code of each nibble
-d_et:   .byte $0a,$0b,$12,$13,$0e,$0f,$16,$17,$09,$19,$1a,$1b,$0d,$1d,$1e,$15
-
-; d_enc: A = a sector. d_e2, d_e3: the bytes a header with it holds, as far as the sector goes
-; (header byte 2 low nibble; byte 3 high six bits). Uses A, X.
-d_enc:  pha
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        tax
-        lda d_et,x              ; the code of the high nibble
-        sta d_c
-        pla
-        and #$0f
-        tax
-        lda d_et,x              ; the code of the low nibble
-        asl a
-        asl a
-        sta d_e3
-        lda d_c
-        lsr a
-        sta d_e2
-        lda #0
-        ror a                   ; the bit the first code lost
-        ora d_e3
-        sta d_e3
         rts
 
 ; d_sync: wait for sync and read the first byte as the DOS does ($F556). Carry set: none in
@@ -1245,81 +1336,8 @@ d_sync: lda #$ee
         clc
         rts
 
-; d_pre: take the block d_e2/d_e3 name, raw, into RB (325 bytes). On success d_pt, d_k2 and
-; d_k3 name it.
-d_pre:  inc d_np
-        lda #40
-        sta d_try
-@h:     jsr d_sync
-        bcs @fail
-        ldy #0
-@hb:    bvc @hb
-        clv
-        lda $1c01
-        sta d_hd,y
-        iny
-        cpy #5
-        bne @hb
-        lda d_hd
-        cmp #$52
-        bne @nx
-        lda d_hd+2
-        and #$0f
-        cmp d_e2
-        bne @nx
-        lda d_hd+3
-        and #$fc
-        cmp d_e3
-        bne @nx
-        lda d_hd+3
-        and #$03
-        cmp $0208
-        bne @nx
-        lda d_hd+4
-        cmp $0209
-        beq @hit
-@nx:    dec d_try
-        beq @fail
-        jmp @h
-@fail:  inc d_nm
-        jmp d_quit
-@hit:   jsr d_sync
-        bcs @fail
-        ldy #0
-@d1:    bvc @d1
-        clv
-        lda $1c01
-        sta RB,y
-        iny
-        bne @d1
-@d2:    bvc @d2
-        clv
-        lda $1c01
-        sta RB+256,y
-        iny
-        cpy #69
-        bne @d2
-        lda RB
-        cmp #$55
-        bne @fail
-        lda $0a
-        sta d_pt
-        lda d_e2
-        sta d_k2
-        lda d_e3
-        sta d_k3
-        jmp d_quit
-
-d_pt:   .res 1          ; the block taken raw: its track (0: none) and what its sector reads as
-d_k2:   .res 1
-d_k3:   .res 1
-d_e2:   .res 1
-d_e3:   .res 1
-d_c:    .res 1
-d_try:  .res 1
-d_hd:   .res 5
         .res (CHUNK - ((* - D2) .mod CHUNK)) .mod CHUNK, 0
 d_end2:
 .reloc
 BLOB2LEN = d_end2 - D2
-.assert BLOB2LEN <= $1b0, error, "fast.s: the second drive blob outgrew its buffers"
+.assert BLOB2LEN <= 96, error, "fast.s: the second drive blob outgrew its room"
