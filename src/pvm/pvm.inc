@@ -14,6 +14,10 @@ P_ESTKL = $15
 ; the IP the VM resumes at when it returns at $0103,x (low) and $0104,x (high): rewriting those
 ; two bytes makes the VM go on elsewhere (docs/design/pvm.md section 4).
 P_IFP   = $2D
+; For an XOP routine (pvm.s's XOP): the base of the bytecode being run, and the offset of its
+; last byte (an operand-reading routine advances P_IPY past what it consumes).
+P_IP    = $26
+P_IPY   = $2F
 
 .macro P_FUNC
         jsr pvm_interp
@@ -132,3 +136,4 @@ PO_NATV   = $C0
 PO_JUMPZ  = $C2
 PO_JUMP   = $C4
 PO_SYS    = $C6
+PO_XOP    = $C8          ; $C8-$FE: the program's native operations

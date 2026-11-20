@@ -72,6 +72,10 @@ class Abi(unittest.TestCase):
         drop = int(re.search(r"^DROP\s*=\s*\$([0-9A-F]+)", vm, re.M).group(1), 16)
         self.assertIn("IFP     = DROP + 10", vm)
         self.assertEqual(int(re.search(r"^P_IFP\s*=\s*\$([0-9A-F]+)", inc, re.M).group(1), 16), drop + 10)
+        self.assertIn("IP      = FETCHOP + 1", vm)
+        self.assertIn("IPY     = IFP + 2", vm)
+        self.assertEqual(int(re.search(r"^P_IP\s*=\s*\$([0-9A-F]+)", inc, re.M).group(1), 16), drop + 3)
+        self.assertEqual(int(re.search(r"^P_IPY\s*=\s*\$([0-9A-F]+)", inc, re.M).group(1), 16), drop + 12)
 
 
 class Refused(unittest.TestCase):
@@ -349,6 +353,64 @@ nine:   dex
         self.check("extern int sub2(int a, int b);\nextern int nine();\n"
                    'int main() { if (sub2(10, 3) == 7) if (sub2(nine(), 1 + sub2(5, 4)) == 7) if (1 + (2 + sub2(3, 3)) == 3)'
                    ' puts("Y"); return 0; }', natives=natives)
+
+    XOPS = """.include "pvm.inc"
+.export tk, xtab
+xtab:   .word x_one, x_addw, x_addk
+        .repeat 25
+        .word x_nop
+        .endrepeat
+x_nop:  rts
+x_one:  dex                     ; C8: push 1
+        lda #1
+        sta P_ESTKL,x
+        lda #0
+        sta P_ESTKH,x
+        rts
+x_addw: ldy P_IPY               ; CA w: TOS += w
+        iny
+        lda (P_IP),y
+        clc
+        adc P_ESTKL,x
+        sta P_ESTKL,x
+        iny
+        lda (P_IP),y
+        adc P_ESTKH,x
+        sta P_ESTKH,x
+        sty P_IPY
+        rts
+x_addk: ldy P_IPY               ; CC a b c: TOS += a + b + c
+        iny
+        lda (P_IP),y
+        iny
+        clc
+        adc (P_IP),y
+        iny
+        adc (P_IP),y
+        sty P_IPY
+        clc
+        adc P_ESTKL,x
+        sta P_ESTKL,x
+        bcc :+
+        inc P_ESTKH,x
+:       rts
+tk:     P_FUNC
+        P_CN 0
+        .repeat 150             ; 300 bytes: past a page of IP, which each XOP starts over
+        .byte $C8
+        P_OP PO_ADD
+        .endrepeat
+        .byte $CA
+        .word 1000
+        .byte $CC, 1, 2, 3
+        P_OP PO_RET
+"""
+
+    def test_an_xop_runs_through_the_program_vector_table(self):
+        # /* xops */ puts the program's xtab 56 bytes under its frame stack; $C8 + 2 * i calls
+        # entry i with X the eval stack index, operand bytes after it, and IP renormalised after
+        r = run_full("/* xops */\nextern int tk();\nint main() { if (tk() == 1156) return 0; return 1; }\n", natives=self.XOPS)
+        self.assertEqual(r.exit, 0, r.out)
 
 
 class L3aRefused(unittest.TestCase):

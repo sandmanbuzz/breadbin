@@ -27,6 +27,7 @@
 ; - ENTER spills the caller's pending eval-stack entries to the frame stack when fewer than
 ;   ESRESERVE would be free, LEAVE restores them under any number of results; an eval stack
 ;   index out of range at a call or return traps (exit ENOMEM).
+; - XOP (opcodes $C8-$FE): the program's own native operations, one byte each (docs/design/pvm.md).
 ; - SYS n (opcode $C6): a Breadbin syscall, the eval stack saved around it (on the frame stack).
 ; - no module loader, no cmd, no IINTERP. The VM is a shared library (CX format 3, /lib/pvm): pure
 ;   code, every byte of state in the process's zero page or frame stack; the image starts with the
@@ -217,6 +218,46 @@ OPTBL:  .word CN,CN,CN,CN,CN,CN,CN,CN                           ; 00 02 04 06 08
         .word ADDLB,ADDLW,ADDAB,ADDAW,IDXLB,IDXLW,IDXAB,IDXAW   ; B0 B2 B4 B6 B8 BA BC BE
         .word NATV,JUMPZ,JUMP,SYS                               ; C0 C2 C4 C6
 .assert * - OPTBL = OP_SYS + 2, error, "SYS is not at its opcode"
+        .word XOP,XOP,XOP,XOP,XOP,XOP,XOP,XOP                   ; C8 CA CC CE D0 D2 D4 D6
+        .word XOP,XOP,XOP,XOP,XOP,XOP,XOP,XOP                   ; D8 DA DC DE E0 E2 E4 E6
+        .word XOP,XOP,XOP,XOP,XOP,XOP,XOP,XOP                   ; E8 EA EC EE F0 F2 F4 F6
+        .word XOP,XOP,XOP,XOP                                   ; F8 FA FC FE
+.assert * - OPTBL = 256, error, "the opcode table is one page"
+
+; XOP ($C8-$FE, the program's own operations): a native routine behind a one-byte opcode. The
+; program keeps a vector table of 28 words in the 56 bytes just below the bottom of its frame
+; stack (flim); the vector for opcode op is at flim - 256 + op. The routine is called with JSR as a
+; CALL'd native is (X is the eval stack index and may move; A, Y and TMP are free) and RTSes; IP
+; and IPY are in zero page, IPY the offset of the last byte the op owns (its own opcode, or its
+; operand bytes: a routine that reads operands advances IPY past them). The VM then renormalises
+; IP, as a CALL does, so straight-line counts start again. Not for code that redirects control:
+; that stays a CALL, which has the return address on the stack.
+XOP:    sty IPY
+        lda flim
+        clc
+        adc OPIDX
+        sta TMP
+        lda flim+1
+        adc #$FF
+        sta TMP+1
+        ldy #0
+        lda (TMP),y
+        pha
+        iny
+        lda (TMP),y
+        sta TMP+1
+        pla
+        sta TMP
+        jsr JMPTMP
+        ldy IPY
+        tya
+        sec
+        adc IP
+        sta IP
+        bcc :+
+        inc IP+1
+:       ldy #0
+        jmp FETCHOP
 
 _DIV:   sty IPY
         ldy #$11                ; bits + 1

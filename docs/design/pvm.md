@@ -170,9 +170,23 @@ Ported changes, each forced by §1:
    set; `pvm_errno` is 0 after a successful call. The eval stack is copied to the frame stack and back around the call (an allocation like any
    other: a full frame stack exits with `ENOMEM`) (`tools/asim.py` now trashes
    `$08–$1F` on every syscall, so the simulator checks this).
-5. **Numbers.** Fixed point (format chosen at L3) as runtime calls first; opcodes in the free
+5. **XOP: the program's own opcodes** (owner 2026-11-20: "the time to add stuff is now"). The 28
+   opcodes `$C8`-`$FE` are a native call in one byte. A program that wants them keeps a table of
+   28 words in the 56 bytes just under its frame stack (`flim`; the vector for opcode `op` is at
+   `flim - 256 + op`), so the VM carries no per-program state and the opcode table stays one
+   page. cc_pcode does it for a source with a `/* xops */` line: it reserves the 56 bytes and
+   copies the program's exported `xtab` there at start-up. The routine is entered by `JSR`, as a
+   CALL'd native is (X is the eval stack index; A, Y and TMP are free) and `RTS`es. `P_IP` and
+   `P_IPY` (`pvm.inc`) give it the bytecode base and the offset of the op's last byte; one that
+   has operands reads them from there and advances `P_IPY` past them. The VM then adds IPY + 1 to
+   IP, as a CALL does, so straight-line counting starts over. Cost: about 100 bytes of VM (the 56 bytes
+   of opcode table and the handler) and 56 of the program's own. What an XOP cannot do is redirect control (it has no
+   return address on the stack): GOSUB/FOR/RETURN-like transfers stay CALLs. bas uses it for
+   variable loads and stores (3 bytes, was 6), constants (5, was 9), every arithmetic op and
+   line markers (1 byte, was 3).
+6. **Numbers.** Fixed point (format chosen at L3) as runtime calls first; opcodes in the free
    range only if L3 measures a need. FP reserves opcodes, nothing more.
-6. **Licence record.** The ported file keeps the MIT notice and the upstream URL and commit in its
+7. **Licence record.** The ported file keeps the MIT notice and the upstream URL and commit in its
    header, and the adoption is recorded here and in `docs/design/fast-io.md` §4, as the licence
    policy asks.
 

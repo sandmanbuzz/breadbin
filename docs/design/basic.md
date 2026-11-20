@@ -185,6 +185,50 @@ loader.
 `ultimate` lock, when it is free) of `bas` typed at the shell and the acceptance listings,
 to catch assumptions VICE and py65 share. Not a per-slice gate.
 
+### 6.1 Runnable size: the plan (owner direction 2026-11-20)
+
+A `16128 BYTES FREE` that runs a third of that is not acceptable; the shell leaves about 31 KB.
+Options the owner listed: a separate code arena, a resident runtime, the compiler as a child that
+is released when done, immediate mode split from the compiler.
+
+*Where the bytes are* (L3c tip, from the object sizes): the compiler and editor about 7.5 KB
+(p-code 7.1 KB and natives 2.5 KB, less the 2 KB the running program needs: the number core,
+`rt_*`, `c_fmt`); runtime about 2 KB; buffers and stacks about 1.5 KB; the VM library 2.5 KB
+(shared); the arena 16 KB. At `RUN` three things are live: the text T, the code C (about 2 T
+today) and the compiler K. **The peak is T + C + K, and only the peak limits a program.** So:
+
+- A separate code arena adds nothing alone (T + C shares one pool either way).
+- A resident runtime or a compiler child frees K (7.5 KB) *after* compiling: room for variables,
+  arrays and strings at run time, but not for a larger program. A child gains about 2 KB at the
+  peak (the runtime is not needed while compiling); it pays a load per `RUN`, instant with the
+  REU cache or UCI, seconds on a bare 1541.
+- Splitting immediate mode out of the compiler does not shrink K (a line is compiled the same way).
+
+*Levers on the peak, in order of return:*
+1. **Denser code (C about 1.1 T).** Every number operation is a 3-byte `CALL` today and a
+   variable access 6; `A=A+B*2` is about 30 bytes of code for 8 of text. One-byte opcodes for the
+   numeric operations (the VM's free opcode range, a native table behind them) and a 2-byte
+   variable load halve C. At the same arena T + C = 16 KB gives T about 7.5 KB (5.4 KB today), and
+   the compiler emits and the VM runs fewer bytes, which is also the compile-speed lever.
+   *Landed (2026-11-20, XOPs, `pvm.md` section 4 item 5):* 289 lines of a mixed test program
+   fit where 208 did (+39%). It cost about 350 bytes (the VM table and handler, the routines, a
+   56-byte vector table) and a library page, so the arena is 16,128 bytes, not 16,384, to keep
+   the load at the shell. The code is still well above 1.1 T: the next gain is in what is left
+   (`PRINT` strings, `FOR`/`GOSUB` as calls, `IF` branches) and in K.
+2. **A smaller K.** Native `getline`, `cline`, `var`, `constant`, `match` and `move` (the profile's
+   top entries) cost less than the p-code they replace; each KB of K is 0.3 KB of T.
+3. **Compile to a file, run from a runner.** `bc prog.bas` writes dense code; a runner holding
+   only the runtime (2 KB) and the VM runs it with about 24 KB for code (about 20 KB of source
+   equivalent), no text, no compiler. Interactive `bas` stays the small-program path; the
+   file route is the big-program path, and the SDK story (L3f). Needs code that is position-bound
+   to a load base and an entry table for the runtime (a build id check).
+4. **REU/Recommended tiers** may spill text or code; never required.
+Rejected: dropping T and decompiling `LIST` from code (loses REM text and layout; heavy).
+
+*Order:* 1 and 2 first (they also fix compile speed), measured against the fixture; then 3. The
+banner stays `BYTES FREE` = arena minus text until the code is dense enough that it is honest to
+within about 10 %.
+
 ## 7. Open questions
 
 - **Compile speed.** The compiler is p-code, at the VM's speed. *Estimate:* a 100-line

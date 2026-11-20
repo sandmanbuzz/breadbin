@@ -16,26 +16,12 @@
    opcode is written as its number with its name in a comment, which tools/test_bas.py checks
    against src/pvm/pvm.inc. */
 
+/* xops */
 /* fstack 768 */   /* the VM's frame stack: 256 bytes under the 1024 default, for memory (cc_pcode) */
 
 extern int rt_mark();   /* bas-rt.s, for the compiled code: these take their arguments from the */
 extern int rt_go();     /* eval stack and the number stack as the comments there say; the */
 extern int rt_ln();     /* compiler only takes their addresses */
-extern int n_ldv();
-extern int n_ldk();
-extern int n_stv();
-extern int n_add();
-extern int n_sub();
-extern int n_mul();
-extern int n_div();
-extern int n_neg();
-extern int n_abs();
-extern int n_int();
-extern int n_sgn();
-extern int n_fromi();
-extern int n_toi();
-extern int n_cmp();
-extern int n_tst();
 extern int c_ldv(char *p);      /* bas-rt.s, for the mini C: one result each */
 extern int c_stv(char *p);
 extern int c_add();
@@ -63,8 +49,10 @@ extern int c_room(int n);
 extern int c_op1(int b);
 extern int c_opw(int b, int w);
 extern int c_ncall(char *f);
+extern int c_xop(int b);
+extern int c_xopw(int b, int w);
 
-char mem[16384];        /* MEM: the arena (keep the two in step) */
+char mem[16128];        /* MEM: the arena (keep the two in step) */
 int ptop;               /* the program text: [0, ptop); per line its number (low, high), length,
                            the offset of its code (low, high), then the text */
 int pend;               /* the program's code: [ptop, pend); 0 when out of date */
@@ -252,7 +240,7 @@ int move(char *d, char *s, int n) {
 }
 
 int clearv() {          /* no variables, and the compiled program is out of date */
-    vbot = 16384;
+    vbot = 16128;
     pend = 0;
     return 0;
 }
@@ -263,7 +251,7 @@ int store(int n, int t, int len) {  /* line n is lbuf from t, len bytes; none de
     int add = 0;
     if (p < ptop && lineno(p) == n) old = next(p) - p;
     if (len) add = len + 6;
-    if (ptop - old + add > 16384) {
+    if (ptop - old + add > 16128) {
         fail(2);
         return 0;
     }
@@ -504,7 +492,7 @@ int epush(int d) {
 
 int tonum(int k) {
     if (k == 2) {
-        c_ncall(&n_fromi);
+        c_xop(226 /* x FROMI */);
         epush(-1);
         npush(1);
     }
@@ -513,7 +501,7 @@ int tonum(int k) {
 
 int toint(int k) {
     if (k == 1) {
-        c_ncall(&n_toi);
+        c_xop(228 /* x TOI */);
         npush(-1);
         epush(1);
     }
@@ -537,7 +525,7 @@ int var() {             /* the variable at si (a letter): its value's address, m
         vint = 1;
         c2 = c2 | 128;
     } else if (src[si] == '$') fail(1);       /* strings come with L3d */
-    while (p < 16384) {
+    while (p < 16128) {
         if (mem[p] == c1 && mem[p + 1] == c2) return addr(p + 2);
         p = p + 6 - (mem[p + 1] & 128) / 64;
     }
@@ -599,20 +587,18 @@ int constant() {        /* a number at si: digits, a point, digits (spaces among
     if (o) fail(4);
     if (!big && !(f[0] | f[1] | f[2] | f[3] | r)) {
         pushint(ip);
-        c_ncall(&n_fromi);
+        c_xop(226 /* x FROMI */);
         return npush(1);
     }
-    c_room(2);
-    c_emit(46 /* PO_CS */);
-    c_emit(4);
+    c_room(5);
+    c_emit(204 /* x LDK */);
     for (i = 0; i < 4; i = i + 1) c_emit(kbuf[i]);
-    straight = 5;       /* CS moves the base to the string: the next op is past it */
-    c_ncall(&n_ldk);
+    straight = 0;       /* the VM renormalises IP past the operand */
     return npush(1);
 }
 
 int deep;
-int fn(char *f) {       /* a function of one number: f(...) */
+int fn(int f) {       /* a function of one number: f(...) */
     c_sp();
     if (src[si] != '(') {
         fail(1);
@@ -622,7 +608,7 @@ int fn(char *f) {       /* a function of one number: f(...) */
     if (deep > 15) fail(11);
     else tonum(primary());
     deep = deep - 1;
-    c_ncall(f);
+    c_xop(f);
     return 1;
 }
 
@@ -638,17 +624,16 @@ int primary() {
         return k;
     }
     if (c_digit() || src[si] == '.') return constant();
-    if (c_tok(128 /* tk ABS */)) return fn(&n_abs);
-    if (c_tok(137 /* tk INT */)) return fn(&n_int);
-    if (c_tok(148 /* tk SGN */)) return fn(&n_sgn);
+    if (c_tok(128 /* tk ABS */)) return fn(222 /* x ABS */);
+    if (c_tok(137 /* tk INT */)) return fn(220 /* x INT */);
+    if (c_tok(148 /* tk SGN */)) return fn(224 /* x SGN */);
     if (c_letter()) {
         k = var();
         if (vint) {
             c_opw(106 /* PO_LAW */, k);
             return epush(1);
         }
-        c_opw(44 /* PO_CW */, k);
-        c_ncall(&n_ldv);
+        c_xopw(200 /* x LDV */, k);
         return npush(1);
     }
     fail(1);
@@ -676,7 +661,7 @@ int operand() {         /* a primary, or - + NOT and theirs. Each ( and unary op
         if (c == '-') {         /* binds looser than ^, as MS: -2^2 is -4 */
             si = si + 1;
             tonum(climb(10));
-            c_ncall(&n_neg);
+            c_xop(216 /* x NEG */);
         } else if (c == '+') {
             si = si + 1;
             k = climb(10);
@@ -730,7 +715,7 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
             if (m == 7) fail(1);
             tonum(k);
             tonum(climb(7));
-            c_ncall(&n_cmp);
+            c_xop(218 /* x CMP */);
             npush(-2);
             epush(1);
             c_op1(0 /* PO_CN 0 */);
@@ -751,10 +736,10 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
         tonum(k);
         tonum(climb(p + 1));
         if (c == '^') ecall(&rt_pow);
-        else if (c == '*') c_ncall(&n_mul);
-        else if (c == '/') c_ncall(&n_div);
-        else if (c == '+') c_ncall(&n_add);
-        else c_ncall(&n_sub);
+        else if (c == '*') c_xop(212 /* x MUL */);
+        else if (c == '/') c_xop(214 /* x DIV */);
+        else if (c == '+') c_xop(208 /* x ADD */);
+        else c_xop(210 /* x SUB */);
         k = npush(-1);
     }
     return k;
@@ -774,8 +759,7 @@ int assign(int a, int isint, int k) {
         return 0;
     }
     tonum(k);
-    c_opw(44 /* PO_CW */, a);
-    c_ncall(&n_stv);
+    c_xopw(202 /* x STV */, a);
     npush(-1);
     return 0;
 }
@@ -885,7 +869,7 @@ int gotol() {
 int ifs_() {            /* IF e THEN n | statements, IF e GOTO n: false goes to the next line */
     int k = expr();
     if (k == 1) {
-        c_ncall(&n_tst);
+        c_xop(230 /* x TST */);
         npush(-1);
         epush(1);
     }
@@ -937,7 +921,7 @@ int fors() {            /* FOR v = a TO b [STEP c] */
     if (c_tok(149 /* tk STEP */)) tonum(expr());
     else {
         c_op1(2 /* PO_CN 1 */);
-        c_ncall(&n_fromi);
+        c_xop(226 /* x FROMI */);
         npush(1);
     }
     c_room(9);            /* so that the body is 10 bytes on */
@@ -1055,7 +1039,7 @@ int cline(int p) {      /* compile the line at p */
         fln[i] = fln[nfix];
     }
     cur = n;
-    c_ncall(&rt_ln);
+    c_xop(206 /* x LN */);
     src = mem + p + 5;
     si = 0;
     nd = 0;
@@ -1165,7 +1149,7 @@ int immediate() {       /* compile the line after the program's code (compiling 
     ed = 0;
     nif = 0;
     prologue();
-    c_ncall(&rt_ln);
+    c_xop(206 /* x LN */);
     stmts();
     endline();
     finish();
@@ -1219,7 +1203,7 @@ int command() {         /* a line without a number */
         si = 0;
         at = ptop;
         prologue();
-        c_ncall(&rt_ln);
+        c_xop(206 /* x LN */);
         stmts();
         endline();
         finish();

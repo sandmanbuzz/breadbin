@@ -47,6 +47,9 @@ L3a (docs/design/basic.md section 4) adds, to this back end only:
 A source comment `/* fstack N */` at the start of a line sets the program's frame stack to N bytes (default 1024, 128 to 8192); a
 program that knows its depth gives back the rest (bas takes 768).
 
+A source line `/* xops */` makes the program keep the VM's XOP vector table (pvm.s) under its
+frame stack, copied at start from `xtab`, which the program's natives export.
+
 A compare that decides a branch is the VM's compare and a `BRTRU`/`BRFLS`, with no `NEG`.
 
 Signed semantics are the native back end's: `int` is signed, so `<` `>` `<=` `>=` compare signed
@@ -69,6 +72,18 @@ STRAIGHT = 240                       # most bytecode bytes past the IP base befo
 
 SIZE = {"P_CN": 1, "P_OP": 1, "P_B": 2, "P_W": 3, "P_BR": 3, "P_ENTER": 3, "P_SYS": 2}
 
+# A program with `/* xops */` keeps the vector table of the VM's XOP opcodes (pvm.s) in the 56
+# bytes under the bottom of its frame stack, copied at start from `xtab` (28 words, which the
+# program's natives define and export).
+XOPS = {False: {"xres": "", "xinit": "  ", "xoff": ""},
+        True: {"xres": " + 56", "xoff": " + 56", "xinit": """
+        .import xtab
+        ldy #55
+@x:     lda xtab,y
+        sta cc_fstk,y
+        dey
+        bpl @x
+        """}}
 PRELUDE = """\
 ; compiled by tools/cc.py --pcode: p-code for /lib/pvm (CX format 2)
 .include "breadbin.inc"
@@ -80,13 +95,13 @@ SYSN_CLOSE = (SYS_CLOSE - SYS_BASE) / 3
 SYSN_EXIT = (SYS_EXIT - SYS_BASE) / 3
 SYSN_ISATTY = (SYS_ISATTY - SYS_BASE) / 3
 .segment "BSS"
-cc_fstk: .res {fstack}
+cc_fstk: .res {fstack}{xres}
 cc_fend:
 .segment "CODE"
 ; native entry: the VM with its frame stack, then main; main's value is the exit status
-start:  lda #<cc_fstk
+start:{xinit}  lda #<(cc_fstk{xoff})
         sta r0
-        lda #>cc_fstk
+        lda #>(cc_fstk{xoff})
         sta r0+1
         lda #<cc_fend
         ldy #>cc_fend
@@ -179,9 +194,10 @@ class Local(Var):
 
 
 class PGen(cc.Gen):
-    def __init__(self, funcs, fstack=FSTACK):
+    def __init__(self, funcs, fstack=FSTACK, xops=False):
         super().__init__(funcs)
         self.fstack = fstack
+        self.xops = xops
         self.helpers = set()
         self._need = {}
         self.loops = []                  # (break label, continue label), innermost last
@@ -272,7 +288,7 @@ class PGen(cc.Gen):
         helpers = "".join(HELPERS[h] for h in HELPERS if h in self.helpers)
         if self.externs:    # the natives may share the globals, by their labels
             helpers += "".join(f".export {v.label}\n" for v in self.globals.values())
-        return (PRELUDE.format(fstack=self.fstack) + "\n".join(self.out) + "\n" + helpers
+        return (PRELUDE.format(fstack=self.fstack, **XOPS[self.xops]) + "\n".join(self.out) + "\n" + helpers
                 + '.segment "DATA"\n' + self.strings_text() + "\n".join(self.gdata) + "\n"
                 + '.segment "BSS"\n' + "\n".join(self.gres) + "\n" + '.segment "CODE"\n')
 
@@ -817,7 +833,7 @@ def compile_pcode(src, fstack=None):
             if name in seen:
                 raise CompileError(f"line {line}: function {name} is defined twice")
             seen.add(name)
-        return PGen(funcs, fstack).program(funcs, globs)
+        return PGen(funcs, fstack, bool(re.search(r"^/\*\s*xops\s*\*/", src, re.M))).program(funcs, globs)
     except RecursionError:
         raise CompileError("expression nested too deeply for the compiler") from None
     finally:
