@@ -369,3 +369,21 @@ For the drive without a JiffyDOS ROM. A kernel module, so it costs the kernel no
 3. Fast uploader and direct writes only if step 2 shows the gain.
 
 Not run: nothing here was executed on a drive; the cycle figures and the roles marked "believed" above are hypotheses until step 1 and 2.
+
+### 18.5 Where a `fast.km` block's time goes (measured 2026-11-20, VICE, stock 1541 ROM)
+
+Method: a throwaway patch to `ft_read` stamped the kernel's `ticks` (100 per second here, calibrated against the emulated cycle counter) at six points and summed the differences per phase; read back after `wc` of a 12-block file with the module loaded. 44 blocks were carried by that command (the file, its inode and indirect block, and the command's own binary). Real speed, host VICE; warp mode changes the cycle count and is not usable for timing. Resolution is 10 ms per stamp, so read each figure as plus or minus about 10 ms; two runs agree within 15 ms.
+
+| per block carried | ms (blocks of the file 1 apart / 5 apart) |
+|---|---|
+| probe (`ft_ready`) | 0 / 0 |
+| `M-E` sent, drive code started, handshake | 24 / 23 |
+| **job wait (drive reads the sector)** | **226 / 209** |
+| status byte | 0 / 0 |
+| 256 bytes and checksum | 57 / 56 |
+| total inside `ft_read` | 306 / 288 |
+
+- **The job wait is about 70% of a block**, and about a full revolution (200 ms) on average. Sequential blocks are physical neighbours (the kernel maps block n to consecutive sectors), so the sector after the one just read has passed under the head by the time the next request arrives.
+- The 5-apart file barely helped because only 12 of the 44 blocks were the strided file; the rest were sequential misses. An earlier stride sweep (1 to 13) gave 346 to 522 ms per block for the whole command and had the same flaw. Do not quote it as a floor.
+- **Consequence for the plan:** the transfer (57 ms) and the command (24 ms) are small beside the wait. The first lever is therefore **read-ahead**: have the drive start the job for the next block into the spare buffer while the current one crosses the bus, so a sequential block pays the transfer, not the revolution. A direct-GCR reader (18.2) matters second: it lets the drive catch the next header at once instead of waiting for the job queue's next pass, which decides whether read-ahead gets close to the transfer time or stays near one revolution per block. A faster bus helps last.
+- Not measured: writes (verify doubles the job time), the JiffyDOS drive ROM, the physical 1541, and the host's own time outside `ft_read` (about 50 ms per block by difference).
