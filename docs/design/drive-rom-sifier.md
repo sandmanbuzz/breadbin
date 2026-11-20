@@ -117,10 +117,10 @@ The U2 write path enters ~WRIGHT~ at ~$F56E~. That routine and its ~JSR $F510~ h
 
 A behavior-preserving 32 KiB test image can validate the ROM bank layout and hook ABI before any real read optimization is written:
 
-`python3 tools/sjd41/read_hook_smoke.py \\
-  --base JiffyDOS_6.01-1541-and-1541-II.bin \\
-  --output /tmp/breadbin-read-hook-smoke.bin \\
-  --extension-output /tmp/breadbin-read-hook-extension.bin \\
+`python3 tools/sjd41/read_hook_smoke.py \
+  --base JiffyDOS_6.01-1541-and-1541-II.bin \
+  --output /tmp/breadbin-read-hook-smoke.bin \
+  --extension-output /tmp/breadbin-read-hook-extension.bin \
   --manifest-output /tmp/breadbin-read-hook-smoke.json`
 
 The only patch is `$F4D1`: stock `JSR $F50A` becomes `JSR $B000`. The extension trampoline at `$B000` is `JMP $F50A`, so the original JiffyDOS routine executes unchanged and returns to the original caller. The rest of the 16 KiB extension bank is `$FF`. This is strictly an emulator smoke test: it adds no feature or speedup and must not be burned as a production ROM.
