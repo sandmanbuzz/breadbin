@@ -160,7 +160,7 @@ A clean-room interpreter was run against the supplied D64 and ROM binaries, with
 - `$EBC3-$EBC4`
 - `$FA32-$FA37`
 
-The generated bank SHA-256 is `3f7151c402d60a00308d1a0a10b34c28bbe5bad3b1c5851e1435a84c85d37f97`. This is a strong confirmation of the record format and stage ordering, but not yet an exact reproduction of the supplied SJD image. The nine bytes remain an open discrepancy; do not paper over them with guessed patches.
+The generated bank SHA-256 is `3f7151c402d60a00308d1a0a10b34c28bbe5bad3b1c5851e1435a84c85d37f97`. This is a strong confirmation of the record format and stage ordering, but not yet an exact reproduction of the supplied SJD image. The nine differences are now better classified: six bytes at `$FA32-$FA37` coincide exactly with the known 1541C-vs-1541-II track-zero routine area. Wolfgang Moser's ROM comparison documents the 1541C track-zero sensor hook at `$FA32` and its supporting routine at `$FF36`, which the 1541-II ROM lacks; SJD41's own hook changes the corresponding bytes in the supplied SJD image. This strongly indicates that the supplied JD base is the 1541-II variant while the comparison target is a 1541C-derived SJD image. The remaining three bytes (`$EAD5`, `$EBC3-$EBC4`) remain unexplained. Do not paper over them with guessed patches. See [1541C-to-1541-II ROM comparison](https://www.zimmers.net/anonftp/pub/cbm/firmware/drives/new/1541/1541C-to-1541-II.txt).
 
 One Stage 3 record starts at C64 address `$7FFF` and is 102 bytes long, so the interpreter writes through `$8064`. The generator subsequently saves only `$6000-$7FFF` as the 8 KiB output file. Only the first byte of that record is therefore in the saved bank; the remaining 101 bytes are written beyond it. The purpose of this spill is not yet established and should be investigated rather than silently discarded.
 
@@ -168,7 +168,7 @@ One Stage 3 record starts at C64 address `$7FFF` and is 102 bytes long, so the i
 
 The first-stage BASIC program also manually patches its captured C000-DFFF buffer at C64 addresses around `$6070`, `$609F`, `$6D92`, `$7367`, and `$7CBB`, then saves `(C)CMD/C/C0-DF`.
 
-Applying those literal patch locations to the C000-DFFF half of the supplied JD binary does **not** reproduce the supplied SJD image's C000-DFFF bank: 68 bytes still differ (67 bytes in `$C010-$C054`, plus one at `$C0AD`). The generator's first stage reads the live drive address space, so the supplied 16 KiB JD file may not be the complete source for that captured bank, or the image/model mapping still needs another correction. The actual C000-DFFF capture is the authoritative input; this discrepancy remains open.
+Applying those literal patch locations to the C000-DFFF half of the supplied JD binary does **not** reproduce the supplied SJD image's C000-DFFF bank: 68 bytes still differ (67 bytes in `$C010-$C054`, plus one at `$C0AD`). The six-byte E-bank discrepancy above proves that the supplied JD image and SJD comparison image are not a clean same-model pair. A model-specific C-bank baseline is therefore a strong candidate explanation, but the exact 68-byte provenance is not yet established. The generator's first stage reads the live drive address space, so the actual C000-DFFF capture is authoritative; obtain that capture from the matching 1541C/JD configuration before treating these differences as SJD-specific patches.
 
 The helper's initial copy of C64 `$E000-$FFFF` to `$4000-$5FFF` is separate from the record interpreter. The helper does not subsequently reference that copied range in its visible code; its purpose is also still open.
 
@@ -206,9 +206,9 @@ It makes two passes, each loading four 8 KiB files into C64 memory pages `$20`, 
 
 The `41OLD-HIG` and `41OLD-LOW` generators are separate outputs for the old 1541's two-ROM configuration. Their input selection differs; do not assume the C/2 concatenation layout applies to them.
 
-## Compatibility caveat
+## Compatibility and model caveat
 
-The first-stage program's literal check is `JIFFYDOS 5.0 1541`, while the local binary under analysis has been identified by filename/hash as JiffyDOS 6.01. Before claiming the generator can consume that exact local image, compare the embedded version/signature bytes and run the generator's read/patch logic against a controlled copy. The supplied SJD41 image's similarity to the supplied JD image is strong evidence of family relationship, but not a substitute for proving this generator's accepted input.
+The first-stage program's literal check is `JIFFYDOS 5.0 1541`. The user confirms that JiffyDOS drive ROMs did not rev from 5.0 to 6.x and that the drive ROM binaries are byte-identical, so this literal status string is the expected signature and is not a 5.x-only restriction. The remaining compatibility question is **drive-ROM model baseline**, not JiffyDOS release number: the local 16 KiB JD image is labelled for 1541/1541-II, while the comparison target is explicitly a 1541C S-JiffyDOS image. The documented 1541C/1541-II track-zero differences explain six of the nine E-bank mismatches. Do not infer that one model's captured C000-DFFF bank is interchangeable with the other.
 
 ## Next reverse-engineering work
 
