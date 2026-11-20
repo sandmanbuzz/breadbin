@@ -176,6 +176,21 @@ The helper's initial copy of C64 `$E000-$FFFF` to `$4000-$5FFF` is separate from
 
 `tools/sjd41/generator_records.py` parses the supplied 35-track D64, finds the three PRGs, extracts record metadata without printing payload bytes, applies Stage 1 and Stage 3 to a user-supplied JD image, and optionally compares/writes the resulting E000-FFFF bank. No ROM bytes or extracted patch payloads are embedded in the tool.
 
+Run the local reconstruction/inspection tool from the repository root:
+
+```sh
+python3 tools/sjd41/generator_records.py \
+  --disk /path/to/ajnsjd41.d64 \
+  --jd-rom /path/to/JiffyDOS_6.01-1541-and-1541-II.bin \
+  --compare-sjd /path/to/S-JiffyDOS_1541C_v1.bin \
+  --output /tmp/sjd-e000.bin \
+  --summary-only
+```
+
+The output file is only the reconstructed 8 KiB E000-FFFF bank, not a complete drive ROM. The tool reports the nine-byte comparison discrepancy and the 101-byte spill separately. Parser tests live in `tests/test_sjd41_generator_records.py`.
+
+
+
 ## Final EPROM generator: 1541C / 1541-II
 
 `EP-GEN/41C&2(NEW` defines the following input files in its REM header:
