@@ -73,11 +73,11 @@ The correct drive-side generator disk, `ajnsjd41.d64`, is now parsed and its sta
 
 The shared 138-byte helper interprets records as destination-low, destination-high, length, payload; a zero length byte means 256 bytes. Each BASIC generator contains its record table as a binary trailer immediately after the BASIC end marker.
 
-Applying Stage 1 and Stage 3 to the supplied JD image reconstructs the SJD E000-FFFF bank with only nine differing bytes from the supplied SJD binary: `$EAD5`, `$EBC3-$EBC4`, and `$FA32-$FA37`. This is strong validation of the stage order and record interpreter, but not an exact byte-for-byte reproduction yet. One Stage-3 record writes 102 bytes starting at `$7FFF`, spilling 101 bytes beyond the 8 KiB saved bank; the spill's purpose is unresolved.
+Applying Stage 1 and Stage 3 to the supplied JD image reconstructs the SJD E000-FFFF bank with only nine differing bytes from the supplied SJD binary: `$EAD5`, `$EBC3-$EBC4`, and `$FA32-$FA37`. The six-byte `$FA32-$FA37` range coincides with the documented 1541C-versus-1541-II track-zero routine difference: the 1541C has a track-zero sensor hook that the 1541-II ROM lacks. This indicates the supplied JD base and SJD comparison target are different model baselines, not a failed record interpreter. The remaining three bytes are still unresolved. One Stage-3 record writes 102 bytes starting at `$7FFF`, spilling 101 bytes beyond the 8 KiB saved bank; the spill's purpose is unresolved.
 
-The C000-DFFF bank is also not yet fully reproducible from the supplied JD file plus the visible first-stage manual POKEs: 68 bytes still differ from the supplied SJD image (67 at `$C010-$C054`, one at `$C0AD`). The generator captures the live drive memory, so this is an important source/model discrepancy, not something to paper over with guessed patches.
+The C000-DFFF bank is also not yet fully reproducible from the supplied JD file plus the visible first-stage manual POKEs: 68 bytes still differ from the supplied SJD image (67 at `$C010-$C054`, one at `$C0AD`). Given the confirmed 1541C/1541-II mismatch in the upper bank, a model-specific C-bank baseline is the leading explanation, but the exact provenance of these 68 bytes remains unproven. The generator captures live drive memory; a matching 1541C/JD capture is the authoritative input.
 
-See `docs/research/sjd41-generator-disk.md` for the full evidence and the local inspector invocation.
+See `docs/research/sjd41-generator-disk.md` for the full evidence and the local inspector invocation. The model distinction is documented in [Wolfgang Moser's 1541C-to-1541-II ROM comparison](https://www.zimmers.net/anonftp/pub/cbm/firmware/drives/new/1541/1541C-to-1541-II.txt).
 
 ## Next implementation gates
 
