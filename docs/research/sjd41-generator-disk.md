@@ -248,7 +248,7 @@ Run the scanner with:
 
 The `$E91D-$E998` replacement is part of the serial-bus/ATN handling area, not the GCR decoder. It accesses VIA1 registers `$1800`, `$1801`, and `$180D`, and calls the `$E9xx` plus `$FEF3/$FEFB` helpers; the exact SJD-specific behavior remains to be mapped. The nearby `$E781-$E7A1` change also reconfigures VIA1 and appears related to this bus/ATN path.
 
-The first three entries are the key SJD extension call-ins, but they are not all read paths: `$A003` is reached from FORMAT, `$B4DD` extends the disk-full/track search to 40 tracks, and `$B842` replaces next-sector allocation. The GCR-to-HD LOAD optimization is a separate in-place routine at `$E91D-$E998`. This corrects the earlier tentative classification of `$FB15` as a fast-load hook.
+The first three entries are the key SJD extension call-ins, but they are not all read paths: `$A003` is reached from FORMAT, `$B4DD` extends disk-full handling to tracks 36-40, and `$B842` replaces next-sector allocation. The GCR-to-HD read path is the separate `$F4D1 -> $B2F7 -> $B2C0/$B132` chain. The `$E91D-$E998` replacement belongs to the serial-bus/ATN area, not GCR decoding. This corrects the earlier tentative classifications of `$FB15` and `$E91D`.
 
 A useful next static-analysis pass is to disassemble each trampoline's caller and the first extension routine block, then build a call graph across `$8000-$BFFF`. The host-side JiffyDOS byte transport should remain a separate question: the extension may accelerate drive-side disk operations while still using the existing JD IEC bus routines.
 
