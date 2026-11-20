@@ -12,10 +12,16 @@
 ; Stock zero page keeps its meaning: $D3 = column (0-79 here), $D6 = row.
 ; Scratch: p1/p2 (the con_write buffer), p3/p4 and tmp0-tmp3, all the kernel's.
 ;
-; Not here yet: reverse video, cursor, ESC and backspace, the raster wait on scroll, colour RAM.
-; Entry points: c80_init, c80_write (r0 = buffer, r1 = count, as con_write).
+; Console features as con.s: reverse ($C7, ended by LF, cleared by FF), backspace, ESC = R r K C, and
+; a cursor (XOR of the half cell; c80_curshow / c80_curhide for the IRQ blink, c80_write hides it
+; first). The colour matrix is (fg << 4) | bg from $0286 and $D021, refilled by ESC C.
+; Not here yet: the raster wait on scroll.
+; Entry points: c80_init, c80_write (r0 = buffer, r1 = count, as con_write), c80_curshow, c80_curhide.
 .ifndef BMP
 BMP  = $2000
+.endif
+.ifndef MATRIX
+MATRIX = $0400
 .endif
 .ifndef FONT
 FONT = $4000
@@ -23,7 +29,7 @@ FONT = $4000
 .assert <FONT = 0, error, "FONT must be page aligned"
 .include "kernel_syms.inc"      ; test-generated: r0 r1 p1-p4 tmp0-tmp3 to_screen
 
-.export c80_init, c80_write, lastpos
+.export c80_init, c80_write, c80_curshow, c80_curhide, lastpos, esc_st
 
 COLD = $d3
 ROWD = $d6
@@ -32,11 +38,16 @@ sp   = p4                       ; source pointer for scroll copies
 pp   = p4                       ; put: first source (shares sp: scroll and draw never overlap)
 qq   = tmp0                     ; put: second source (tmp0/tmp1)
 nl   = tmp2                     ; scratch
+xv   = tmp3                     ; put: the nibbles to flip for reverse video
+REV  = $c7
 
 .segment "CODE"
-; c80_init: blank the bitmap (and the BSS after it), home the cursor
+; c80_init: colour matrix, then c80_clear
 c80_init:
+        jsr matrix
         ; fall through
+
+; c80_clear: blank the bitmap (and the BSS after it), home the cursor, reverse off
 c80_clear:
         lda #<BMP
         sta dp
@@ -53,6 +64,29 @@ c80_clear:
         bne @p
         sty COLD
         sty ROWD
+        sty REV
+        rts
+
+; matrix: the colour matrix (1000 bytes at MATRIX) = (fg << 4) | bg
+matrix: lda $0286
+        asl a
+        asl a
+        asl a
+        asl a
+        sta nl
+        lda $d021
+        and #15
+        ora nl
+        ldy #0
+@a:     sta MATRIX,y
+        sta MATRIX+$100,y
+        sta MATRIX+$200,y
+        iny
+        bne @a
+@b:     sta MATRIX+$300,y
+        iny
+        cpy #232
+        bne @b
         rts
 
 ; c80_write: r0 = buffer, r1 = count
@@ -65,30 +99,189 @@ c80_write:
         sta p2
         lda r1+1
         sta p2+1
+        jsr c80_curhide
 @next:  lda p2
         ora p2+1
         beq @done
         ldy #0
         lda (p1),y
-        cmp #$0a
+        ldx esc_st
+        beq @n0
+        jsr escape
+        jmp @skip
+@n0:    cmp #$0a
         beq @lf
         cmp #$0c
         beq @ff
+        cmp #$08
+        beq @bs
+        cmp #$1b
+        beq @esc
         cmp #$09
         beq @run
         cmp #$20
-        bcc @skip               ; other controls: ignored for now
+        bcc @skip               ; other controls: ignored
 @run:   jsr run
         jmp @next
 @ff:    jsr c80_clear
+        jmp @skip
+@bs:    jsr bs
+        jmp @skip
+@esc:   inc esc_st
 @skip:  jsr adv1
         jmp @next
 @done:  clc
         rts
 
 @lf:    jsr adv1
+        lda #0
+        sta REV                 ; a newline ends reverse
         jsr nextline
         jmp @next
+
+; escape: A = the next byte of an escape sequence, X = esc_st (not 0)
+;   ESC = row+32 col+32 | R | r | K | C fg+32 bg+32 border+32 (states 2,3 / 4,5,6)
+escape: cpx #2
+        bcc @cmd
+        sbc #32                 ; (carry set)
+        inc esc_st
+        cpx #4
+        bcc @rc
+        beq @fg
+        cpx #6
+        bcc @bg
+        sta $d020
+        bcs @end
+@rc:    cpx #3
+        beq @col
+        sta erow
+        rts
+@col:   cmp #80
+        bcc @c1
+        lda #79
+@c1:    sta COLD
+        lda erow
+        cmp #25
+        bcc @r1
+        lda #24
+@r1:    sta ROWD
+@end:   lda #0
+        sta esc_st
+        rts
+@fg:    and #15
+        sta $0286
+        jmp matrix
+@bg:    sta $d021
+        jmp matrix
+@cmd:   ldx #0
+        stx esc_st
+        cmp #'='
+        bne @n1
+        lda #2
+        bne @set
+@n1:    cmp #'R'
+        bne @n2
+        lda #$12
+        sta REV
+        rts
+@n2:    cmp #'r'
+        bne @n3
+        stx REV
+        rts
+@n3:    cmp #'C'
+        bne @n4
+        lda #4
+@set:   sta esc_st
+        rts
+@n4:    cmp #'K'
+        beq eol
+        rts
+
+; eol: blank from the cursor to the end of the row (only as far as the row was drawn)
+eol:    ldx ROWD
+        lda lastpos,x
+        cmp COLD
+        bcc @r
+        beq @r
+        jsr cellp
+        bcc @f
+        eor #$ff
+        jsr clrh                ; odd column: the right half of its cell
+        jsr nextcell
+@f:     ldx ROWD
+        lda lastpos,x
+        jsr cells               ; cnt = cells drawn
+        lda COLD
+        clc
+        adc #1
+        lsr a
+        sta nl                  ; first whole cell
+        lda cnt
+        sec
+        sbc nl
+        sta cnt
+        jsr fill
+        ldx ROWD
+        lda COLD
+        sta lastpos,x
+@r:     rts
+
+; bs: cursor left one column (up a row from column 0), blank that half cell
+bs:     lda COLD
+        bne @l
+        lda ROWD
+        beq clrr
+        dec ROWD
+        lda #80
+        sta COLD
+@l:     dec COLD
+        jsr cellp
+        eor #$ff
+        ; fall through
+; clrh: A = bits to keep: (dp)[0..7] &= A
+clrh:   sta nl
+        ldy #7
+@c:     lda (dp),y
+        and nl
+        sta (dp),y
+        dey
+        bpl @c
+clrr:   rts
+
+; the cursor: the half cell at (COLD, ROWD) XORed, with a flag
+c80_curshow:
+        lda cur_vis
+        beq tog
+        rts
+c80_curhide:
+        lda cur_vis
+        beq clrr
+tog:    jsr cellp
+        sta nl
+        ldy #7
+@l:     lda (dp),y
+        eor nl
+        sta (dp),y
+        dey
+        bpl @l
+        lda cur_vis
+        eor #1
+        sta cur_vis
+@r:     rts
+
+; cellp: dp = the cell of (COLD, ROWD); carry = odd column; A = the half's pixel mask ($f0 / $0f)
+cellp:  lda ROWD
+        ldx #dp
+        jsr setp
+        lda COLD
+        lsr a
+        php
+        jsr addcell
+        plp
+        lda #$f0
+        bcc @r
+        lda #$0f
+@r:     rts
 
 ; nextline: column 0 of the next row. At the bottom, scroll for the LFs still waiting in the
 ; buffer too, in one pass; the cursor lands n-1 rows above the bottom, so those LFs only move it.
@@ -129,6 +322,8 @@ lookahead:
 @n:     cmp #$0c
         beq @d
         cmp #$1b
+        beq @d
+        cmp #$08
         bne @s
 @d:     txa
         rts
@@ -203,14 +398,7 @@ run:    lda #80
 @r:     rts
 
 ; draw: rb[0..rn) at (COLD, ROWD): an odd first char, whole pairs, an odd last char
-draw:   lda ROWD
-        ldx #dp
-        jsr setp
-        lda COLD
-        lsr a
-        php
-        jsr addcell             ; dp += (COLD/2)*8
-        plp
+draw:   jsr cellp
         ldx #0
         bcc @pairs
         lda rb                  ; odd column: the first char is the right half of its cell
@@ -218,6 +406,8 @@ draw:   lda ROWD
         jsr gp
         ldx #pp
         jsr cpdp
+        lda #$0f
+        jsr sx
         jsr put
         jsr nextcell
         ldx #1
@@ -236,6 +426,8 @@ draw:   lda ROWD
         pla
         ldx #qq
         jsr gp
+        lda #$ff
+        jsr sx
         jsr put
         jsr nextcell
         inc di
@@ -249,6 +441,8 @@ draw:   lda ROWD
         jsr gp
         ldx #qq
         jsr cpdp
+        lda #$f0
+        jsr sx
         jsr put                 ; the left half: the glyph first, the old cell second
 @hw:    lda COLD                ; high-water mark: columns drawn on this row
         clc
@@ -259,13 +453,21 @@ draw:   lda ROWD
         sta lastpos,x
 @ok:    rts
 
-; put: (dp)[0..7] = (pp & $f0) | (qq & $0f), the eor form so that a half can come from the old
+; sx: A = the nibbles of the cell being drawn -> xv = those if reverse video, else 0
+sx:     ldx REV
+        bne @r
+        lda #0
+@r:     sta xv
+        rts
+
+; put: (dp)[0..7] = (pp & $f0) | (qq & $0f), then ^ xv, the eor form so that a half can come from the old
 ; cell itself (pointing pp or qq at dp)
 put:    ldy #7
 @l:     lda (qq),y
         eor (pp),y
         and #$0f
         eor (pp),y
+        eor xv
         sta (dp),y
         dey
         bpl @l
@@ -437,3 +639,6 @@ scn:    .res 1
 srow:   .res 1
 ssrc:   .res 1
 cnt:    .res 1
+esc_st: .res 1                  ; escape sequence state (as con.s)
+erow:   .res 1
+cur_vis: .res 1

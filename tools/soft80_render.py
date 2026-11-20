@@ -92,7 +92,11 @@ class Soft80:
         self.font = font
         self.bitmap = bytearray(8000)
         self.colour = bytes([(fg << 4) | bg]) * 1000
-        self.fg, self.bg = fg, bg
+        self.fg, self.bg, self.border = fg, bg, 0
+        self.rev = 0                   # $C7: nonzero = reverse video
+        self.esc = 0                   # escape sequence state (con.s esc_st)
+        self.erow = 0
+        self.cur = 0                   # cursor drawn
         self.lastpos = [0] * ROWS      # per row: columns drawn (high-water mark)
         self.cx = self.cy = 0
         self.reads = self.writes = 0   # bitmap bytes touched
@@ -113,12 +117,13 @@ class Soft80:
         self.writes += 8
         self.lastpos[row] = max(self.lastpos[row], col + 1)
 
-    def put_pair(self, col, row, left, right):
+    def put_pair(self, col, row, left, right, reverse=False):
         """Two chars filling one cell: whole-byte writes, no read."""
         assert col % 2 == 0
         base = self.cell(col, row)
         for i in range(8):
-            self.bitmap[base + i] = (self.font[left * 8 + i] & 0xF0) | (self.font[right * 8 + i] & 0x0F)
+            self.bitmap[base + i] = ((self.font[left * 8 + i] & 0xF0) | (self.font[right * 8 + i] & 0x0F)) \
+                ^ (0xFF if reverse else 0)
         self.writes += 8
         self.lastpos[row] = max(self.lastpos[row], col + 2)
 
@@ -126,11 +131,11 @@ class Soft80:
         """Pair-aligned put: odd leading char, whole pairs, odd trailing char."""
         i = 0
         if col % 2 and codes:
-            self.put(col, row, codes[0]); col += 1; i = 1
+            self.put(col, row, codes[0], self.rev); col += 1; i = 1
         while len(codes) - i >= 2:
-            self.put_pair(col, row, codes[i], codes[i + 1]); col += 2; i += 2
+            self.put_pair(col, row, codes[i], codes[i + 1], self.rev); col += 2; i += 2
         if i < len(codes):
-            self.put(col, row, codes[i])
+            self.put(col, row, codes[i], self.rev)
 
     def scroll_up(self, n=1):
         """Move rows up n; copy each row only to max(src, dst) high-water mark."""
@@ -150,6 +155,7 @@ class Soft80:
         self.bitmap[:] = bytes(8000)
         self.lastpos = [0] * ROWS
         self.cx = self.cy = 0
+        self.rev = 0
         self.writes += 8000
 
     def clear_row(self, r):
@@ -170,7 +176,7 @@ class Soft80:
             return
         n = 1
         for ch in rest[:255]:
-            if ch in "\f\x1b":
+            if ch in "\f\x1b\b":
                 break
             if ch == "\n":
                 n += 1
@@ -179,20 +185,99 @@ class Soft80:
         self.scroll_up(n)
         self.cy = ROWS - n
 
+    def cursor(self):
+        """Toggle the cursor: XOR the half cell at (cx, cy) (the 6502's tog)."""
+        mask = 0xF0 if self.cx % 2 == 0 else 0x0F
+        base = self.cell(self.cx, self.cy)
+        for i in range(8):
+            self.bitmap[base + i] ^= mask
+        self.cur ^= 1
+
+    def blank_half(self, col, row):
+        mask = 0x0F if col % 2 == 0 else 0xF0      # the bits kept
+        base = self.cell(col, row)
+        for i in range(8):
+            self.bitmap[base + i] &= mask
+
+    def bs(self):
+        if self.cx == 0:
+            if self.cy == 0:
+                return
+            self.cy -= 1
+            self.cx = COLS
+        self.cx -= 1
+        self.blank_half(self.cx, self.cy)
+
+    def eol(self):
+        """ESC K: blank from the cursor to the end of the row."""
+        if self.lastpos[self.cy] <= self.cx:
+            return
+        for c in range(self.cx, COLS):
+            self.blank_half(c, self.cy)
+        self.lastpos[self.cy] = self.cx
+
+    def recolour(self):
+        self.colour = bytes([(self.fg << 4) | (self.bg & 15)]) * 1000
+
+    def escape(self, ch):
+        """One byte of an escape sequence (con.s con_escape; 80 columns, bitmap colours)."""
+        st, v = self.esc, ord(ch)
+        if st == 1:
+            self.esc = 0
+            if ch == "=":
+                self.esc = 2
+            elif ch == "R":
+                self.rev = 0x12
+            elif ch == "r":
+                self.rev = 0
+            elif ch == "C":
+                self.esc = 4
+            elif ch == "K":
+                self.eol()
+            return
+        v = (v - 32) & 255
+        self.esc = st + 1
+        if st == 2:
+            self.erow = v
+        elif st == 3:
+            self.esc = 0
+            self.cx, self.cy = min(v, COLS - 1), min(self.erow, ROWS - 1)
+        elif st == 4:
+            self.fg = v & 15
+            self.recolour()
+        elif st == 5:
+            self.bg = v
+            self.recolour()
+        else:
+            self.esc = 0
+            self.border = v
+
     def write(self, text):
         """Console write: runs of text on a row go out as one put_string; a scroll looks
-        ahead in the buffer (advance)."""
+        ahead in the buffer (advance). The cursor is hidden first and stays hidden."""
+        if self.cur:
+            self.cursor()
         i = 0
         while i < len(text):
             ch = text[i]
+            if self.esc:
+                self.escape(ch); i += 1
+                continue
+            if ch == "\x1b":
+                self.esc = 1; i += 1
+                continue
             if ch == "\f":
                 self.clear(); i += 1
+                continue
+            if ch == "\b":
+                self.bs(); i += 1
                 continue
             if ch != "\n" and ch != "\t" and ord(ch) < 0x20:
                 i += 1                 # other controls: ignored
                 continue
             if ch == "\n":
                 i += 1
+                self.rev = 0
                 self.advance(text[i:])
                 continue
             j, codes = i, []

@@ -29,14 +29,10 @@ start:  sei
         sta $d011
         lda #DEMO_BORDER
         sta $d020
-        lda #DEMO_COLOUR
-        ldy #0
-@c:     sta $0400,y
-        sta $0500,y
-        sta $0600,y
-        sta $0700,y
-        iny
-        bne @c
+        lda #DEMO_COLOUR >> 4   ; c80_init fills the colour matrix from $0286 (fg) and $d021 (bg)
+        sta $0286
+        lda #DEMO_COLOUR & 15
+        sta $d021
         lda #<script
         sta sptr
         lda #>script

@@ -68,6 +68,7 @@ class Con80(unittest.TestCase):
         s.mem.b[CODE:CODE + len(self.bin)] = self.bin
         s.mem.b[FONT:FONT + m.NGLYPH * 8] = m.glyphs(self.font)
         s.lbl.update(self.lab)
+        s.mem.b[0x286], s.mem.b[0xD021], s.mem.b[0xC7], s.mem.b[0xD020] = 1, 6, 0, 0
         s.call("c80_init")
         self.model = m.Soft80(self.font)
 
@@ -90,6 +91,9 @@ class Con80(unittest.TestCase):
         L = self.lab["lastpos"]
         self.assertEqual(list(b[L:L + 25]), mod.lastpos)
         self.assertEqual((b[0xD3], b[0xD6]), (mod.cx, mod.cy))
+        self.assertEqual((b[0xC7], b[self.lab["esc_st"]]), (mod.rev, mod.esc))
+        self.assertEqual(bytes(b[0x400:0x400 + 1000]), mod.colour)
+        self.assertEqual(b[0xD020], mod.border)
 
     def test_short_text(self):
         self.feed("hello, world\nsecond line\n")
@@ -117,9 +121,73 @@ class Con80(unittest.TestCase):
 
     def test_look_ahead_edges(self):
         rnd = random.Random(4)
-        pieces = ["\n" * 30, "x" * 160, "\x1b", "\f", "ab\n" * 12, "z" * 79, "\n", "q" * rnd.randrange(200, 400)]
+        pieces = ["\n" * 30, "x" * 160, "\x1b", "\f", "\n\b\n", "\b", "ab\n" * 12, "z" * 79, "\n", "q" * rnd.randrange(200, 400)]
         for _ in range(40):
             self.feed("".join(rnd.choice(pieces) for _ in range(rnd.randrange(1, 6))))
+            self.same()
+
+    def test_reverse_bs_and_escapes(self):
+        self.feed("plain \x1bRrev\x1br back\x1bR rev wrap\nnext line is plain\n")
+        self.same()
+        self.feed("abc\b\bX\x08\x08\x08\x08\x08\nline\n\b\b\b\bq\b\b\b\b\b\b\bzz")
+        self.same()
+        self.feed("\f\x1b=%'at 5,7\x1b=  home\x1b=~~clamped\x1b=\x1f\x1fbelow-range")
+        self.same()
+
+    def test_clear_to_end_of_line(self):
+        for col in range(0, 12):
+            self.feed("\f" + "0123456789ab\n" * 3 + "\x1b=%d%d" % (32 + 1, 32 + col) + "\x1bK\x1bR!")
+            self.same()
+        self.feed("\f" + "x" * 79 + "\x1b=  \x1bKshort")      # row drawn to 79 then cleared from 0
+        self.same()
+        self.feed("\x1b=\x2f\x70\x1bK")                     # K at a column past the drawn part
+        self.same()
+
+    def test_bs_ends_the_look_ahead(self):
+        self.feed(("row\n") * 30 + "last")            # cursor on the bottom row
+        self.same()
+        self.feed("\n\b\n\b\n" + "z" * 5 + "\n\n\b")
+        self.same()
+
+    def test_clear_to_end_stays_in_the_row(self):
+        self.feed("\f" + ("w" * 79 + "\n") * 5 + "\x1b=#\x5c\x1bK")    # row 3, column 60
+        self.same()
+
+    def test_colours(self):
+        self.feed("hi\x1bC\x2a\x2b\x2cthere\x1bC\x31\x32\x33")
+        self.same()
+
+    def test_escape_split_across_writes(self):
+        for chunk in (1, 2, 3):
+            self.feed("\f\x1b=#%dabc\x1bR rev\x1b=  \x1bK\x1bCabc" * 3 + "\x1br\x1bQz\x1b", chunk=chunk)
+            self.same()
+
+    def test_cursor_is_xor_of_the_half_cell(self):
+        s = self.sim
+        for text in ("", "ab", "abc", "\n\n\x1b=\x2f\x70xyz"):
+            self.feed("\f" + text)
+            before = bytes(self.sim.mem.b[BMP:BMP + 8000])
+            s.call("c80_curshow"); s.call("c80_curshow"); self.model.cursor()      # idempotent
+            self.same()
+            s.call("c80_curhide"); s.call("c80_curhide"); self.model.cursor()
+            self.same()
+            for _ in range(2):
+                s.call("c80_curshow"); self.model.cursor()
+                self.same()
+                s.call("c80_curshow"); s.call("c80_curhide"); self.model.cursor()
+                self.same()
+            s.call("c80_curshow"); self.model.cursor()
+            self.feed("!")                      # a write hides it first
+            self.same()
+            self.assertEqual(self.model.cur, 0)
+            del before
+
+    def test_flood_with_everything(self):
+        rnd = random.Random(21)
+        pieces = ["abc", "x" * 90, "\n", "\n\n\n", "\b", "\x1bR", "\x1br", "\x1bK", "\x1b=\x25\x30", "\t", "\f",
+                  "\x1bC\x25\x26\x27", "\x1b=\x39\x20", "\x1b", "q"]
+        for _ in range(60):
+            self.feed("".join(rnd.choice(pieces) for _ in range(rnd.randrange(1, 12))))
             self.same()
 
     def test_one_byte_writes(self):
