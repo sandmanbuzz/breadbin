@@ -59,7 +59,7 @@ The BASIC loop sets `$FB/$FC` to `$2000 + page*256` before each call. Therefore 
 The subsequent BASIC setup selects the upper portions of that capture for the first-stage outputs:
 
 - `(C)CMD/J/E0-FF` corresponds to the captured drive range `$E000-$FFFF`, held at C64 `$8000-$9FFF`.
-- `(C)CMD/C/C0-DF` corresponds to drive range `$C000-$DFFF`, held at C64 `$6000-$7FFF`. Before saving, the BASIC program applies byte patches at several offsets within that buffer (including locations around C64 `$6070`, `$607E`, `$6D92`, `$7367`, and `$7CBB`).
+- `(C)CMD/C/C0-DF` corresponds to drive range `$C000-$DFFF`, held at C64 `$6000-$7FFF`. Before saving, the BASIC program applies byte patches at several offsets within that buffer (including locations around C64 `$6070`, `$609F`, `$6D92`, `$7367`, and `$7CBB`).
 
 The captured `$8000-$BFFF` portion is not emitted by these two first-stage files; the final SJD image obtains its lower two 8 KiB regions from the supplied `S80-9` and `SA0-B` files. This aligns with the final generator's four-bank SJD assembly.
 
