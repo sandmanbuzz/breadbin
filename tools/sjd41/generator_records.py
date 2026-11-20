@@ -110,11 +110,80 @@ def mismatch_runs(a: bytes, b: bytes, base: int):
         else: result[-1][1], result[-1][2] = addr, result[-1][2] + 1
     return result
 
+
+def basic_data_values(prg: bytes) -> list[int]:
+    """Extract numeric DATA items from a tokenized BASIC PRG."""
+    load = prg[0] | prg[1] << 8
+    if load != 0x0801:
+        raise ValueError(f"expected BASIC load address $0801, got ${load:04X}")
+    values, pos = [], 2
+    while pos + 2 <= len(prg):
+        nxt = prg[pos] | prg[pos + 1] << 8
+        if nxt == 0:
+            break
+        next_pos = nxt - load + 2
+        if next_pos <= pos + 4 or next_pos > len(prg):
+            raise ValueError(f"invalid BASIC link ${nxt:04X} at {pos}")
+        line_end = prg.find(b"\\0", pos + 4, next_pos)
+        if line_end < 0:
+            raise ValueError(f"unterminated BASIC line at {pos}")
+        line = prg[pos + 4:line_end]
+        if 0x83 in line:  # DATA token
+            data = line[line.index(0x83) + 1:].decode("latin-1")
+            for item in data.split(","):
+                item = item.strip()
+                try:
+                    values.append(int(item))
+                except ValueError:
+                    raise ValueError(f"non-numeric DATA item {item!r}")
+        pos = next_pos
+    return values
+
+
+def stage1_c000_patches(prg: bytes) -> tuple[Record, ...]:
+    """Decode the first-stage BASIC POKEs without embedding their payload."""
+    values = basic_data_values(prg)
+    segments, current = [], []
+    for value in values:
+        if value == -1:
+            segments.append(current)
+            current = []
+        else:
+            current.append(value)
+    if len(segments) != 3 or len(current) != 60:
+        raise ValueError(
+            f"expected three helper terminators and 60 C000-DFFF patch bytes; "
+            f"got {len(segments)} terminators and {len(current)} trailing values"
+        )
+    if any(not 0 <= value <= 255 for value in current):
+        raise ValueError("C000-DFFF patch DATA contains a non-byte value")
+    data = bytes(current)
+    return (
+        Record(0x6070, data[0:15]),
+        Record(0x609F, data[15:30]),
+        Record(0x6D92, bytes((112, 192))),
+        Record(0x7367, bytes((76, 159, 192, 234))),
+        Record(0x7CBB, data[30:60]),
+    )
+
+
+def reconstruct_c000(capture: bytes, stage1_prg: bytes) -> bytes:
+    """Apply the generator's literal C000-DFFF patches to a live 8 KiB capture."""
+    if len(capture) != 0x2000:
+        raise ValueError(f"C000-DFFF capture must be 8192 bytes, got {len(capture)}")
+    result = bytearray(capture)
+    for record in stage1_c000_patches(stage1_prg):
+        offset = record.address - 0x6000
+        result[offset:offset + len(record.payload)] = record.payload
+    return bytes(result)
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--disk", required=True, type=Path)
     p.add_argument("--jd-rom", required=True, type=Path)
     p.add_argument("--compare-sjd", type=Path)
+    p.add_argument("--c000-capture", type=Path, help="raw 8 KiB live capture of drive $C000-$DFFF")
+    p.add_argument("--c000-output", type=Path, help="write patched C000-DFFF bank")
     p.add_argument("--output", type=Path)
     p.add_argument("--summary-only", action="store_true")
     a = p.parse_args()
@@ -149,12 +218,24 @@ def main() -> int:
         print(f"Stage-3 spill beyond $7FFF: 101 bytes, sha256={digest(spill)}")
         if a.output:
             a.output.write_bytes(generated); print(f"wrote {a.output}")
+        sjd = None
         if a.compare_sjd:
             sjd = a.compare_sjd.read_bytes()
             if len(sjd) != 0x8000: raise ValueError(f"SJD image must be 32 KiB, got {len(sjd)}")
             diff = mismatch_runs(generated, sjd[0x6000:0x8000], 0xE000)
-            print(f"comparison: {sum(r[2] for r in diff)} differing bytes in {len(diff)} runs")
+            print(f"comparison E000-FFFF: {sum(r[2] for r in diff)} differing bytes in {len(diff)} runs")
             for start, end, count in diff: print(f"  ${start:04X}-${end:04X}: {count} byte(s)")
+        if a.c000_capture:
+            c000 = reconstruct_c000(a.c000_capture.read_bytes(), files[FILES["stage1"]])
+            print(f"C000-DFFF output: {len(c000)} bytes, sha256={digest(c000)}")
+            if a.c000_output:
+                a.c000_output.write_bytes(c000); print(f"wrote {a.c000_output}")
+            if sjd is not None:
+                diff = mismatch_runs(c000, sjd[0x4000:0x6000], 0xC000)
+                print(f"comparison C000-DFFF: {sum(r[2] for r in diff)} differing bytes in {len(diff)} runs")
+                for start, end, count in diff: print(f"  ${start:04X}-${end:04X}: {count} byte(s)")
+        elif a.c000_output:
+            raise ValueError("--c000-output requires --c000-capture")
         return 0
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr); return 2
