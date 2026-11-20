@@ -105,6 +105,44 @@ prove the whole path with one tiny program end to end before widening anything.
   - `LET` and expressions;
   - `PRINT` of numbers with MS spacing;
   - `IF`/`THEN`, `GOTO`, `GOSUB`/`RETURN`, `FOR`/`NEXT` (`STEP`), `END`/`STOP`.
+  **Landed (L3c), as built:**
+  - *Program text is tokenised* at store time, MS-crunch style: a keyword outside strings and
+    REM text becomes one byte (128 + its place in `kwt`), `?` is PRINT, and `LIST` spells them
+    out. The first keyword in the table that matches wins, so `TOTAL` is `TO TAL`, as MS.
+    Spaces are kept as typed (runs collapse), so `LIST` shows `PRINT "A"` if the user typed a
+    space and `PRINT"A"` if not. A byte above 127 outside quotes is a syntax error.
+  - *Errors:* compile errors carry the line; a runtime error reports the line of the code
+    that raised it. `UNDEF'D STATEMENT` is raised at compile time (MS raises it when the
+    GOTO runs): a difference to document. The first error is kept. Parentheses and unary
+    operators nest 14 deep, and `ABS(`/`INT(`/`SGN(` count as two levels (`FORMULA TOO
+    COMPLEX`; the compiler's own frames bound it). `^` takes a whole-number exponent, else `ILLEGAL QUANTITY`.
+    `NEXT` of a variable whose `FOR` was replaced by another `FOR` on it is `NEXT WITHOUT
+    FOR`, as MS. Deferred: Ctrl-C during a run (an endless loop needs a reset), `ON..GOTO`, `CLR`.
+    Known divergences: after a `RUN` that ran out of memory compiling, an immediate `GOTO n`
+    says `UNDEF'D STATEMENT` (the compile error is dropped); `RUN`, `LIST` and `NEW` are
+    immediate-only, so `PRINT 1:RUN` is a syntax error.
+  - *What `BYTES FREE` means:* it is the arena minus the program text. `RUN` compiles into the
+    same arena, and code is about twice the text, plus variables, so a program of about a
+    third of the figure (measured: 221 lines, 5.4 KB of text) is the largest that runs. The
+    gate below is met to the letter and not in spirit: the owner decides before L3d between
+    freeing the source while running, a second arena for code, and a resident runtime.
+  - *Native helpers* (`src/pc/bas-rt.s`): the number core, `c_crunch`, `c_find`, and the
+    scanner and code emitter (`c_sp`, `c_digit`, `c_letter`, `c_tok`, `c_ult`, `c_emit`,
+    `c_room`, `c_op1`, `c_opw`, `c_ncall`), which work on the mini C's globals: a program with
+    an `extern` exports them as `g_NAME`. Expressions are one precedence-climbing function.
+  - *Measured* (`.blocks/pvm-prof.py`, py65, a 102-line, 2,714-byte program, store plus `RUN`
+    to the end): 41.4M cycles (about 42 s on a PAL machine) with the compiler all in p-code
+    and text stored as typed; 27.4M after tokenising, the native helpers and the climb. The
+    store alone went from 40M to 9.6M. Still far from the estimate of about a second per 100
+    lines in §7; what remains is spread over `getline` (4.3M), `cline`, `var` and `constant`,
+    each next in line to go native.
+  - *Memory:* `bas` is about 10 KB of code and 29 KB with its 16,384-byte arena, 1 KB of VM
+    frames and the 2.5 KB VM library, against the 31 KB `free` shows at the shell. The first
+    build with the full arena **did not load** (`sh: bas: out of memory`); 15,872 did. Fitting
+    16,384 took a 768-byte frame stack (a `/* fstack N */` directive in the source, read by
+    `cc_pcode`), 32 forward-GOTO fixups, a 192-byte GOSUB/FOR stack and 64-byte I/O buffers. It
+    fits by about 500 bytes: the 16 KB gate is met, barely, and L3d (strings) will not fit
+    without one of the options in §6.
 - **L3d. Strings and arrays:**
   - string variables and a string heap with garbage collection;
   - `LEFT$`, `MID$`, `RIGHT$`, `LEN`, `CHR$`, `ASC`, `STR$`, `VAL`;
@@ -116,6 +154,21 @@ prove the whole path with one tiny program end to end before widening anything.
   - the period-style listings (written for this, not copied) that the roadmap's acceptance
     names;
   - `/bin/basic` replaced; `basic.s` retired.
+- **L3f. The manuals** (owner, 2026-11-19: required, "SDK docs, basically, with a nice user
+  manual and reference manual"). Compiled code may come from end users, developers, or people
+  in between, and the feature does not look good to anyone until they are told about it. In
+  `docs/manual/`, written as the books that came with a computer or a small Unix:
+  - a **user manual**: a tutorial from `bas` to a working program, editing, running, saving,
+    the immediate mode, and what is different from the C64's BASIC;
+  - a **reference manual**: every statement, function, operator and error message, number
+    formats and limits, one entry each, with an example that is run by a test;
+  - a **developer guide (the SDK)**: the mini C (`cc.py --pcode`) and its builtins, building a
+    p-code program (`src/pc/`, the Makefile rule), the VM and its calling convention, how
+    BASIC's compiled code calls its runtime, `/lib/pvm`, and the tools (`asim`, `pvmlink`).
+
+  Examples in the manuals are extracted and run by the host tests, so the books cannot drift
+  from the program. Each slice from L3c on adds its reference entries as it lands; L3f is the
+  user manual, the developer guide and the pass that makes the three read as one set.
 
 ## 6. Budget and gate
 
@@ -128,10 +181,16 @@ compiled code, variables and strings, stop and rethink before L3d. The options t
 tokenised text, freeing the source while running, or a resident runtime library on E2's
 loader.
 
+**Hardware gate (owner, 2026-11-19):** at the end of L3, a run on the real Ultimate (under the
+`ultimate` lock, when it is free) of `bas` typed at the shell and the acceptance listings,
+to catch assumptions VICE and py65 share. Not a per-slice gate.
+
 ## 7. Open questions
 
 - **Compile speed.** The compiler is p-code, at the VM's speed. *Estimate:* a 100-line
-  program compiles in about a second. Measure it in L3c. If it is slow, the lexer and
+  program compiles in about a second. *Measured in L3c: about 27 s* after tokenising and the
+  first native helpers (see L3c in §5); more of the lexer and the variable and constant code
+  go native next. Measure it in L3c. If it is slow, the lexer and
   line-table helpers become native first.
 - **Where the compiled code goes during an edit-run cycle.** It is rebuilt on each `RUN`; a
   `CONT` after `STOP` must not survive an edit (MS's rule).

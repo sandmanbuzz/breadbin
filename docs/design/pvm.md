@@ -138,6 +138,12 @@ Ported changes, each forced by §1:
    writes `$20`, the low byte of argv. A native callee may return any
    index; the next push, call or return catches it.
    Cheaper guards are open for later.
+   Native routines linked beside a mini C program (`extern`, `tools/cc_pcode.py`; L3b) follow
+   this item: arguments on the eval stack, one result pushed, RTS, no syscalls, and no more
+   entries than the arguments took. One that must rewrite the return IP (BASIC's jumps and
+   errors, `src/pc/bas-rt.s`) finds it above its own return address, at `$0103 + S`. The
+   program's globals are exported as `g_NAME`, so a native can use them directly. A program
+   sizes its frame stack with a `/* fstack N */` comment (L3c: `bas` takes 768).
 3. **Relocation and sharing (L1s).** Our front ends emit bytecode as ca65 `.byte` and `.word`
    lines in the program's source. The VM is a shared library, CX format 3 (`/lib/pvm`, built by
    `tools/pvmlink.py lib`, `mk/pvm.mk`): image bytes 0–1 are its id, the low 16 bits of the

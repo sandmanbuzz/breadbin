@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HAVE_TOOLS = test_pvm.HAVE_TOOLS
 
 
-def build(src, d, fstack=cc_pcode.FSTACK, natives=None):
+def build(src, d, fstack=None, natives=None):
     """The CX file for src, built in directory d; natives is ca65 source linked in beside it
     (the routines `extern` declares)."""
     objs = []
@@ -30,12 +30,12 @@ def build(src, d, fstack=cc_pcode.FSTACK, natives=None):
         with open(s, "w") as f:
             f.write(text)
         objs.append(os.path.join(d, name + ".o"))
-        pvmlink.sh("ca65", "-I", os.path.join(ROOT, "include"), "-I", os.path.join(ROOT, "src", "pvm"),
+        pvmlink.sh("ca65", "-g", "-I", os.path.join(ROOT, "include"), "-I", os.path.join(ROOT, "src", "pvm"),
                    "-o", objs[-1], s)
     return pvmlink.link_prog(os.path.join(d, "p.cx"), test_pvm.lib_dir(), objs)
 
 
-def run_full(src, fstack=cc_pcode.FSTACK, natives=None, **kw):
+def run_full(src, fstack=None, natives=None, **kw):
     """kw goes to asim.run (files=, stdin=)."""
     with tempfile.TemporaryDirectory(prefix="ccp-") as d:
         path = build(src, d, fstack, natives)
@@ -69,6 +69,9 @@ class Abi(unittest.TestCase):
         self.assertIn("ESTKL   = ESTKH + ESDEPTH", vm)
         self.assertEqual(int(re.search(r"^P_ESTKH\s*=\s*\$([0-9A-F]+)", inc, re.M).group(1), 16), esh)
         self.assertEqual(int(re.search(r"^P_ESTKL\s*=\s*\$([0-9A-F]+)", inc, re.M).group(1), 16), esh + depth)
+        drop = int(re.search(r"^DROP\s*=\s*\$([0-9A-F]+)", vm, re.M).group(1), 16)
+        self.assertIn("IFP     = DROP + 10", vm)
+        self.assertEqual(int(re.search(r"^P_IFP\s*=\s*\$([0-9A-F]+)", inc, re.M).group(1), 16), drop + 10)
 
 
 class Refused(unittest.TestCase):
@@ -481,6 +484,20 @@ class L3b(unittest.TestCase):
         fails("int main() { char *p = 0; return 1 - p; }", "a pointer cannot be the right side of -")
         fails("int main() { char *p = 0; return p + p; }", "pointer")
         fails("int f() { return 1; }\nint main() { int *p = &f; return 0; }", "a pointer to char where a pointer to int")
+
+    def test_fstack_directive(self):
+        def stk(src, **kw):
+            return re.search(r"cc_fstk: \.res (\d+)", cc_pcode.compile_pcode(src, **kw)).group(1)
+        main = "int main() { return 0; }\n"
+        self.assertEqual(stk(main), "1024")
+        self.assertEqual(stk("/* fstack 768 */\n" + main), "768")
+        self.assertEqual(stk("/* fstack 768 */\n" + main, fstack=1024), "1024")   # the argument wins
+        self.assertEqual(stk('char *s = "/* fstack 5 */";\n' + main), "1024")      # only at a line start
+        with self.assertRaises(cc.CompileError):
+            cc_pcode.compile_pcode(main, fstack=7)
+        for n in (0, 7, 127, 8193, 70000):
+            with self.assertRaises(cc.CompileError):
+                cc_pcode.compile_pcode("/* fstack %d */\n" % n + main)
 
 
 if __name__ == "__main__":

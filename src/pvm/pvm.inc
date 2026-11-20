@@ -9,6 +9,11 @@
 ; pvm.s's ESTKL and ESTKH (tools/test_cc_pcode.py checks that they agree).
 P_ESTKH = $0A
 P_ESTKL = $15
+; The frame pointer (the frame stack grows down from it), for natives that unwind it (pvm.s's IFP).
+; A native reached by CALL or ICAL finds, after TSX, its return address at $0101,x-$0102,x and
+; the IP the VM resumes at when it returns at $0103,x (low) and $0104,x (high): rewriting those
+; two bytes makes the VM go on elsewhere (docs/design/pvm.md section 4).
+P_IFP   = $2D
 
 .macro P_FUNC
         jsr pvm_interp

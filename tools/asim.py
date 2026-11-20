@@ -56,6 +56,7 @@ class Result:
         self.mem = None              # the 64 KB memory at exit, for tests that look at the program's variables
 
 
+PVM_FETCHOP = 0x25                 # the VM's zero-page fetch: LDA IP,Y (src/pvm/pvm.s FETCHOP; IP follows it)
 LIB_PAGE = 0xB0                   # where a format 2 program's library is loaded (below argv)
 
 
@@ -81,14 +82,16 @@ def cx_load(data, page, lib_page=None, formats=(1, 2)):
     return bytes(out), bss, hdr
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None, libs=None):
+def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None, libs=None, profile=None):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
     A format 2 program's library is loaded at LIB_PAGE from libs[its path] (a host file) or build/root.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
     fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_create=path makes a write-open of that path fail with EIO; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs).
     cooked=True makes a read of fd 0 stop after the first LF, as the console's cooked mode does (a read at the end of stdin returns 0 bytes).
     poke maps an offset in the program image (a link address, e.g. a label from build/p/<prog>.lbl) to bytes written there before the first instruction: a board or a table to start from.
-    kbd=True models the keyboard and clock a game polls: KEYCNT ($C6) is 1 while stdin has bytes left, the jiffy clock ($A0-$A2, big-endian) starts at jiffy0 and each YIELD advances it by yield_jiffies, and TIME answers it (A/X/Y = lo/mid/hi)."""
+    kbd=True models the keyboard and clock a game polls: KEYCNT ($C6) is 1 while stdin has bytes left, the jiffy clock ($A0-$A2, big-endian) starts at jiffy0 and each YIELD advances it by yield_jiffies, and TIME answers it (A/X/Y = lo/mid/hi).
+    profile, if a dict, collects 6502 cycles by image offset: native code's PC, and for code the VM
+    runs, the IP of the opcode being run (attribute them to the labels of the -Ln file)."""
     if MPU is None:
         raise RuntimeError("py65 not installed")
     with open(path or os.path.join(ROOT, "build", "root", "bin", prog), "rb") as f:
@@ -125,6 +128,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
     mem[0x20], mem[0x21], mem[0x22] = top & 0xFF, top >> 8, len(ptrs)
     cpu = MPU(memory=mem, pc=base)
     jf = [jiffy0]
+    ip = [-1]
 
     def sync():
         if kbd:
@@ -315,7 +319,15 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
             continue
         if mem[cpu.pc] == 0:
             raise RuntimeError("BRK at $%04X after %d steps" % (cpu.pc, n))
-        cpu.step()
+        if profile is None:
+            cpu.step()
+        else:                            # cycles by image offset: native code by its PC, the VM by the IP
+            c0, pc = cpu.processorCycles, cpu.pc
+            if pc == PVM_FETCHOP:
+                ip[0] = mem[PVM_FETCHOP + 1] + (mem[PVM_FETCHOP + 2] << 8) + cpu.y - base
+            key = pc - base if base <= pc < base + len(image) else ip[0]
+            cpu.step()
+            profile[key] = profile.get(key, 0) + cpu.processorCycles - c0
         n += 1
         if n > limit:
             raise RuntimeError("no exit after %d steps, pc $%04X" % (n, cpu.pc))
