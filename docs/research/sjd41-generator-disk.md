@@ -180,16 +180,16 @@ Static inspection of the supplied SJD image now identifies several explicit tram
 
 | Hook address | SJD destination | Evidence / current interpretation |
 |---|---:|---|
-| `$FB15` | `$A003` | Replaces the normal path with a jump into the extension from the `$FB0F` DOS path. This is a fast file-load path candidate; exact command conditions still need disassembly. |
-| `$F15C` | `$B4DD` | Replaces the existing routine body with an extension entry. Likely part of the read/sector path; exact semantics still open. |
-| `$F173` | `$B842` | Second extension entry from the same modified `$F15C-$F194` region; likely a helper for the accelerated read path. |
+| `$FB15` | `$A003` | The hook is inside the original `FORMT` routine (the format-track path around `$FB0C-$FB17`), not the LOAD path. SJD diverts this format path into the extension; exact extension behavior remains to be disassembled. |
+| `$F15C` | `$B4DD` | Replaces `NXTERR`, the disk-full path reached after the standard sector allocator exhausts its search. The extension scans tracks `$24-$28` (36-40) before returning disk-full, confirming the 40-track overflow path. |
+| `$F173` | `$B842` | Replaces `FNDNXT`, the routine that chooses the optimum next sector on the current track. The extension routine consults the sector increment and track's maximum sector, so this is the configurable interleave/gap allocator path, not a read helper. |
 | `$FA32` | `$C010` | 1541C track-zero sensor routine relocated into the C-bank, as described above. |
 | `$EBC2` | `$C049` | Calls a small wrapper around `$F259`, then sets zero-page state. |
 | `$DCD6` | `$C075` | Calls a short C-bank cleanup/helper routine after the modified status/job handling sequence. |
 
 A separate in-place replacement at `$E91D-$E998` is a high-confidence disk-controller read/decode routine: it manipulates VIA registers `$1800`, `$1801`, and `$180D`, rotates sampled bits, and stores decoded bytes into the DOS buffer. This aligns with the documented GCR-to-HD decoding while reading. It is not one of the cross-bank calls; it is a replacement routine in the existing DOS bank. The nearby `$E781-$E7A1` change also reconfigures VIA registers and appears to support the altered controller path.
 
-The first three entries are the key SJD extension call-ins. The extension's code at `$A003`, `$B4DD`, and `$B842` is not yet assigned definitive routine names. Do not label them as "fast load", "GCR decode", or "track cache" solely from their call sites; those are hypotheses to test by following the callers, callees, zero-page usage, and VIA accesses. The upstream feature list makes fast open/load/save and GCR-to-HD decoding plausible areas, but it does not map those features to these addresses.
+The first three entries are the key SJD extension call-ins, but they are not all read paths: `$A003` is reached from FORMAT, `$B4DD` extends the disk-full/track search to 40 tracks, and `$B842` replaces next-sector allocation. The GCR-to-HD LOAD optimization is a separate in-place routine at `$E91D-$E998`. This corrects the earlier tentative classification of `$FB15` as a fast-load hook.
 
 A useful next static-analysis pass is to disassemble each trampoline's caller and the first extension routine block, then build a call graph across `$8000-$BFFF`. The host-side JiffyDOS byte transport should remain a separate question: the extension may accelerate drive-side disk operations while still using the existing JD IEC bus routines.
 
