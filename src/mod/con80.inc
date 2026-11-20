@@ -30,13 +30,16 @@ FONT = $4000
 .include "kernel_syms.inc"      ; test-generated: r0 r1 p1-p4 tmp0-tmp3 to_screen
 .endif
 
-.export c80_init, c80_write, c80_go, c80_curshow, c80_curhide, lastpos, esc_st
+.export c80_init, c80_go, c80_curshow, c80_curhide, lastpos, esc_st
+.ifndef MODULE
+.export c80_write
+.endif
 
 COLD = $d3
 ROWD = $d6
 dp   = p3                       ; destination pointer into the bitmap
 sp   = p4                       ; source pointer for scroll copies
-pp   = p4                       ; put: first source (shares sp: scroll and draw never overlap)
+src1   = p4                       ; put: first source (shares sp: scroll and draw never overlap)
 qq   = tmp0                     ; put: second source (tmp0/tmp1)
 nl   = tmp2                     ; scratch
 xv   = tmp3                     ; put: the nibbles to flip for reverse video
@@ -89,6 +92,7 @@ matrix: lda $0286
         bne @b
         rts
 
+.ifndef MODULE
 ; c80_write: r0 = buffer, r1 = count
 c80_write:
         lda r0
@@ -99,6 +103,7 @@ c80_write:
         sta p2
         lda r1+1
         sta p2+1
+.endif
 ; c80_go: p1 = buffer, p2 = count
 c80_go: jsr c80_curhide
 @next:  lda p2
@@ -405,7 +410,7 @@ draw:   jsr cellp
         lda rb                  ; odd column: the first char is the right half of its cell
         ldx #qq
         jsr gp
-        ldx #pp
+        ldx #src1
         jsr cpdp
         lda #$0f
         jsr sx
@@ -422,7 +427,7 @@ draw:   jsr cellp
         lda rb+1,x
         pha
         lda rb,x
-        ldx #pp
+        ldx #src1
         jsr gp
         pla
         ldx #qq
@@ -438,7 +443,7 @@ draw:   jsr cellp
         beq @hw                 ; none left
         ldx di
         lda rb,x
-        ldx #pp
+        ldx #src1
         jsr gp
         ldx #qq
         jsr cpdp
@@ -461,13 +466,13 @@ sx:     ldx REV
 @r:     sta xv
         rts
 
-; put: (dp)[0..7] = (pp & $f0) | (qq & $0f), then ^ xv, the eor form so that a half can come from the old
-; cell itself (pointing pp or qq at dp)
+; put: (dp)[0..7] = (src1 & $f0) | (qq & $0f), then ^ xv, the eor form so that a half can come from the old
+; cell itself (pointing src1 or qq at dp)
 put:    ldy #7
 @l:     lda (qq),y
-        eor (pp),y
+        eor (src1),y
         and #$0f
-        eor (pp),y
+        eor (src1),y
         eor xv
         sta (dp),y
         dey
