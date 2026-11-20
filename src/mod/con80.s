@@ -60,6 +60,8 @@ init:   lda mod_busy
         sta free_pages
         inc con_busy            ; no blink between the hide and the switch
         jsr cursor_hide         ; the 40-column cursor is on screen RAM we are about to reuse
+        lda #$0b
+        sta $d011               ; screen off while the matrix (screen RAM) and the bitmap are built
         jsr c80_init            ; matrix and a clear bitmap, before the VIC looks at them
         ldy #0
         jsr patch
