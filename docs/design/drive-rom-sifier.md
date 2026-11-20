@@ -111,7 +111,7 @@ See `docs/research/sjd41-generator-disk.md` for the full evidence and the local 
 
 The clean-room DOS source trace shows that Breadbin's ordinary U1 block reads enter the controller READ job (the ~block.s~ → ~drtrd~ → ~doit2~ path). SJD replaces the READ job's call at ~$F4D1~ from ~$F50A~ (~DSTRT~) to ~$B2F7~. That extension path reads the GCR block via ~$B2C0~, decodes it via ~$B132~, and returns to the common read completion path. Therefore U1 reads should use the SJD drive-side read optimization without any Breadbin host protocol change.
 
-The U2 write path enters ~WRIGHT~ at ~$F56E~. That routine and its ~JSR $F510~ header-search path remain byte-identical to the supplied JD base; the SJD sector-allocation/format hooks do not apply to an explicit track/sector write. Static analysis therefore confirms a read-side benefit but not a fast-write benefit. Measure U1 and U2 separately on VICE and the C64 Ultimate before deciding whether any additional work is warranted.
+The U2 write path enters ~WRIGHT~ at ~$F56E~. That routine and its ~JSR $F510~ header-search path remain byte-identical to the supplied JD base; the SJD sector-allocation/format hooks do not apply to an explicit track/sector write. Static analysis confirms U1 reaches the SJD read dispatcher (with a conditional optimized branch), but not a fast-write benefit. Measure U1 and U2 separately on VICE and the C64 Ultimate before deciding whether any additional work is warranted.
 
 ## First SJD41 hook map
 
