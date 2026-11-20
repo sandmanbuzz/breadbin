@@ -64,6 +64,8 @@ Tracked in `docs/design/upstream-survey.md`, whose status table is dated 2026-11
 - **Drive robustness:** a drive that was reset or stops answering gives an error and keeps working (`6aca717`, `2374af2`). Our IO release (`9d1b949`) bounds the bus waits and retries failed transfers; the two have not been compared line by line.
 - **`edit` fixes:** several (`1cd090b`, `b84924a`, `683a525`, `1224179`). One equivalent of the flicker fix (`0575584`) has landed here; the others have not been compared.
 
+**Upstream userspace that has come in with PR #45** (2026-11-19): the size pass of `chess.s` and `tetris.s` was rebased onto upstream `fec4040`, which is newer than the `0b3f621` above and includes the serial-line work (`/dev/ttyS0`, `O_NONBLOCK`, `EAGAIN`; upstream PR #46). The rebased `tetris.s` therefore carries serial-line input: it asks `SYS_ISATTY` about fd 0 and, on a serial line, opens `/dev/tty` with `O_NONBLOCK`. This fork has no serial terminal, so that path should never run here, and the console path is unchanged (`KBNDX`); but it is upstream userspace code we did not write for our kernel. Do not copy the games into this tree without checking that `SYS_ISATTY`, `O_NONBLOCK` and `EAGAIN` exist and behave as that code assumes (the PR also costs tetris 72 bytes for it). The same rebase fixed `a2a3` in chess (upstream treated any input starting with `a` as the AI command): a deliberate change from upstream.
+
 What was on this list on 2026-11-07 and is now done here: fast 1541 reads (the `fast` module) and the JiffyDOS protocol, the 1581 (`d81` module, format 2), `$?`/`&&`/`||`. Job control, a write-back cache and file times are classed "inspiration only" in the survey.
 
 ## Platform tiers
