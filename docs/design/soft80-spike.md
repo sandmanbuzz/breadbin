@@ -104,3 +104,30 @@ A scrolling full-speed listing runs at about 8-9 lines per second on a stock mac
 4. **Look-ahead scroll and row high-water marks** in the first driver; **REU scroll** behind a probe afterwards. Then a hardware run (legibility, IEC with the mode on).
 
 Sources: ACE `acesoft80.s` and `ace16.txt` (csbruce.com archive); Compute's Gazette, Sep 1984, "80 Columns For The 64" and its disk image; SOFT80.txt and SOFT80.com, Color80, the same set on mikenaberezny.com; Novaterm 9.6C binaries and `novaterm-source.tgz` (zimmers.net, `pub/cbm/c64/comm/Novaterm/`).
+
+## Host model (POC, 2026-11-20)
+
+`tools/soft80_render.py FONT [TEXT] -o out.png` models the driver's algorithms
+on the host (`tools/test_soft80_render.py` checks them against per-pixel
+drawing): the nibble-merge put, pair-aligned put_string, high-water-mark
+scroll and look-ahead scroll, counting bitmap bytes read and written. The
+font is a parameter (doubled-nibble, 2048 bytes); none is committed, since
+the Novaterm font's licence is owner-asserted only.
+
+What it showed:
+
+- The doubled-nibble merge is right: random puts in any order equal the
+  per-pixel reference, and rendered text with the Novaterm font is clean and
+  legible at 80 columns (the 4-pixel cells hold up; `m`, `w` and `@` are the
+  weak glyphs).
+- Pair-aligned put_string needs under half the bitmap reads of per-char put
+  (test asserts it): a pair never reads the cell.
+- Look-ahead scroll beats one-LF-at-a-time (test asserts fewer bytes moved).
+- On a synthetic 200-line listing (~31 columns average): 697k bytes read and
+  744k written, against 1.40M each for per-char RMW with full-width scrolls.
+  Scrolling still dominates (176 scrolls); this is the number a REU-DMA scroll
+  or a smaller scroll window would attack. Bytes, not cycles: the 6502 cost
+  per byte is still an estimate.
+
+Next: the 6502 `con80` put/scroll in a VICE test, with this model as the
+oracle for the bitmap contents.
