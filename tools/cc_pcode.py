@@ -40,6 +40,12 @@ L3a (docs/design/basic.md section 4) adds, to this back end only:
   them, pushes one result, and returns with RTS. It may not make syscalls (they clobber the eval
   stack's zero page; only `SYS` saves it) and may not use more entries than its arguments took
   (one, with none). Its name is the ca65 symbol, so the compiler's own prefixes are refused.
+  A program with an extern exports its globals as `g_NAME` (an int is 2 bytes, low first; an
+  array is its elements), so such a routine can use them directly rather than through
+  arguments.
+
+A source comment `/* fstack N */` at the start of a line sets the program's frame stack to N bytes (default 1024, 128 to 8192); a
+program that knows its depth gives back the rest (bas takes 768).
 
 A compare that decides a branch is the VM's compare and a `BRTRU`/`BRFLS`, with no `NEG`.
 
@@ -56,7 +62,9 @@ from cc import CompileError, Var
 
 ESLIMIT = 8                          # eval stack entries a framed function may use (pvm.md, section 4)
 FRAME_MAX = 255                      # ENTER/LEAVE take the frame size in a byte
+FSTACK_MIN, FSTACK_MAX = 128, 8192
 FSTACK = 1024                        # bytes of frame stack (return IPs, spills, frames)
+POOL = 39680                         # the user pool ($0800-$A2FF): static bytes past it can never load
 STRAIGHT = 240                       # most bytecode bytes past the IP base before a renormalising branch
 
 SIZE = {"P_CN": 1, "P_OP": 1, "P_B": 2, "P_W": 3, "P_BR": 3, "P_ENTER": 3, "P_SYS": 2}
@@ -259,9 +267,11 @@ class PGen(cc.Gen):
             if name not in self.funcs:
                 raise CompileError(f"line {line}: undefined function {name}")
         total = sum(v.nbytes() for v in self.globals.values())
-        if total > cc.STATIC_MAX:
-            raise CompileError(f"the program's static variables take {total} bytes; the limit is {cc.STATIC_MAX}")
+        if total > POOL:   # cc.STATIC_MAX is the native back end's (the on-system `as`); ca65 has none
+            raise CompileError(f"the program's static variables take {total} bytes; the limit is {POOL}")
         helpers = "".join(HELPERS[h] for h in HELPERS if h in self.helpers)
+        if self.externs:    # the natives may share the globals, by their labels
+            helpers += "".join(f".export {v.label}\n" for v in self.globals.values())
         return (PRELUDE.format(fstack=self.fstack) + "\n".join(self.out) + "\n" + helpers
                 + '.segment "DATA"\n' + self.strings_text() + "\n".join(self.gdata) + "\n"
                 + '.segment "BSS"\n' + "\n".join(self.gres) + "\n" + '.segment "CODE"\n')
@@ -790,12 +800,17 @@ class PGen(cc.Gen):
             self.push()
 
 
-def compile_pcode(src, fstack=FSTACK):
+def compile_pcode(src, fstack=None):
     """ca65 source for the program (assemble with -I include -I src/pvm; link with pvmlink)."""
     import sys
     limit = sys.getrecursionlimit()
     sys.setrecursionlimit(max(limit, 6000))
     try:
+        if fstack is None:              # an explicit argument wins; else the program's own, else the default
+            m = re.search(r"^/\*\s*fstack\s+(\d+)\s*\*/", src, re.M)
+            fstack = int(m.group(1)) if m else FSTACK
+        if not FSTACK_MIN <= fstack <= FSTACK_MAX:
+            raise CompileError(f"fstack {fstack}: the frame stack is {FSTACK_MIN} to {FSTACK_MAX} bytes")
         funcs, globs = cc.Parser(cc.lex(src)).program()
         seen = set()
         for name, _, _, line in funcs:
