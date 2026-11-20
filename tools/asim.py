@@ -29,6 +29,7 @@ with open(os.path.join(ROOT, "include", "breadbin.inc")) as _f:
         if _m:
             SYS[0xCF00 + 3 * int(_m.group(2))] = _m.group(1)
 ENOENT = 2
+ENOSYS = 38
 EBADF = 9
 EINVAL = 22
 ENOSPC = 28
@@ -82,7 +83,7 @@ def cx_load(data, page, lib_page=None, formats=(1, 2)):
     return bytes(out), bss, hdr
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None, libs=None, profile=None):
+def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None, libs=None, profile=None, brk=64):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
     A format 2 program's library is loaded at LIB_PAGE from libs[its path] (a host file) or build/root.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
@@ -90,6 +91,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
     cooked=True makes a read of fd 0 stop after the first LF, as the console's cooked mode does (a read at the end of stdin returns 0 bytes).
     poke maps an offset in the program image (a link address, e.g. a label from build/p/<prog>.lbl) to bytes written there before the first instruction: a board or a table to start from.
     kbd=True models the keyboard and clock a game polls: KEYCNT ($C6) is 1 while stdin has bytes left, the jiffy clock ($A0-$A2, big-endian) starts at jiffy0 and each YIELD advances it by yield_jiffies, and TIME answers it (A/X/Y = lo/mid/hi).
+    brk is the most pages BRK (MEMINFO with r0+1 = 0) will grant in all, as the pool above the program allows: the default 64 is a 16,384-byte arena.
     profile, if a dict, collects 6502 cycles by image offset: native code's PC, and for code the VM
     runs, the IP of the opcode being run (attribute them to the labels of the -Ln file)."""
     if MPU is None:
@@ -139,6 +141,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
     writes = [0]
     renames = [0]
     next_fd = [3]
+    brk_got = [0]
 
     def cstr(addr):
         s = bytearray()
@@ -244,6 +247,15 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
                     ret(True, EBADF)
                     continue
                 ret(False, 0)
+            elif name == "MEMINFO":           # r0+1 = 0: BRK, A = n pages, the free ones after the program; else not modelled
+                if not mem[3]:
+                    first = (base + len(image) + bss + 255 >> 8) + brk_got[0]
+                    got = max(0, min(fd, brk - brk_got[0], LIB_PAGE - first))
+                    brk_got[0] += got
+                    cpu.x = got
+                    ret(False, first)
+                else:
+                    ret(True, ENOSYS)
             elif name == "UNLINK":            # r0 = path
                 p = cstr(r(2))
                 if p in res.files:

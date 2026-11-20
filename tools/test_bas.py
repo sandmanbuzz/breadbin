@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src", "pc", "bas.c")
 RT = os.path.join(ROOT, "src", "pc", "bas-rt.s")
 _built = {}
-FREE = "16128 BYTES FREE\n"
+FREE = "16384 BYTES FREE\n"
 LINE = ":".join(['?"A";'] * 26)       # 155 bytes stored (? is one token), 185 of code with the line's rt_ln
 LISTED = LINE.replace("?", "PRINT")
 
@@ -34,10 +34,10 @@ def binary():
     return _built["path"]
 
 
-def bas(text, tty=False, limit=40_000_000):
+def bas(text, tty=False, limit=40_000_000, brk=64):
     """bas with text on stdin: (output as str, exit status)."""
     r = asim.run("bas", [], path=binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
-                 stdin=text.encode("latin-1"), tty=tty, limit=limit)
+                 stdin=text.encode("latin-1"), tty=tty, limit=limit, brk=brk)
     return r.out.decode("latin-1"), r.exit
 
 
@@ -47,6 +47,16 @@ class Bas(unittest.TestCase):
         out, status = bas(text, **kw)
         self.assertEqual(status, 0, out)
         return out
+
+    def test_the_arena_is_what_the_kernel_grants(self):
+        # BYTES FREE follows the pages BRK gives: 64 is 16,384 bytes, 80 is 20,480, and a pool
+        # too small for 4096 bytes is refused with a message on stderr, not a crash
+        for pages, text in ((64, "16384"), (80, "20480"), (120, "30720"), (200, "30720"), (16, "4096")):
+            out, status = bas("", tty=True, brk=pages)
+            self.assertEqual((out, status), (text + " BYTES FREE\nREADY.\n", 0), pages)
+        r = asim.run("bas", [], path=binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
+                     stdin=b"", tty=True, brk=15)
+        self.assertEqual((r.out, r.err, r.exit), (b"", b"bas: out of memory\n", 1))
 
     def test_hello_end_to_end(self):
         self.assertEqual(self.out('10 PRINT "HELLO, WORLD"\nRUN\n'), "HELLO, WORLD\n")
@@ -175,22 +185,22 @@ class Bas(unittest.TestCase):
         self.assertEqual(out, " %g  %g \n" % (a, a * 2))
 
     def test_out_of_memory(self):
-        # text, code and variables share the 16128-byte arena. The text: a line of 150 Ys is 159
-        # bytes (2 + 1 + 2 of header, 153 of text, a 0), so 101 fit; the rest are refused and the store is unhurt
+        # text, code and variables share the 16384-byte arena. The text: a line of 150 Ys is 159
+        # bytes (2 + 1 + 2 of header, 153 of text, a 0), so 103 fit; the rest are refused and the store is unhurt
         prog = "".join('%d ?"%s"\n' % (n, "Y" * 150) for n in range(1, 110))
-        out = self.out(prog + "LIST 1\nLIST 101\nLIST 102\n", limit=400_000_000)
-        self.assertEqual(out, "?OUT OF MEMORY ERROR\n" * 8 + '1 PRINT"' + "Y" * 150 + '"\n101 PRINT"' + "Y" * 150 + '"\n')
+        out = self.out(prog + "LIST 1\nLIST 103\nLIST 104\n", limit=400_000_000)
+        self.assertEqual(out, "?OUT OF MEMORY ERROR\n" * 6 + '1 PRINT"' + "Y" * 150 + '"\n103 PRINT"' + "Y" * 150 + '"\n')
 
     def test_out_of_memory_compiling(self):
-        # the code: 60 lines leave room for 35 lines' code; the error names the line being
+        # the code: 60 lines leave room for 36 lines' code; the error names the line being
         # compiled, and a typed line still runs
         out = self.out(BIG(60) + 'RUN\n?"STILL"\nLIST 60\n', limit=400_000_000)
-        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 36\nSTILL\n60 " + LISTED + "\n")
-        # the variables: 46 lines leave too little (45 leave enough) for 26 new variables (6 bytes each) and their
+        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 37\nSTILL\n60 " + LISTED + "\n")
+        # the variables: 47 lines leave too little (46 leave enough) for 26 new variables (6 bytes each) and their
         # assignments (5 bytes of code each: a constant, then XSTV)
-        out = self.out(BIG(46) + "47 " + ":".join("A%s=0" % chr(65 + i) for i in range(26)) + "\nRUN\n",
+        out = self.out(BIG(47) + "48 " + ":".join("A%s=0" % chr(65 + i) for i in range(26)) + "\nRUN\n",
                        limit=400_000_000)
-        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 47\n")
+        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 48\n")
 
     def test_opcode_numbers_agree_with_the_vm(self):
         inc = open(os.path.join(ROOT, "src", "pvm", "pvm.inc")).read()

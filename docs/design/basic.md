@@ -187,7 +187,7 @@ to catch assumptions VICE and py65 share. Not a per-slice gate.
 
 ### 6.1 Runnable size: the plan (owner direction 2026-11-20)
 
-A `16128 BYTES FREE` that runs a third of that is not acceptable; the shell leaves about 31 KB.
+A `16384 BYTES FREE` that runs a third of that is not acceptable; the shell leaves about 31 KB.
 Options the owner listed: a separate code arena, a resident runtime, the compiler as a child that
 is released when done, immediate mode split from the compiler.
 
@@ -212,9 +212,28 @@ today) and the compiler K. **The peak is T + C + K, and only the peak limits a p
    the compiler emits and the VM runs fewer bytes, which is also the compile-speed lever.
    *Landed (2026-11-20, XOPs, `pvm.md` section 4 item 5):* 289 lines of a mixed test program
    fit where 208 did (+39%). It cost about 350 bytes (the VM table and handler, the routines, a
-   56-byte vector table) and a library page, so the arena is 16,128 bytes, not 16,384, to keep
-   the load at the shell. The code is still well above 1.1 T: the next gain is in what is left
-   (`PRINT` strings, `FOR`/`GOSUB` as calls, `IF` branches) and in K.
+   56-byte vector table) and a library page, so the arena went to 16,128 bytes.
+   *Landed (XOP calls):* the 12 hottest compiler externs (`c_sp`, `c_tok`, `c_emit`, `c_op1`,
+   `c_ldv`, `c_digit`, `c_ncall`, `c_stv`, `c_room`, `c_opw`, `c_letter`, `c_ult`) are called by a
+   one-byte XOP (`extern ... /* xop N */`; the 12 free slots E8-FE) instead of a 3-byte CALL:
+   the image is 648 bytes smaller on disk, and the arena is back at 16,384. At the shell the
+   arena fits to between 16,640 and 16,896 (measured: 16,640 loads, 16,896 is "out of memory"),
+   so the margin at 16,384 is 256 to 512 bytes. The code is still well above 1.1 T: the next
+   gain is in what is left (`PRINT` strings, `FOR`/`GOSUB` as calls, `IF` branches) and in K.
+
+   *Landed (BRK, 2026-11-20):* the arena is no longer BSS. The kernel's `meminfo` call with A not
+   0 is `BRK` (`mem.s`, 45 bytes; `SYS_BRK` in `breadbin.inc`): it grows the caller's run by as
+   many of the pages directly after it as are free (A = first, X = count), and exit frees them
+   with the rest. `bas` asks for up to 120 pages (30,720 bytes, so an `int` offset stays
+   positive), keeps what it is given, and says `bas: out of memory` below 4,096 bytes. So
+   `BYTES FREE` is what the machine has: a smaller pool (the opt-in 80-column mode may take it
+   to about 115 pages) gives a smaller number, never a failed start, and every byte the image
+   loses is a byte of arena. Measured at the shell: the pool is 155 pages; 27 are the system, 11
+   the VM library, `bas` is 47 pages (10 KB of code and data, 1.7 KB of other BSS) and the arena
+   takes the 64 after it: 16,384, so the stock figure has not moved (the static arena was already
+   the last page that fit); the 7 free pages below `bas` are a hole no 47-page image fits. The
+   next gains are therefore all in the image, 256 bytes of arena per page saved.
+
 2. **A smaller K.** Native `getline`, `cline`, `var`, `constant`, `match` and `move` (the profile's
    top entries) cost less than the p-code they replace; each KB of K is 0.3 KB of T.
 3. **Compile to a file, run from a runner.** `bc prog.bas` writes dense code; a runner holding

@@ -222,12 +222,20 @@ class Basic(unittest.TestCase):
     the shell: it is built by the Makefile and on the root like any program."""
 
     def test_hello_typed_at_the_shell(self):
+        pg_used = label("pg_used")
+        npool = (int(re.search(r"^KSTART\s*=\s*\$([0-9A-Fa-f]+)", open(os.path.join(ROOT, "src", "kernel", "k.inc")).read(),
+                              re.M).group(1), 16) >> 8) - 8
         with Vice(make_disk()) as v:
             v.wait_shell()
+
+            def used():
+                return sum(1 for b in v.mem(pg_used, pg_used + npool - 1) if b)
+            before = used()
             v.type("clear\n")
             v._wait(lambda ls: [l for l in ls if l] == ["/ $"], 60, what="clear")
             v.type("bas\n")
-            v.wait_for("READY.", timeout=60)
+            banner = v.wait_for("READY.", timeout=60)
+            during = used()
             v.type('10 print "hello, world"\n')
             v.type("list\n")
             listed = v.wait_for('10 PRINT "hello, world"', timeout=60, after="list")
@@ -237,6 +245,14 @@ class Basic(unittest.TestCase):
             v.wait_for("$", timeout=60, after="bye")
             status = v.run("echo $?", clear=False, timeout=30)
             piped = v.run("echo '? \"PIPED\";:?\"!\"' | bas", timeout=60)
+            after = used()
+        # BYTES FREE is what BRK gave the arena: never fewer than the 16,384 the compiler started
+        # with, and all of it comes back at exit
+        free = int(re.search(r"(\d+) BYTES FREE", banner).group(1))
+        sys.stderr.write("bas banner: %d BYTES FREE, %d pages in use (%d before)\n" % (free, during, before))
+        self.assertGreaterEqual(free, 16384)
+        self.assertGreaterEqual(during - before, free // 256)
+        self.assertEqual(after, before)
         self.assertIn('10 PRINT "hello, world"', listed)
         self.assertEqual([l for l in ran.split("run")[-1].splitlines() if l.strip()], ["hello, world", "READY."])
         self.assertEqual(status.split(), ["0"])

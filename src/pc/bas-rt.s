@@ -17,12 +17,13 @@
 ; finds, above its own return address, the IP the VM resumes at when it returns: low byte at
 ; $0103 + S, high at $0104 + S. rt_go and rt_throw jump by rewriting it.
 .include "pvm.inc"
+.include "breadbin.inc"
 
 .export n_ldv, n_ldk, n_stv, n_dup, n_add, n_sub, n_mul, n_div, n_neg, n_abs, n_int, n_sgn
 .export n_fromi, n_toi, n_cmp, n_tst
 .export rt_mark, rt_go, rt_ln, xtab
 .export c_ldv, c_stv, c_dup, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_mac, c_fmt
-.export c_throw, c_err, c_curip, c_nclr, c_crunch, c_find
+.export c_grow, c_throw, c_err, c_curip, c_nclr, c_crunch, c_find
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 
 NDEPTH  = 16
@@ -1047,6 +1048,23 @@ match:  lda kbase
         sec
         rts
 
+; c_grow(n): ask the kernel for up to n more pages (SYS_BRK; they are the free ones directly after
+; the program's own) for the arena: g_mem = the first, the result the number granted.
+c_grow: lda P_ESTKL,x
+        stx sx
+        ldy #0
+        sty r0+1                ; BRK is meminfo with no buffer
+        jsr SYS_BRK
+        sta g_mem+1
+        lda #0
+        sta g_mem
+        txa
+        ldx sx
+        sta P_ESTKL,x
+        lda #0
+        sta P_ESTKH,x
+        rts
+
 ; c_find(mem, top, n): the offset in mem of the first line numbered n or above (unsigned), or
 ; top. A line is its number (2 bytes), its length L, 2 bytes, the text and a 0: 6 + L bytes.
 c_find: lda P_ESTKL,x
@@ -1204,11 +1222,11 @@ emitb:  pha
         lda #E_OOM
         sta g_err
 @r:     rts
-:       lda #<g_mem
+:       lda g_mem               ; mem is a pointer: c_grow sets it
         clc
         adc g_cend
         sta ptr
-        lda #>g_mem
+        lda g_mem+1
         adc g_cend+1
         sta ptr+1
         pla
@@ -1342,6 +1360,6 @@ xtab:   .word x_ldv, x_stv, x_ldk, x_ln                 ; C8 CA CC CE
         .word n_add, n_sub, n_mul, n_div                 ; D0 D2 D4 D6
         .word n_neg, n_cmp, n_int, n_abs                 ; D8 DA DC DE
         .word n_sgn, n_fromi, n_toi, n_tst               ; E0 E2 E4 E6
-        .repeat 12
-        .word x_nop                                      ; E8 .. FE: unused
-        .endrepeat
+        .word c_sp, c_tok, c_emit, c_op1                 ; E8 EA EC EE: the compiler's hot externs,
+        .word c_ldv, c_digit, c_ncall, c_stv             ; F0 F2 F4 F6  called as one byte (bas.c's
+        .word c_room, c_opw, c_letter, c_ult             ; F8 FA FC FE  /* xop N */ declarations)

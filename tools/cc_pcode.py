@@ -48,7 +48,11 @@ A source comment `/* fstack N */` at the start of a line sets the program's fram
 program that knows its depth gives back the rest (bas takes 768).
 
 A source line `/* xops */` makes the program keep the VM's XOP vector table (pvm.s) under its
-frame stack, copied at start from `xtab`, which the program's natives export.
+frame stack, copied at start from `xtab`, which the program's natives export. An extern
+declaration followed on its line by `/* xop N */` (N even, 200 to 254) is called by that one
+opcode byte instead of a 3-byte CALL: the native must not read the return IP (an ordinary
+native callee that takes its arguments from the eval stack is fine) and `xtab` names it at
+slot (N - 200) / 2.
 
 A compare that decides a branch is the VM's compare and a `BRTRU`/`BRFLS`, with no `NEG`.
 
@@ -194,10 +198,11 @@ class Local(Var):
 
 
 class PGen(cc.Gen):
-    def __init__(self, funcs, fstack=FSTACK, xops=False):
+    def __init__(self, funcs, fstack=FSTACK, xops=False, xcalls=None):
         super().__init__(funcs)
         self.fstack = fstack
         self.xops = xops
+        self.xcalls = xcalls or {}       # extern name -> its XOP opcode: a call is one byte
         self.helpers = set()
         self._need = {}
         self.loops = []                  # (break label, continue label), innermost last
@@ -739,7 +744,11 @@ class PGen(cc.Gen):
             raise CompileError(f"line {line}: {name} takes {len(params)} argument(s), not {len(args)}")
         self.arguments(name, args, [(base, ptr, pname) for base, ptr, pname, _ in params], line)
         self.calls.append((name, line))
-        self.op("P_W", "PO_CALL", name if name in self.externs else "fn_" + name)
+        if name in self.xcalls:
+            self.op("P_OP", self.xcalls[name])
+            self.straight = 0               # the VM renormalises IP after an XOP, as after a CALL
+        else:
+            self.op("P_W", "PO_CALL", name if name in self.externs else "fn_" + name)
         self.pop(len(args))
         self.push()
 
@@ -833,7 +842,14 @@ def compile_pcode(src, fstack=None):
             if name in seen:
                 raise CompileError(f"line {line}: function {name} is defined twice")
             seen.add(name)
-        return PGen(funcs, fstack, bool(re.search(r"^/\*\s*xops\s*\*/", src, re.M))).program(funcs, globs)
+        xops = bool(re.search(r"^/\*\s*xops\s*\*/", src, re.M))
+        xcalls = {}
+        for m in re.finditer(r"^extern\s[^;]*?(\w+)\s*\([^;]*\)[ \t]*;[ \t]*/\*[ \t]*xop[ \t]+(\d+)", src, re.M):
+            n = int(m.group(2))
+            if not xops or n % 2 or not 200 <= n <= 254:
+                raise CompileError(f"extern {m.group(1)}: xop {n}: needs /* xops */ and an even number, 200 to 254")
+            xcalls[m.group(1)] = n
+        return PGen(funcs, fstack, xops, xcalls).program(funcs, globs)
     except RecursionError:
         raise CompileError("expression nested too deeply for the compiler") from None
     finally:
