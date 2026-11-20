@@ -187,6 +187,46 @@ Static inspection of the supplied SJD image now identifies several explicit tram
 | `$EBC2` | `$C049` | Calls a small wrapper around `$F259`, then sets zero-page state. |
 | `$DCD6` | `$C075` | Calls a short C-bank cleanup/helper routine after the modified status/job handling sequence. |
 
+A raw byte-pattern scan of the SJD upper bank versus the supplied JD base finds 34 **changed** absolute JSR/JMP candidates into `$8000-$BFFF`. This is a candidate inventory, not a disassembly: some apparent opcodes may be data or operands. The confirmed/partially mapped entries above are only the starting subset.
+
+| DOS call site | Extension target |
+|---:|---:|
+| `$E653` | `$B721` |
+| `$E6D1` | `$B75F` |
+| `$E6EA`, `$E6F4` | `$B7AA` |
+| `$E8D7` | `$B81D` |
+| `$E9FA` | `$B100` |
+| `$EBFC` | `$AF00` |
+| `$EC55` | `$B638` |
+| `$EE1D` | `$B6A8` |
+| `$EE3D` | `$B690` |
+| `$EE43` | `$B678` |
+| `$EE7F` | `$B4D6` |
+| `$EED2` | `$B5DF` |
+| `$EF28` | `$B5D6` |
+| `$EF3A` | `$B4A4` |
+| `$EF4F` | `$B46D` |
+| `$EF85` | `$B794` |
+| `$EFC5` | `$B86F` |
+| `$F077`, `$F0B7` | `$B5CC` |
+| `$F0D1` | `$B72F` |
+| `$F15C` | `$B4DD` |
+| `$F173` | `$B842` |
+| `$F1AE` | `$B7C4` |
+| `$F1DC` | `$B505` |
+| `$F1FA` | `$B5F6` |
+| `$F24B` | `$B613` |
+| `$F27A` | `$A900` |
+| `$F348` | `$B618` |
+| `$F37C` | `$B6B1` |
+| `$F3E8` | `$B82F` |
+| `$F4D1` | `$B2F7` |
+| `$FACB` | `$B6AD` |
+| `$FB15` | `$A003` |
+
+Run the scanner with:
+`python3 tools/sjd41/crossrefs.py --jd-rom JiffyDOS_6.01-1541-and-1541-II.bin --sjd-rom S-JiffyDOS_1541C_v1.bin`
+
 A separate in-place replacement at `$E91D-$E998` is a high-confidence disk-controller read/decode routine: it manipulates VIA registers `$1800`, `$1801`, and `$180D`, rotates sampled bits, and stores decoded bytes into the DOS buffer. This aligns with the documented GCR-to-HD decoding while reading. It is not one of the cross-bank calls; it is a replacement routine in the existing DOS bank. The nearby `$E781-$E7A1` change also reconfigures VIA registers and appears to support the altered controller path.
 
 The first three entries are the key SJD extension call-ins, but they are not all read paths: `$A003` is reached from FORMAT, `$B4DD` extends the disk-full/track search to 40 tracks, and `$B842` replaces next-sector allocation. The GCR-to-HD LOAD optimization is a separate in-place routine at `$E91D-$E998`. This corrects the earlier tentative classification of `$FB15` as a fast-load hook.
