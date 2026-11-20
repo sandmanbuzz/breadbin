@@ -387,12 +387,100 @@ class L3aRefused(unittest.TestCase):
                          ("int main() { while (1) break; return 0; }", "break"),
                          ("int main() { while (1) continue; return 0; }", "continue"),
                          ("int main() { return close(1); }", "the builtin close"),
-                         ("extern int f(int a);\nint main() { return 0; }", "extern")):
+                         ("extern int f(int a);\nint main() { return 0; }", "extern"),
+                         ("int main() { return 6 & 3; }", "&"), ("int main() { return 6 | 3; }", "|"),
+                         ("int main() { return 6 ^ 3; }", "^"), ("int main() { return 6 << 3; }", "<<"),
+                         ("int main() { return 6 >> 1; }", ">>"), ("int main() { return ~6; }", "~"),
+                         ("int main() { return icall(0); }", "the builtin icall"),
+                         ("int f() { return 1; }\nint main() { char *p = &f; return 0; }",
+                          "the address of a function")):
             self.fails(src, msg + " is p-code only", native=True)
 
     def test_the_native_back_end_keeps_its_own_names(self):
         # a native program may still define read() itself (the L2 language had no builtins but puts)
         self.assertIn("v_read_a", cc.compile_c("int read(int a) { return a; }\nint main() { return read(1); }"))
+
+
+
+class L3b(unittest.TestCase):
+    """What the BASIC compiler's code generator needs: bit operations to split an address into
+    bytes, pointer difference to make an int of one, and &f with icall to run the code it built."""
+
+    def check(self, src, want=b"Y", status=0, **kw):
+        r = run_full(src, **kw)
+        self.assertEqual((r.out, r.exit), (want, status), src)
+        return r
+
+    def test_bit_operations_and_shifts_against_a_model(self):
+        vals = [-32768, -32767, -256, -255, -2, -1, 0, 1, 2, 5, 255, 256, 4660, 32767]
+        ops = {"&": lambda a, b: a & b, "|": lambda a, b: a | b, "^": lambda a, b: a ^ b}
+        lit = lambda v: "(0 - %d)" % -v if v < 0 else str(v)  # noqa: E731
+        lines = []
+        for a in vals:
+            for b in vals:
+                for op, f in ops.items():
+                    lines.append("if ((%s %s %s) != %s) return 1;" % (lit(a), op, lit(b), lit(s16(f(a, b)))))
+            lines.append("if (~%s != %s) return 2;" % (lit(a), lit(s16(~a))))
+            for n in range(16):
+                lines.append("if ((%s << %d) != %s) return 3;" % (lit(a), n, lit(s16(a << n))))
+                lines.append("if ((%s >> %d) != %s) return 4;" % (lit(a), n, lit(a >> n)))   # arithmetic
+        self.check("int main() {\n%s\nputs(\"Y\"); return 0; }" % "\n".join(lines))
+
+    def test_precedence_is_c_precedence(self):
+        # * over + over << over < over == over & over ^ over | over &&
+        self.check('int main() { if ((1 + 2 << 1) == 6) if ((1 << 2 < 5) == 1) if ((3 & 1 == 1) == 1)'
+                   ' if ((6 ^ 3 & 1) == 7) if ((1 | 6 ^ 3) == 5) if ((1 | 2 && 0) == 0) if ((~0 & 7) == 7)'
+                   ' if ((2 * 3 << 1) == 12) if (-1 >> 4 == -1) puts("Y"); return 0; }')
+
+    def test_bit_operations_in_conditions_and_with_variables(self):
+        self.check("int main() { int a = 12; char c = 255; int n = 0;\n"
+                   "  if (a & 3) return 1; if (!(a & 4)) return 2; while (a) { a = a >> 1; n = n + 1; }\n"
+                   "  if (n != 4) return 3; if ((c << 8 >> 8) != -1) return 4; if ((c ^ 15) != 240) return 5;\n"
+                   '  puts("Y"); return 0; }')
+
+    def test_pointer_difference(self):
+        self.check('char s[10]; int w[6];\n'
+                   'int main() { char *p = s; char *q = &s[7]; int *a = w; int *b = &w[5]; char *z = 0;\n'
+                   '  if (q - p != 7) return 1; if (p - q != -7) return 2; if (b - a != 5) return 3;\n'
+                   '  if (a - b != -5) return 4; if (p - p != 0) return 5;\n'
+                   '  if (p - z == 0) return 6; if ((p + 3) - z != (p - z) + 3) return 7;\n'
+                   '  puts("Y"); return 0; }')
+
+    def test_icall_runs_a_function_by_its_address(self):
+        self.check('int h() { puts("H"); return 7; }\n'
+                   'int main() { char *p = &h; if (icall(p) != 7) return 1; return icall(&h) + 30; }',
+                   b"HH", 37)
+
+    def test_icall_runs_code_built_at_run_time(self):
+        # what RUN does: the JSR pvm_interp header copied from a function of the program, then
+        # bytecode: CALL h; CB 5; ADD; RET (PO_CALL $54, PO_CB $2A, PO_ADD $82, PO_RET $5C)
+        self.check('char buf[16];\n'
+                   'int h() { puts("H"); return 7; }\n'
+                   'int main() { char *z = 0; char *p = &h; int a = p - z; int i;\n'
+                   '  for (i = 0; i < 3; i = i + 1) buf[i] = p[i];\n'
+                   '  buf[3] = 84; buf[4] = a; buf[5] = a >> 8; buf[6] = 42; buf[7] = 5; buf[8] = 130;'
+                   ' buf[9] = 92;\n'
+                   '  return icall(buf); }', b"H", 12)
+
+    def test_isatty_is_one_or_zero(self):
+        src = "int main() { return isatty(0) * 10 + isatty(1) * 2 + isatty(7) + 40; }"
+        self.check(src, b"", 52, tty=True)
+        self.check(src, b"", 40, tty=False)
+
+    def test_refusals(self):
+        def fails(src, msg):
+            with self.assertRaises(cc.CompileError) as cm:
+                cc_pcode.compile_pcode(src)
+            self.assertIn(msg, str(cm.exception))
+        fails("int main() { return icall(5); }", "argument 1 of icall: a number where a pointer is needed")
+        fails("int main() { return icall(); }", "icall takes 1 argument, not 0")
+        fails("int icall() { return 1; }\nint main() { return 0; }", "icall is a builtin")
+        fails("int main() { char *p = 0; return p & 1; }", "a pointer can only be added to or subtracted from")
+        fails("int main() { char *p = 0; return ~p; }", "~ of a pointer")
+        fails("int main() { char *p = 0; int *q = 0; return p - q; }", "- of a pointer to int from a pointer to char")
+        fails("int main() { char *p = 0; return 1 - p; }", "a pointer cannot be the right side of -")
+        fails("int main() { char *p = 0; return p + p; }", "pointer")
+        fails("int f() { return 1; }\nint main() { int *p = &f; return 0; }", "a pointer to char where a pointer to int")
 
 
 if __name__ == "__main__":

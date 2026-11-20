@@ -26,7 +26,8 @@ import re
 import sys
 
 KEYWORDS = {"int", "char", "if", "else", "while", "for", "return", "break", "continue", "extern"}
-SYSCALLS = ("read", "write", "open", "close", "exit")    # builtins of the p-code back end
+SYSCALLS = ("read", "write", "open", "close", "exit", "isatty")   # p-code back end builtins
+BUILTINS = SYSCALLS + ("icall",)                                  # and the call through an address
 PCODE_ONLY = "is p-code only (cc.py --pcode): the native back end is frozen at the L2 language"
 MAX_DEPTH = 32                       # values pushed at once: cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
@@ -40,7 +41,7 @@ TOKEN = re.compile(r"""
     (?P<str>"(?:\\.|[^"\\\n])*") |
     (?P<chr>'(?:\\.|[^'\\\n])') |
     (?P<id>[A-Za-z_][A-Za-z_0-9]*) |
-    (?P<op>==|!=|<=|>=|&&|\|\||[-+*/%<>=!(){};,&\[\]])
+    (?P<op>==|!=|<<|>>|<=|>=|&&|\|\||[-+*/%<>=!(){};,&|^~\[\]])
 """, re.X | re.S)
 
 ESCAPES = {"n": 10, "t": 9, "r": 13, "0": 0, "\\": 92, '"': 34, "'": 39}
@@ -95,7 +96,9 @@ def unescape(body, line, nul=False):
     return bytes(out)
 
 
-LEVELS = [("||",), ("&&",), ("==", "!="), ("<", ">", "<=", ">="), ("+", "-"), ("*", "/", "%")]
+LEVELS = [("||",), ("&&",), ("|",), ("^",), ("&",), ("==", "!="), ("<", ">", "<=", ">="), ("<<", ">>"),
+          ("+", "-"), ("*", "/", "%")]
+PREC = {op: i for i, ops in enumerate(LEVELS) for op in ops}
 TYPES = ("int", "char")
 
 
@@ -300,12 +303,12 @@ class Parser:
         return self.binary(0)
 
     def binary(self, level):
-        if level == len(LEVELS):
-            return self.unary()
-        left = self.binary(level + 1)
-        while self.peek()[0] == "op" and self.peek()[1] in LEVELS[level]:
+        """Precedence climbing: operators at level or tighter, left-associative. One recursion
+        per operator, not per level, so nesting depth costs the same at any number of levels."""
+        left = self.unary()
+        while self.peek()[0] == "op" and PREC.get(self.peek()[1], -1) >= level:
             op, line = self.take()[1], self.peek()[2]
-            left = ("bin", op, left, self.binary(level + 1), line)
+            left = ("bin", op, left, self.binary(PREC[op] + 1), line)
         return left
 
     def unary(self):
@@ -315,6 +318,9 @@ class Parser:
         if self.at("op", "-"):
             line = self.take()[2]
             return ("neg", self.unary(), line)
+        if self.at("op", "~"):
+            line = self.take()[2]
+            return ("comp", self.unary(), line)
         if self.at("op", "*"):
             line = self.take()[2]
             return ("deref", self.unary(), line)
@@ -1019,6 +1025,8 @@ class Gen:
             else:
                 self.call(name, args, line)
             return ("int", False)
+        if kind == "comp":
+            raise CompileError(f"line {e[2]}: ~ {PCODE_ONLY}")
         if kind == "neg":
             if self.expr(e[1])[1]:
                 raise CompileError(f"line {e[2]}: - of a pointer is not in this slice")
@@ -1048,6 +1056,8 @@ class Gen:
     def addr_of(self, e):
         x, line = e[1], e[2]
         if x[0] == "var":
+            if x[1] not in self.vars and x[1] not in self.globals and x[1] in self.funcs:
+                raise CompileError(f"line {line}: the address of a function {PCODE_ONLY}")
             v = self.var(x[1], x[2])
             if v.ptr and v.arr is None:
                 raise CompileError(f"line {line}: pointers to pointers are not in this slice")
@@ -1064,7 +1074,7 @@ class Gen:
 
     def binary(self, e):
         _, op, a, b, line = e
-        if op in ("%", "&&", "||"):
+        if op in ("%", "&&", "||", "&", "|", "^", "<<", ">>"):
             raise CompileError(f"line {line}: {op} {PCODE_ONLY}")
         ta = self.expr(a)
         self.push()
@@ -1084,7 +1094,7 @@ class Gen:
         return ("int", False)
 
     def call(self, name, args, line):
-        if name not in self.funcs and name in SYSCALLS:
+        if name not in self.funcs and name in BUILTINS:
             raise CompileError(f"line {line}: the builtin {name} {PCODE_ONLY}")
         if name not in self.funcs:
             raise CompileError(f"line {line}: undefined function {name}")

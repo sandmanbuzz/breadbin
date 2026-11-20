@@ -52,8 +52,9 @@ def build_lib(d):
 
 
 def link_prog(out, libdir, objs):
-    """OUT, format 2, from ca65 objects linked against the library built in libdir."""
-    d = os.path.dirname(os.path.abspath(out))
+    """OUT, format 2, from ca65 objects linked against the library built in libdir. The
+    intermediate files go beside the first object, not beside OUT (which may be a disk's root)."""
+    d = os.path.dirname(os.path.abspath(objs[0]))
     stem = os.path.join(d, os.path.basename(out))
     stub = os.path.join(libdir, "pvmstub.s")
     for base, tag in ((cx.LIBBASE, "a"), (cx.LIBBASE + 0x100, "b")):

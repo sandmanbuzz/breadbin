@@ -30,6 +30,7 @@ with open(os.path.join(ROOT, "include", "breadbin.inc")) as _f:
             SYS[0xCF00 + 3 * int(_m.group(2))] = _m.group(1)
 ENOENT = 2
 EBADF = 9
+EINVAL = 22
 ENOSPC = 28
 ENAMETOOLONG = 36
 
@@ -258,8 +259,8 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
                     ret(False, 0)
                 else:
                     ret(True, ENOENT)
-            elif name == "ISATTY":            # fd 0 is the console when tty=True
-                ret(not (fd == 0 and tty), 0)
+            elif name == "ISATTY":            # fds 0-2 are the console when tty=True; else EINVAL, as file.s
+                ret(not (fd <= 2 and tty), 0 if fd <= 2 and tty else EINVAL)
             elif name == "GETCWD":            # r0 = buffer, A = its size
                 cwd_b = res.cwd.encode() + b"\0"
                 if len(cwd_b) > fd:

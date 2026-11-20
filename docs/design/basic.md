@@ -1,8 +1,8 @@
 # L3: a compiled BASIC on the p-code VM
 
-Status: design draft, 2026-11-19. Story L3 in `docs/roadmap.md` (E1); the VM is
-`docs/design/pvm.md`. Nothing here is built yet; numbers marked *estimate* are guesses to be
-replaced by measurements.
+Status: accepted by the owner, 2026-11-19; L3a and L3b done. Story L3 in `docs/roadmap.md`
+(E1); the VM is `docs/design/pvm.md`. Numbers marked *estimate* are
+guesses to be replaced by measurements.
 
 ## 1. Decisions (owner, 2026-11-19)
 
@@ -90,6 +90,16 @@ prove the whole path with one tiny program end to end before widening anything.
   the Makefile) gets the line store, `LIST`, `NEW`, `RUN`, and `PRINT` of a string literal. It
   runs on the host (py65) and on the machine under VICE, typed at the shell. This slice also
   adds the Makefile rule that builds p-code programs.
+
+  **Done (2026-11-19):** `src/pc/bas.c` is `/bin/bas` until L3e replaces `/bin/basic` (3,813
+  bytes; `mk/pvm.mk` builds every `src/pc/*.c` to `/bin`). Besides the slice it has `?` for
+  `PRINT`, `;`, `REM` (its text kept as typed), `LIST` ranges, immediate mode, `BYE`/`SYSTEM`,
+  and `READY.` only on a terminal, so piped use stays clean. The code generator needed from the
+  mini C: `&`, `|`, `^`, `~`, `<<`, `>>`, pointer difference, `&f`, `icall` and `isatty`
+  (`docs/design/s14-compiler.md`). Line numbers go to 63999, compared unsigned. Tests:
+  `tools/test_bas.py` (py65) and `tests.test_pvm_machine.Basic` (typed at the shell on VICE).
+  Open for L3c: the branch that resets the VM's Y past 240 straight-line bytes (`room()`) cannot
+  fire yet, since every `PRINT` item ends in a `CALL`; its test comes with expressions.
 - **L3c. Numbers and control flow:**
   - the fixed-point runtime and `%` variables;
   - `LET` and expressions;

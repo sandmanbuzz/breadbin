@@ -38,7 +38,11 @@ and string arrays of pointers (use char arrays), `*` on pointers (`p * 2` is ref
 **The native back end is frozen at this language** (L3, `docs/design/basic.md` section 4). What
 the language gained since is p-code only (`cc.py --pcode`, `tools/cc_pcode.py`), and this back
 end refuses each by name ("... is p-code only"): `%`, `&&`, `||`, `!`, `break`, `continue`, the
-syscall builtins (`read`, `write`, `open`, `close`, `exit`) and `extern`. Character literals
+syscall builtins (`read`, `write`, `open`, `close`, `exit`, `isatty`), `extern`, and since L3b
+`&`, `|`, `^`, `~`, `<<`, `>>` (arithmetic: `int` is signed; counts 0 to 15), a function's
+address (`&f`, a `char *`) and `icall(p)` (call the code at `p`, no arguments). Pointer
+difference (`p - q`, same base, in elements) is p-code only too; this back end reports it as a
+pointer on the right of `-`. Precedence is C's. Character literals
 (`'A'`, with the string escapes and `\'`) are numbers to the lexer, so both back ends take them;
 `break`, `continue` and `extern` became keywords for both.
 
