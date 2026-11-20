@@ -188,6 +188,24 @@ Static inspection of the supplied SJD image now identifies several explicit tram
 | `$EBC2` | `$C049` | Calls a small wrapper around `$F259`, then sets zero-page state. |
 | `$DCD6` | `$C075` | Calls a short C-bank cleanup/helper routine after the modified status/job handling sequence. |
 
+The original DOS disassembly gives names to several more of the confirmed call sites. These replacements line up with the SJD instruction feature list:
+
+| DOS site / original routine | SJD target | What the replacement is for |
+|---|---:|---|
+| `$E6D1` / `BCDDEC` | `$B75F` | Error-number-to-ASCII conversion; SJD documents three-digit error numbers |
+| `$EBFC` / `PARSXQ` | `$AF00` | Command parser/dispatcher; likely where SJD-specific configuration commands enter |
+| `$EE3D` / `FORMAT` | `$B690` | Format routine replacement |
+| `$EF28` / `AVCK` | `$B5D6` | BAM consistency validation |
+| `$EF3A` / `SETBPT` | `$B4A4` | BAM loading/pointer setup |
+| `$EF4F` / `NUMFRE` | `$B46D` | Free-block count |
+| `$EFC5` / disk-full check | `$B86F` | Disk-full handling |
+| `$F15C` / `NXTERR` | `$B4DD` | 40-track overflow search |
+| `$F173` / `FNDNXT` | `$B842` | Next-sector selection/interleave |
+| `$F4D1` / `DSTRT` in READ | `$B2F7` | SJD GCR read/decode path |
+| `$FB15` / `FORMT` | `$A003` | Format-track extension path |
+
+Routine names above are from the original 1541 DOS disassembly; SJD target addresses are from the supplied SJD image. The feature mapping is high-confidence where the original routine's purpose and the SJD instructions agree, but the internal details of each replacement still need tracing. Reference: [commented 1541 DOS disassembly](https://g3sl.github.io/c1541rom.html).
+
 A raw byte-pattern scan of the SJD upper bank versus the supplied JD base finds 34 **changed** absolute JSR/JMP candidates into `$8000-$BFFF`. This is a candidate inventory, not a disassembly: some apparent opcodes may be data or operands. The confirmed/partially mapped entries above are only the starting subset.
 
 | DOS call site | Extension target |
