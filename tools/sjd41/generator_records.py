@@ -177,13 +177,25 @@ def reconstruct_c000(capture: bytes, stage1_prg: bytes) -> bytes:
         result[offset:offset + len(record.payload)] = record.payload
     return bytes(result)
 
+
+def load_c000_intermediate(prg: bytes) -> bytes:
+    """Extract the already-patched C-bank from the Stage-1 SAVE PRG."""
+    if len(prg) != 0x2002:
+        raise ValueError(f"C000-DFFF intermediate must be 8194-byte PRG, got {len(prg)}")
+    load = prg[0] | prg[1] << 8
+    if load != 0x6000:
+        raise ValueError(f"expected C-bank intermediate load address $6000, got ${load:04X}")
+    return prg[2:]
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--disk", required=True, type=Path)
     p.add_argument("--jd-rom", required=True, type=Path)
     p.add_argument("--compare-sjd", type=Path)
-    p.add_argument("--c000-capture", type=Path, help="raw 8 KiB live capture of drive $C000-$DFFF")
-    p.add_argument("--c000-output", type=Path, help="write patched C000-DFFF bank")
+    c000_inputs = p.add_mutually_exclusive_group()
+    c000_inputs.add_argument("--c000-capture", type=Path, help="raw 8 KiB live capture of drive $C000-$DFFF")
+    c000_inputs.add_argument("--c000-intermediate", type=Path, help="Stage-1 (C)CMD/C/C0-DF PRG, already patched")
+    p.add_argument("--c000-output", type=Path, help="write patched/extracted C000-DFFF bank")
     p.add_argument("--output", type=Path)
     p.add_argument("--summary-only", action="store_true")
     a = p.parse_args()
@@ -225,8 +237,11 @@ def main() -> int:
             diff = mismatch_runs(generated, sjd[0x6000:0x8000], 0xE000)
             print(f"comparison E000-FFFF: {sum(r[2] for r in diff)} differing bytes in {len(diff)} runs")
             for start, end, count in diff: print(f"  ${start:04X}-${end:04X}: {count} byte(s)")
-        if a.c000_capture:
-            c000 = reconstruct_c000(a.c000_capture.read_bytes(), files[FILES["stage1"]])
+        if a.c000_capture or a.c000_intermediate:
+            c000 = (
+                reconstruct_c000(a.c000_capture.read_bytes(), files[FILES["stage1"]])
+                if a.c000_capture else load_c000_intermediate(a.c000_intermediate.read_bytes())
+            )
             print(f"C000-DFFF output: {len(c000)} bytes, sha256={digest(c000)}")
             if a.c000_output:
                 a.c000_output.write_bytes(c000); print(f"wrote {a.c000_output}")
@@ -235,7 +250,7 @@ def main() -> int:
                 print(f"comparison C000-DFFF: {sum(r[2] for r in diff)} differing bytes in {len(diff)} runs")
                 for start, end, count in diff: print(f"  ${start:04X}-${end:04X}: {count} byte(s)")
         elif a.c000_output:
-            raise ValueError("--c000-output requires --c000-capture")
+            raise ValueError("--c000-output requires --c000-capture or --c000-intermediate")
         return 0
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr); return 2
