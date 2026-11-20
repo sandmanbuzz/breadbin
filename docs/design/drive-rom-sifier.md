@@ -2,36 +2,27 @@
 
 Status: first build-tool slice; **not yet a runnable Breadbin drive ROM**.
 
-This work targets the 1541C/1541-II 32 KiB ROM layout demonstrated by the
-supplied S-JiffyDOS 1541C image:
+This work targets the 1541C/1541-II 32 KiB ROM layout demonstrated by the supplied S-JiffyDOS 1541C image:
 
 | CPU address | Image offset | Purpose |
 |---|---:|---|
 | $8000-$BFFF | $0000-$3FFF | Added extension bank |
 | $C000-$FFFF | $4000-$7FFF | JiffyDOS-derived bank |
 
-The supplied JiffyDOS 6.01 dump is 16 KiB and has SHA-256
-`2de4d06b4aa2a1b1129cc641a01cbac7e631de362dbd6fe2129eec7336afad53`.
-The supplied S-JiffyDOS image is a close derivative: 15,261 of 16,384 bytes
-in its upper bank match. This supports the layout and base-family choice, but
-does not prove that the SJD generator consumes this exact dump byte-for-byte.
+The supplied JiffyDOS 6.01 dump is 16 KiB and has SHA-256 `2de4d06b4aa2a1b1129cc641a01cbac7e631de362dbd6fe2129eec7336afad53`. The supplied S-JiffyDOS image is a close derivative: 15,261 of 16,384 bytes in its upper bank match. This supports the layout and base-family choice, but does not prove that the SJD generator consumes this exact dump byte-for-byte.
 
 ## What exists now
 
 `tools/sjd41/rom_image.py` is a conservative image composer:
 
 - `inspect` reports size, SHA-256 and the NMI/RESET/IRQ vectors.
-- `build` accepts a user-supplied 16 KiB JD ROM, our 16 KiB extension bank,
-  and a JSON patch manifest.
+- `build` accepts a user-supplied 16 KiB JD ROM, our 16 KiB extension bank, and a JSON patch manifest.
 - It requires the base SHA-256 to match the manifest exactly.
-- Every patch is guarded by expected original bytes; overlapping patches,
-  out-of-bank addresses, length mismatches and stale input bytes are rejected.
+- Every patch is guarded by expected original bytes; overlapping patches, out-of-bank addresses, length mismatches and stale input bytes are rejected.
 - It emits the 32 KiB image as extension bank followed by the patched JD bank.
 - No CMD/JiffyDOS/S-JiffyDOS ROM bytes or generated derivative are checked in.
 
-The example manifest is deliberately empty. It is a safe image-layout smoke
-test, **not** a functional S-ifier: a real extension and proven hook patches
-must be supplied before the result can boot.
+The example manifest is deliberately empty. It is a safe image-layout smoke test, **not** a functional S-ifier: a real extension and proven hook patches must be supplied before the result can boot.
 
 Example:
 
@@ -45,54 +36,35 @@ python3 tools/sjd41/rom_image.py build \
   --output breadbin-jd601-1541c-private.bin
 ```
 
-Keep all input ROMs, extension+ROM output images and intermediate combined
-images local. The upstream S-JiffyDOS instructions explicitly warn that
-generated images contain CMD JiffyDOS routines and must not be redistributed.
+Keep all input ROMs, extension+ROM output images and intermediate combined images local. The upstream S-JiffyDOS instructions explicitly warn that generated images contain CMD JiffyDOS routines and must not be redistributed.
 
-## Reverse-engineering evidence: S-JiffyDOS generator disk
+## Important distinction: SJD64 vs SJD41
 
-The user-supplied `ajnsjd64.d64` contains the C64-side generator programs
-`C2-GEN/JD` and `C3-GEN/SJD/US`, plus PC and C64 instructions.
+Jochen Adler publishes two independent patches: SJD64 for the C64 KERNAL and SJD41 for the 1541 drive DOS. The author explicitly says they are independent and that a JD-C64 can be used with an SJD41 drive.
 
-The US PC instructions establish this generation sequence:
+The user-supplied `ajnsjd64.d64` is the **SJD64/C64 generator disk**, not the SJD41 drive generator disk. Its `C2-GEN/JD` and `C3-GEN/SJD/US` programs check for the C64 KERNAL signature `JIFFYDOS V6.01` at `$E4DC` and create C64-side intermediate files. Their code is not evidence for the SJD41 drive-ROM transformation. The earlier C2/C3 disassembly notes below are retained as analysis of that separate C64 toolchain only.
 
-1. Run the appropriate C64-side generator(s) with JiffyDOS 6.01 active in
-   the C64's EPROM.
-2. The generator writes intermediate files to a prepared destination disk.
-3. Run the matching `EPROM-GEN` program to combine the intermediate files
-   into the final EPROM image.
-4. The author explicitly says the generated files contain original CMD
-   JiffyDOS routines and must not be given to others.
+The SJD41 instructions are at https://retro-bobbel.de/nlq/ajnsjd41.html. They state that SJD41:
 
-The C3 BASIC program checks for the exact KERNAL signature
-`JIFFYDOS V6.01` at C64 address $E4DC, loads a 138-byte machine-code routine
-at $C000, executes it, initializes device 8, then saves the memory range
-$4000-$5FFF under a generated filename. The machine-code routine visibly
-copies $E000-$FFFF into $4000-$5FFF. It then scans from $0800 and performs
-a further pointer-driven copy; that second phase is not yet fully annotated
-and must not be described as a proven patch algorithm.
+- patches JiffyDOS 1541 and retains the original JD IEC bus routines;
+- works with ordinary JiffyDOS computers and speeder cartridges; SJD64 is not required;
+- adds drive-side fast open/load/save, scratch and validate operations, plus GCR-to-HD decoding while reading;
+- uses `$8000-$FFFF` on 1541C/1541-II, and `$8000-$FFFF` or `$A000-$FFFF` on the old 1541 depending on whether one or both ROMs are replaced;
+- is generated by a separate SJD41 workflow with separate interim files and a separate `EP-GEN/41...` stage.
 
-The C2/JD program uses the same BASIC scaffold but a shorter 29-byte routine.
-The exact role of its shorter transformation, and the precise data contracts
-between the C1-C4 and EPROM-GEN stages, remain to be disassembled and traced.
+Therefore, the right source for reconstructing the drive-side transformation is the actual SJD41 generator disk plus the supplied JD and SJD41 drive ROMs. Do not continue reverse-engineering C2/C3 as if they produced the drive ROM.
+
+## What the SJD64 disk analysis found (separate product)
+
+The SJD64 C3 BASIC program checks the exact KERNAL signature `JIFFYDOS V6.01` at C64 address `$E4DC`, loads a 138-byte machine-code routine at `$C000`, executes it, initializes device 8, then saves the memory range `$4000-$5FFF` under a generated filename. The routine copies `$E000-$FFFF` into `$4000-$5FFF`, then performs a further pointer-driven transformation that remains to be fully annotated. C2 uses the same BASIC scaffold but a shorter 29-byte routine. This is useful only if we separately work on the C64-side SJD64 product.
 
 ## Next implementation gates
 
-1. Fully annotate the C2 and C3 machine code, including the scan and copy
-   loop, pointer sources, destination range, and exact intermediate-file
-   contents.
-2. Extract and understand the C1-C4 / EPROM-GEN file naming and concatenation
-   rules from the generator programs and PC instructions.
-3. Disassemble the exact JD and SJD ROMs around the changed dispatch, reset,
-   IRQ and DOS entry points; identify safe extension placement and all hook
-   callers.
-4. Define our own extension ABI and implement a harmless PING path first.
-5. Add only byte-verified hook patches to a manifest for this exact JD dump.
-6. Assemble the extension and test the private image in VICE, then the C64
-   Ultimate emulated drive, before physical hardware.
+1. Obtain and inspect the **SJD41** generator disk (not the already supplied SJD64 disk); extract its drive-specific generator stages and `EP-GEN/41...` file contracts.
+2. Map the supplied SJD41 drive image's added `$8000-$BFFF` bank and changed upper-bank regions; identify every entry point and caller.
+3. Compare those changes with the JD 6.01 drive ROM and the published SJD41 feature descriptions. Separate transparent DOS optimizations from optional features Breadbin does not need.
+4. Prove whether Breadbin's existing U1/U2 block read/write path benefits from SJD41 without any host changes. The SJD41 documentation does not explicitly specify U1/U2 behavior.
+5. Only if U1/U2 need an additional operation, define a Breadbin-specific ABI and byte-verified hooks. Keep the existing JiffyDOS host byte protocol unchanged.
+6. Build private images and test them in VICE, then the C64 Ultimate emulated drive, before physical hardware.
 
-The intended transport boundary remains unchanged: preserve JiffyDOS's
-existing IEC bus routines and Breadbin's host-side byte transport. The
-extension adds Breadbin block semantics on the drive side; it must not invent
-a second host transport or assume that S-JiffyDOS already provides a generic
-block RPC.
+The intended transport boundary remains unchanged: preserve JiffyDOS's existing IEC bus routines and Breadbin's host-side byte transport. SJD41 itself is designed to retain that transport. A Breadbin-specific drive command is a separate design choice, not something to assume from SJD41.
