@@ -30,7 +30,28 @@ def build(base_path,extension_path,manifest_path,output_path):
  patched=bytearray(base); occupied=set(); patches=m.get('patches',[])
  if not isinstance(patches,list): raise ValueError('patches must be an array')
  for i,p in enumerate(patches):
-  try: addr=int(p['address'],0) if isinstance(p['address'],str) else int(p['address']); old=bytes.fromhex(p['expect']); new=bytes.fromhex(p['replace'])
+  try: addr=(int(p['address'][1:],16) if p['address'].startswith('; old=bytes.fromhex(p['expect']); new=bytes.fromhex(p['replace'])
+  except (KeyError,TypeError,ValueError) as e: raise ValueError(f'invalid patch #{i}: {e}')
+  if not 0xC000<=addr<=0xFFFF: raise ValueError(f'patch #{i}: address outside $C000-$FFFF')
+  off=addr-0xC000
+  if not old or len(old)!=len(new) or off+len(old)>ROM16: raise ValueError(f'patch #{i}: invalid length or bank crossing')
+  if any(x in occupied for x in range(off,off+len(old))): raise ValueError(f'patch #{i}: overlaps prior patch')
+  occupied.update(range(off,off+len(old)))
+  if bytes(patched[off:off+len(old)])!=old: raise ValueError(f'patch #{i} at ${addr:04X}: expected {old.hex()}, found {bytes(patched[off:off+len(old)]).hex()}')
+  patched[off:off+len(new)]=new
+ result=ext+bytes(patched); output_path.write_bytes(result)
+ print(f'wrote {output_path} ({len(result)} bytes), SHA-256 {sha256(result)}')
+ print(f'layout: extension $8000-$BFFF; JD-derived bank $C000-$FFFF; {len(patches)} patch records')
+ return 0
+def main():
+ p=argparse.ArgumentParser(description=__doc__); s=p.add_subparsers(dest='cmd',required=True)
+ a=s.add_parser('inspect'); a.add_argument('rom',type=Path)
+ b=s.add_parser('build'); b.add_argument('--base',required=True,type=Path); b.add_argument('--extension',required=True,type=Path); b.add_argument('--manifest',required=True,type=Path); b.add_argument('--output',required=True,type=Path)
+ x=p.parse_args()
+ try: return inspect(x.rom) if x.cmd=='inspect' else build(x.base,x.extension,x.manifest,x.output)
+ except (OSError,ValueError,json.JSONDecodeError) as e: print(f'error: {e}',file=sys.stderr); return 2
+if __name__=='__main__': raise SystemExit(main())
+) else int(p['address'],0)) if isinstance(p['address'],str) else int(p['address']); old=bytes.fromhex(p['expect']); new=bytes.fromhex(p['replace'])
   except (KeyError,TypeError,ValueError) as e: raise ValueError(f'invalid patch #{i}: {e}')
   if not 0xC000<=addr<=0xFFFF: raise ValueError(f'patch #{i}: address outside $C000-$FFFF')
   off=addr-0xC000
