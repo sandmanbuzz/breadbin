@@ -31,7 +31,7 @@ def build_smoke_image(base: bytes) -> tuple[bytes, bytes, dict]:
     offset = HOOK_ADDRESS - 0xC000
     if base[offset:offset + 3] != HOOK_EXPECT:
         raise ValueError(
-            f"expected JSR $F50A at ${HOOK_ADDRESS:04X}$, "
+            f"expected JSR $F50A at ${HOOK_ADDRESS:04X}, "
             f"found {base[offset:offset + 3].hex(' ').upper()}"
         )
 
