@@ -35,13 +35,26 @@ class RomImageTests(unittest.TestCase):
         }))
 
     def test_vectors(self):
-        self.assertEqual(rom_image.vectors(bytes(self.base)),
-                         {"nmi": 0xFF01, "reset": 0xEAA0, "irq": 0xFE67})
+        self.assertEqual(
+            rom_image.vectors(bytes(self.base)),
+            {"nmi": 0xFF01, "reset": 0xEAA0, "irq": 0xFE67},
+        )
+
+    def test_address_parser_accepts_supported_forms(self):
+        self.assertEqual(rom_image.parse_address("$C010"), 0xC010)
+        self.assertEqual(rom_image.parse_address("0xC010"), 0xC010)
+        self.assertEqual(rom_image.parse_address(0xC010), 0xC010)
+
+    def test_address_parser_rejects_boolean(self):
+        with self.assertRaisesRegex(ValueError, "boolean"):
+            rom_image.parse_address(True)
 
     def test_build_places_extension_before_jd_bank(self):
         self.manifest()
-        self.assertEqual(rom_image.build(self.base_path, self.ext_path,
-                                         self.manifest_path, self.output_path), 0)
+        self.assertEqual(
+            rom_image.build(self.base_path, self.ext_path,
+                            self.manifest_path, self.output_path), 0
+        )
         result = self.output_path.read_bytes()
         self.assertEqual(len(result), 0x8000)
         self.assertEqual(result[:0x4000], self.ext_path.read_bytes())
@@ -49,8 +62,10 @@ class RomImageTests(unittest.TestCase):
 
     def test_guarded_patch_changes_only_requested_bytes(self):
         self.manifest([{"address": "$C010", "expect": "EA EA", "replace": "4C 00"}])
-        self.assertEqual(rom_image.build(self.base_path, self.ext_path,
-                                         self.manifest_path, self.output_path), 0)
+        self.assertEqual(
+            rom_image.build(self.base_path, self.ext_path,
+                            self.manifest_path, self.output_path), 0
+        )
         result = self.output_path.read_bytes()
         self.assertEqual(result[0x4010:0x4012], bytes.fromhex("4C 00"))
         self.assertEqual(result[0x4012:0x4020], self.base[0x12:0x20])
