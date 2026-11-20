@@ -8,7 +8,7 @@
    run the same way. The compiled code calls the native routines in bas-rt.s (numbers, errors,
    jumps) and the rt_ functions below, by address.
 
-   Memory is one arena, mem[]: the program text from the bottom, the compiled code after it, and
+   Memory is one arena, mem[] (msz bytes, as many as the machine has free): the program text from the bottom, the compiled code after it, and
    the variables from the top down. Editing the program or RUN clears the variables, as in MS.
 
    Mini C (tools/cc.py --pcode); built by mk/pvm.mk with src/pc/bas-rt.s; tested by
@@ -22,8 +22,8 @@
 extern int rt_mark();   /* bas-rt.s, for the compiled code: these take their arguments from the */
 extern int rt_go();     /* eval stack and the number stack as the comments there say; the */
 extern int rt_ln();     /* compiler only takes their addresses */
-extern int c_ldv(char *p);      /* bas-rt.s, for the mini C: one result each */
-extern int c_stv(char *p);
+extern int c_ldv(char *p); /* xop 240 */      /* bas-rt.s, for the mini C: one result each */
+extern int c_stv(char *p); /* xop 246 */
 extern int c_add();
 extern int c_mul();
 extern int c_div();
@@ -39,20 +39,22 @@ extern int c_curip();
 extern int c_nclr();
 extern int c_crunch(char *buf, char *kwt);
 extern int c_find(char *mem, int top, int n);
-extern int c_sp();      /* bas-rt.s: the scanner and the code emitter, on these globals */
-extern int c_digit();
-extern int c_letter();
-extern int c_tok(int t);
-extern int c_ult(int a, int b);
-extern int c_emit(int b);
-extern int c_room(int n);
-extern int c_op1(int b);
-extern int c_opw(int b, int w);
-extern int c_ncall(char *f);
+extern int c_sp(); /* xop 232 */      /* bas-rt.s: the scanner and the code emitter, on these globals */
+extern int c_digit(); /* xop 242 */
+extern int c_letter(); /* xop 252 */
+extern int c_tok(int t); /* xop 234 */
+extern int c_ult(int a, int b); /* xop 254 */
+extern int c_emit(int b); /* xop 236 */
+extern int c_room(int n); /* xop 248 */
+extern int c_op1(int b); /* xop 238 */
+extern int c_opw(int b, int w); /* xop 250 */
+extern int c_ncall(char *f); /* xop 244 */
 extern int c_xop(int b);
 extern int c_xopw(int b, int w);
+extern int c_grow(int n);       /* up to n pages from the kernel for mem (bas-rt.s); the pages granted */
 
-char mem[16128];        /* MEM: the arena (keep the two in step) */
+char *mem;              /* MEM: the arena, msz bytes of pages the kernel grants at start (c_grow) */
+int msz;
 int ptop;               /* the program text: [0, ptop); per line its number (low, high), length,
                            the offset of its code (low, high), then the text */
 int pend;               /* the program's code: [ptop, pend); 0 when out of date */
@@ -240,7 +242,7 @@ int move(char *d, char *s, int n) {
 }
 
 int clearv() {          /* no variables, and the compiled program is out of date */
-    vbot = 16128;
+    vbot = msz;
     pend = 0;
     return 0;
 }
@@ -251,7 +253,7 @@ int store(int n, int t, int len) {  /* line n is lbuf from t, len bytes; none de
     int add = 0;
     if (p < ptop && lineno(p) == n) old = next(p) - p;
     if (len) add = len + 6;
-    if (ptop - old + add > 16128) {
+    if (ptop - old + add > msz) {
         fail(2);
         return 0;
     }
@@ -525,7 +527,7 @@ int var() {             /* the variable at si (a letter): its value's address, m
         vint = 1;
         c2 = c2 | 128;
     } else if (src[si] == '$') fail(1);       /* strings come with L3d */
-    while (p < 16128) {
+    while (p < msz) {
         if (mem[p] == c1 && mem[p + 1] == c2) return addr(p + 2);
         p = p + 6 - (mem[p + 1] & 128) / 64;
     }
@@ -1216,6 +1218,11 @@ int main() {
     int tty = isatty(0);
     int n;
     int t;
+    msz = c_grow(120) * 256;    /* as many pages as are free, to 30,720 bytes: ints stay positive */
+    if (msz < 4096) {
+        write(2, "bas: out of memory\n", 19);
+        exit(1);
+    }
     clearv();
     if (tty) {
         outu(vbot - ptop);

@@ -85,7 +85,8 @@ char v[4];
 char nl[1];
 char *src;              /* bas.c's globals that bas-rt.s's scanner and emitter use */
 int si;
-char mem[1];
+char *mem;
+int msz;
 int cend;
 int vbot;
 int straight;
