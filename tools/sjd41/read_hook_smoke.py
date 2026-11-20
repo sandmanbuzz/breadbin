@@ -46,13 +46,13 @@ def build_smoke_image(base: bytes) -> tuple[bytes, bytes, dict]:
         "format": "breadbin-drive-rom-v1",
         "base_sha256": sha256(base),
         "patches": [{
-            "address": f"${HOOK_ADDRESS:04X}$",
+            "address": f"${HOOK_ADDRESS:04X}",
             "expect": HOOK_EXPECT.hex(" ").upper(),
             "replace": HOOK_REPLACE.hex(" ").upper(),
         }],
         "extension": {
-            "load_address": f"${EXTENSION_BASE:04X}$",
-            "trampoline_address": f"${TRAMPOLINE_ADDRESS:04X}$",
+            "load_address": f"${EXTENSION_BASE:04X}",
+            "trampoline_address": f"${TRAMPOLINE_ADDRESS:04X}",
             "trampoline": "JMP $F50A (stock JD DSTRT)",
         },
         "warning": "SMOKE TEST ONLY: no acceleration; not a production drive ROM",
