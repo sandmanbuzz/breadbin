@@ -11,6 +11,21 @@ SPEC.loader.exec_module(module)
 
 
 class PatchTableTests(unittest.TestCase):
+    def make_data_prg(self, data_lines):
+        body = bytearray()
+        address = 0x0801
+        for number, values in enumerate(data_lines, 1):
+            text = ",".join(str(value) for value in values).encode("ascii")
+            content = bytes((0x83,)) + text
+            next_address = address + 5 + len(content)
+            body.extend((next_address & 0xFF, next_address >> 8))
+            body.extend((number & 0xFF, number >> 8))
+            body.extend(content)
+            body.append(0)
+            address = next_address
+        body.extend((0, 0))
+        return bytes.fromhex("01 08") + bytes(body)
+
     def make_prg(self, records):
         # BASIC at $0801: one line, then the final 00 00 link pointer.
         # The line terminator plus that pointer form the three-zero marker.
@@ -35,6 +50,35 @@ class PatchTableTests(unittest.TestCase):
         memory = bytearray(0x10000)
         module.apply(memory, table)
         self.assertEqual(memory[0x7FFF:0x8002], bytes.fromhex("11 22 33"))
+
+    def test_extracts_stage1_c000_manual_pokes_from_data(self):
+        prg = self.make_data_prg([
+            [1, -1],
+            [2, -1],
+            [3, -1],
+            list(range(60)),
+        ])
+        patches = module.stage1_c000_patches(prg)
+        self.assertEqual(
+            [(p.address, len(p.payload)) for p in patches],
+            [(0x6070, 15), (0x609F, 15), (0x6D92, 2),
+             (0x7367, 4), (0x7CBB, 30)],
+        )
+        self.assertEqual(patches[0].payload, bytes(range(15)))
+        self.assertEqual(patches[1].payload, bytes(range(15, 30)))
+        self.assertEqual(patches[2].payload, bytes((112, 192)))
+        self.assertEqual(patches[3].payload, bytes((76, 159, 192, 234)))
+        self.assertEqual(patches[4].payload, bytes(range(30, 60)))
+
+    def test_reconstructs_c000_capture_with_manual_pokes(self):
+        prg = self.make_data_prg([[1, -1], [2, -1], [3, -1], list(range(60))])
+        capture = bytes([0xAA]) * 0x2000
+        result = module.reconstruct_c000(capture, prg)
+        self.assertEqual(len(result), 0x2000)
+        self.assertEqual(result[0x70:0x7F], bytes(range(15)))
+        self.assertEqual(result[0xD92:0xD94], bytes((112, 192)))
+        self.assertEqual(result[0x1CBB:0x1CD9], bytes(range(30, 60)))
+        self.assertEqual(result[0], 0xAA)
 
     def test_rejects_wrong_load_address(self):
         with self.assertRaisesRegex(ValueError, "load address"):
