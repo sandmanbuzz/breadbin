@@ -423,3 +423,16 @@ Experiment (drive code only, host unchanged, reverted): after the normal DOS rea
 - **Room.** The blob is exactly full at `$0500` with the write path removed; a raw reader plus a write path will not fit in two buffers. The kernel's `#0`/`#1` reservation, the data buffer and the BAM page (`$0700`, which the DOS rewrites on any initialize) all need a plan.
 
 Not shown yet: the full 325-byte capture and decode of all 256 bytes, selecting a wanted sector by header, seeking, reading a track change, error handling, the JiffyDOS drive ROM, the physical 1541, hardware timing, and speed (this run measured correctness, not time).
+
+### 18.10 Single-block prefetch is dead; the unit is a pass of two sectors (measured 2026-11-20)
+
+Experiment (`src/mod/fast.s`, red: writes removed, drive code in two parts at `$0300` and `$0650`, raw blocks decoded on the host, not shippable): after the drive has sent a block it captures the next one raw (header found by its sector, 325 bytes, kept in the `#` buffer) so the host's next request can be served from it. Two things the measurement settled:
+
+- **c64fs data blocks carry no track/sector link** (the filesystem finds blocks through the inode's list), so the drive cannot read the next block from the block it holds. The host guesses by stride (the next block as far past this one as this one is past the last, same track only) and passes the sector in the `M-E` command.
+- **The prefetch never completes.** `wc /bin/as` and `wc /bin/passwd`, host VICE at real speed, stock 1541 ROM: 48 prefetch attempts, 0 blocks served from one, 0 header timeouts. The host's next command (ATN) arrives before the wanted header has gone round: the sector after the one just read has already passed while the previous block crossed the bus (57 ms), and the next pass is a revolution (200 ms) away, longer than the host chain (about 100 ms). Times were 20.6 s and 29.2 s against 19.6 s and 27.3 s without it (the longer command, no hits).
+
+So a read that starts only after the current block has been sent cannot hide the revolution (the same lock as 18.6). The raw reader has to take the next sector **in the same pass** as the wanted one (18.9 showed that works), then send both. Estimate per pair: command 24 ms, about half a revolution to the first header, 20 ms to capture two, then two transfers of about 72 ms (325 raw bytes) and about 26 ms host decode each: about 170 ms a block against 245 ms today, a 30% gain, and 3 sectors a pass would do better.
+
+Room is the constraint: two raw sectors are 650 bytes of buffer, leaving about 630 bytes of the 1280 for code, with a write path out of the question in that budget. The drive code can shrink: the host can send the header codes (no `d_enc` and table on the drive), and only the first block of a track needs the DOS job.
+
+Run: `wc /bin/passwd`, `wc /bin/as` with the experimental module, host VICE real speed. Not run: a two-sector pass, writes, JiffyDOS drive ROM, 1541-II, hardware, `make test-host`, smoke, suite.
