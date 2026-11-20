@@ -187,6 +187,8 @@ Static inspection of the supplied SJD image now identifies several explicit tram
 | `$EBC2` | `$C049` | Calls a small wrapper around `$F259`, then sets zero-page state. |
 | `$DCD6` | `$C075` | Calls a short C-bank cleanup/helper routine after the modified status/job handling sequence. |
 
+A separate in-place replacement at `$E91D-$E998` is a high-confidence disk-controller read/decode routine: it manipulates VIA registers `$1800`, `$1801`, and `$180D`, rotates sampled bits, and stores decoded bytes into the DOS buffer. This aligns with the documented GCR-to-HD decoding while reading. It is not one of the cross-bank calls; it is a replacement routine in the existing DOS bank. The nearby `$E781-$E7A1` change also reconfigures VIA registers and appears to support the altered controller path.
+
 The first three entries are the key SJD extension call-ins. The extension's code at `$A003`, `$B4DD`, and `$B842` is not yet assigned definitive routine names. Do not label them as "fast load", "GCR decode", or "track cache" solely from their call sites; those are hypotheses to test by following the callers, callees, zero-page usage, and VIA accesses. The upstream feature list makes fast open/load/save and GCR-to-HD decoding plausible areas, but it does not map those features to these addresses.
 
 A useful next static-analysis pass is to disassemble each trampoline's caller and the first extension routine block, then build a call graph across `$8000-$BFFF`. The host-side JiffyDOS byte transport should remain a separate question: the extension may accelerate drive-side disk operations while still using the existing JD IEC bus routines.
