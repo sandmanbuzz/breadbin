@@ -6,8 +6,10 @@ This work targets the 1541C/1541-II 32 KiB ROM layout demonstrated by the suppli
 
 | CPU address | Image offset | Purpose |
 |---|---:|---|
-| $8000-$BFFF | $0000-$3FFF | Added extension bank |
-| $C000-$FFFF | $4000-$7FFF | JiffyDOS-derived bank |
+| $8000-$9FFF | $0000-$1FFF | SJD extension bank `S80-9` |
+| $A000-$BFFF | $2000-$3FFF | SJD extension bank `SA0-B` |
+| $C000-$DFFF | $4000-$5FFF | Common captured/modified DOS bank `C/C0-DF` |
+| $E000-$FFFF | $6000-$7FFF | Derived CBM/JD/SJD DOS bank, selected by ROM configuration |
 
 The supplied JiffyDOS 6.01 dump is 16 KiB and has SHA-256 `2de4d06b4aa2a1b1129cc641a01cbac7e631de362dbd6fe2129eec7336afad53`. The supplied S-JiffyDOS image is a close derivative: 15,261 of 16,384 bytes in its upper bank match. This supports the layout and base-family choice, but does not prove that the SJD generator consumes this exact dump byte-for-byte.
 
@@ -19,10 +21,12 @@ The supplied JiffyDOS 6.01 dump is 16 KiB and has SHA-256 `2de4d06b4aa2a1b1129cc
 - `build` accepts a user-supplied 16 KiB JD ROM, our 16 KiB extension bank, and a JSON patch manifest.
 - It requires the base SHA-256 to match the manifest exactly.
 - Every patch is guarded by expected original bytes; overlapping patches, out-of-bank addresses, length mismatches and stale input bytes are rejected.
-- It emits the 32 KiB image as extension bank followed by the patched JD bank.
+- It emits the 32 KiB image as a 16 KiB extension followed by the patched C000-FFFF bank. This is a generic composer, not yet a reproduction of the SJD41 generator's capture and patch stages.
 - No CMD/JiffyDOS/S-JiffyDOS ROM bytes or generated derivative are checked in.
 
 The example manifest is deliberately empty. It is a safe image-layout smoke test, **not** a functional S-ifier: a real extension and proven hook patches must be supplied before the result can boot.
+
+`tools/sjd41/generator_records.py` is now a separate reverse-engineering tool. It reads the operator-supplied SJD41 D64, extracts the three appended patch tables, applies Stage 1 and Stage 3 to the supplied JD E000-FFFF bank, and optionally writes/compares the reconstructed 8 KiB output. It embeds and prints no ROM payload bytes.
 
 Example:
 
@@ -58,12 +62,29 @@ Therefore, the right source for reconstructing the drive-side transformation is 
 
 The SJD64 C3 BASIC program checks the exact KERNAL signature `JIFFYDOS V6.01` at C64 address `$E4DC`, loads a 138-byte machine-code routine at `$C000`, executes it, initializes device 8, then saves the memory range `$4000-$5FFF` under a generated filename. The routine copies `$E000-$FFFF` into `$4000-$5FFF`, then performs a further pointer-driven transformation that remains to be fully annotated. C2 uses the same BASIC scaffold but a shorter 29-byte routine. This is useful only if we separately work on the C64-side SJD64 product.
 
+## SJD41 generator findings
+
+The correct drive-side generator disk, `ajnsjd41.d64`, is now parsed and its staged process is mapped:
+
+1. Stage 1 reads the live drive address window `$8000-$FFFF` in 256-byte pages via a drive-RAM helper and two 128-byte `M-R` transfers per page. It then applies 33 embedded patch records to the captured E000-FFFF bank and manually patches the captured C000-DFFF bank.
+2. Stage 2 applies 67 embedded records to the Stage-1 E000-FFFF intermediate to produce the CBM E000-FFFF bank.
+3. Stage 3 applies 82 embedded records to the same Stage-1 intermediate to produce the SJD E000-FFFF bank.
+4. The final EP-GEN assembles four 8 KiB inputs in address order: S80-9, SA0-B, C/C0-DF, SE0-F.
+
+The shared 138-byte helper interprets records as destination-low, destination-high, length, payload; a zero length byte means 256 bytes. Each BASIC generator contains its record table as a binary trailer immediately after the BASIC end marker.
+
+Applying Stage 1 and Stage 3 to the supplied JD image reconstructs the SJD E000-FFFF bank with only nine differing bytes from the supplied SJD binary: `$EAD5`, `$EBC3-$EBC4`, and `$FA32-$FA37`. This is strong validation of the stage order and record interpreter, but not an exact byte-for-byte reproduction yet. One Stage-3 record writes 102 bytes starting at `$7FFF`, spilling 101 bytes beyond the 8 KiB saved bank; the spill's purpose is unresolved.
+
+The C000-DFFF bank is also not yet fully reproducible from the supplied JD file plus the visible first-stage manual POKEs: 68 bytes still differ from the supplied SJD image (67 at `$C010-$C054`, one at `$C0AD`). The generator captures the live drive memory, so this is an important source/model discrepancy, not something to paper over with guessed patches.
+
+See `docs/research/sjd41-generator-disk.md` for the full evidence and the local inspector invocation.
+
 ## Next implementation gates
 
-1. Obtain and inspect the **SJD41** generator disk (not the already supplied SJD64 disk); extract its drive-specific generator stages and `EP-GEN/41...` file contracts.
-2. Map the supplied SJD41 drive image's added `$8000-$BFFF` bank and changed upper-bank regions; identify every entry point and caller.
-3. Compare those changes with the JD 6.01 drive ROM and the published SJD41 feature descriptions. Separate transparent DOS optimizations from optional features Breadbin does not need.
-4. Prove whether Breadbin's existing U1/U2 block read/write path benefits from SJD41 without any host changes. The SJD41 documentation does not explicitly specify U1/U2 behavior.
+1. Resolve the nine E000-FFFF byte differences and the C000-DFFF source discrepancy; obtain a full, model-correct captured input if needed.
+2. Disassemble the changed SJD41 drive-ROM regions against the exact captured JD/CBM baseline, mapping new routines, hooks, and call paths.
+3. Separate SJD's transparent DOS optimizations from optional features Breadbin does not need.
+4. Prove whether Breadbin's existing U1/U2 block read/write path benefits from SJD41 without host changes. The documentation does not explicitly specify U1/U2 behavior.
 5. Only if U1/U2 need an additional operation, define a Breadbin-specific ABI and byte-verified hooks. Keep the existing JiffyDOS host byte protocol unchanged.
 6. Build private images and test them in VICE, then the C64 Ultimate emulated drive, before physical hardware.
 
