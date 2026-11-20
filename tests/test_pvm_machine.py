@@ -217,6 +217,32 @@ class CompiledC(unittest.TestCase):
         self.assertEqual(self.results["pcdeep?"].split(), ["12"])
 
 
+class Basic(unittest.TestCase):
+    """/bin/bas (src/pc/bas.c, the compiled BASIC's L3b slice, docs/design/basic.md) typed at
+    the shell: it is built by the Makefile and on the root like any program."""
+
+    def test_hello_typed_at_the_shell(self):
+        with Vice(make_disk()) as v:
+            v.wait_shell()
+            v.type("clear\n")
+            v._wait(lambda ls: [l for l in ls if l] == ["/ $"], 60, what="clear")
+            v.type("bas\n")
+            v.wait_for("READY.", timeout=60)
+            v.type('10 print "hello, world"\n')
+            v.type("list\n")
+            listed = v.wait_for('10 PRINT "hello, world"', timeout=60, after="list")
+            v.type("run\n")
+            ran = v.wait_for("READY.", timeout=60, after="run")
+            v.type("bye\n")
+            v.wait_for("$", timeout=60, after="bye")
+            status = v.run("echo $?", clear=False, timeout=30)
+            piped = v.run("echo '? \"PIPED\";:?\"!\"' | bas", timeout=60)
+        self.assertIn('10 PRINT "hello, world"', listed)
+        self.assertEqual([l for l in ran.split("run")[-1].splitlines() if l.strip()], ["hello, world", "READY."])
+        self.assertEqual(status.split(), ["0"])
+        self.assertEqual(piped.splitlines(), ["PIPED!"])
+
+
 class SharedVM(unittest.TestCase):
     """/lib/pvm is loaded once for every p-code process, and freed after the last one."""
 

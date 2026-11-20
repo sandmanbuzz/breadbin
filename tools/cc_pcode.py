@@ -70,6 +70,7 @@ SYSN_READ = (SYS_READ - SYS_BASE) / 3
 SYSN_OPEN = (SYS_OPEN - SYS_BASE) / 3
 SYSN_CLOSE = (SYS_CLOSE - SYS_BASE) / 3
 SYSN_EXIT = (SYS_EXIT - SYS_BASE) / 3
+SYSN_ISATTY = (SYS_ISATTY - SYS_BASE) / 3
 .segment "BSS"
 cc_fstk: .res {fstack}
 cc_fend:
@@ -136,6 +137,16 @@ cc_ok:  lda pvm_errno
         sta P_ESTKH,x
 @e:     rts
 """,
+    # after SYS: isatty is 1 when the kernel said yes (carry clear), else 0, as C's
+    "cc_tty": """\
+cc_tty: lda #0
+        sta P_ESTKH,x
+        ldy pvm_errno
+        bne :+
+        lda #1
+:       sta P_ESTKL,x
+        rts
+""",
 }
 # the syscall builtins: SYS number, the fixing helper, and the parameters (base, pointer)
 SYSCALLS = {
@@ -144,8 +155,10 @@ SYSCALLS = {
     "open": ("SYSN_OPEN", "cc_lo", [("char", True), ("int", False)]),
     "close": ("SYSN_CLOSE", "cc_ok", [("int", False)]),
     "exit": ("SYSN_EXIT", None, [("int", False)]),
+    "isatty": ("SYSN_ISATTY", "cc_tty", [("int", False)]),
 }
 assert set(SYSCALLS) == set(cc.SYSCALLS)
+BITOPS = {"&": "PO_BAND", "|": "PO_IOR", "^": "PO_XOR", "<<": "PO_SHL", ">>": "PO_SHR"}
 VMCMP = {"<": "PO_ISLT", ">": "PO_ISGT", "<=": "PO_ISLE", ">=": "PO_ISGE"}   # signed; true is -1
 
 
@@ -229,7 +242,7 @@ class PGen(cc.Gen):
         for d in globs:
             self.global_var(d)
         for name, params, body, line in funcs:
-            if name in SYSCALLS or name == "puts":
+            if name in cc.BUILTINS or name == "puts":
                 raise CompileError(f"line {line}: {name} is a builtin; a function cannot have its name")
             if body is None:
                 if name == "main":
@@ -303,7 +316,7 @@ class PGen(cc.Gen):
                 n = max(self.need(e[2]), self.need(e[3]), 2)
             elif kind == "index":
                 n = max(self.need(e[1]), self.need(e[2]), 2)
-            elif kind in ("neg", "deref", "not"):
+            elif kind in ("neg", "deref", "not", "comp"):
                 n = self.need(e[1])
             elif kind == "addr":
                 n = 1 if e[1][0] == "var" else self.need(e[1][1] if e[1][0] == "deref" else e[1])
@@ -565,6 +578,8 @@ class PGen(cc.Gen):
                 self.puts(args, line, value=True)
             elif name in SYSCALLS:
                 self.syscall(name, args, line)
+            elif name == "icall":
+                self.icall(args, line)
             else:
                 self.call(name, args, line)
             return ("int", False)
@@ -573,10 +588,10 @@ class PGen(cc.Gen):
             self.op("P_OP", "PO_LNOT")
             self.op("P_OP", "PO_NEG")       # LNOT's true is -1
             return ("int", False)
-        if kind == "neg":
+        if kind in ("neg", "comp"):
             if self.expr(e[1])[1]:
-                raise CompileError(f"line {e[2]}: - of a pointer is not in this slice")
-            self.op("P_OP", "PO_NEG")
+                raise CompileError(f"line {e[2]}: {'-' if kind == 'neg' else '~'} of a pointer is not in this slice")
+            self.op("P_OP", "PO_NEG" if kind == "neg" else "PO_COMP")
             return ("int", False)
         if kind == "deref":
             t = self.expr(e[1])
@@ -597,6 +612,11 @@ class PGen(cc.Gen):
     def addr_of(self, e):
         x, line = e[1], e[2]
         if x[0] == "var":
+            if x[1] not in self.vars and x[1] not in self.globals and x[1] in self.funcs:
+                name = x[1]             # a function's address, typed char *: for icall
+                self.op("P_W", "PO_LA", name if name in self.externs else "fn_" + name)
+                self.push()
+                return ("char", True)
             v = self.var(x[1], x[2])
             if v.ptr and v.arr is None:
                 raise CompileError(f"line {line}: pointers to pointers are not in this slice")
@@ -618,8 +638,10 @@ class PGen(cc.Gen):
     def operands(self, e):
         _, op, a, b, line = e
         ta, tb = self.pair(lambda: self.expr(a), lambda: self.expr(b), self.need(b))
-        if tb[1]:
+        if tb[1] and not (op == "-" and ta[1]):
             raise CompileError(f"line {line}: a pointer cannot be the right side of {op} in this slice")
+        if tb[1] and ta[0] != tb[0]:
+            raise CompileError(f"line {line}: - of a pointer to {tb[0]} from a pointer to {ta[0]}")
         if ta[1] and op not in ("+", "-"):
             raise CompileError(f"line {line}: a pointer can only be added to or subtracted from")
         return ta, tb
@@ -649,7 +671,14 @@ class PGen(cc.Gen):
                 raise CompileError(f"line {line}: a pointer can only be added to or subtracted from")
             self.add_simple(x, ta[1] and ta[0] == "int", neg=op == "-")
             return (ta[0], True) if ta[1] else ("int", False)
-        ta, _ = self.operands(e)
+        ta, tb = self.operands(e)
+        if tb[1]:                           # pointer difference: elements, an int
+            self.op("P_OP", "PO_SUB")
+            if ta[0] == "int":
+                self.const(1)
+                self.op("P_OP", "PO_SHR")   # the byte difference is even
+            self.pop()
+            return ("int", False)
         scaled = ta[1] and ta[0] == "int"
         if op == "+":
             self.op("P_OP", "PO_IDXW" if scaled else "PO_ADD")
@@ -665,6 +694,8 @@ class PGen(cc.Gen):
             self.op("P_OP", "PO_DIV")       # signed, truncating toward zero; by 0 gives 0 (pvm.s _DIV)
         elif op == "%":
             self.op("P_OP", "PO_MOD")       # the dividend's sign, as C's; x % 0 is 0
+        elif op in BITOPS:
+            self.op("P_OP", BITOPS[op])     # >> is arithmetic (int is signed); counts 0 to 15
         elif op in ("==", "!="):
             self.op("P_OP", "PO_ISEQ" if op == "==" else "PO_ISNE")
             self.op("P_OP", "PO_NEG")       # the VM's true is -1; C's is 1
@@ -708,6 +739,16 @@ class PGen(cc.Gen):
             self.op("P_B", "PO_LLW", s)
             self.push()
         self.temps += reversed(slots)
+
+    def icall(self, args, line):
+        """icall(p): call the code at p, a bytecode function (one that starts with JSR
+        pvm_interp, as &f gives) or native code; no arguments, its result is the value."""
+        if len(args) != 1:
+            raise CompileError(f"line {line}: icall takes 1 argument, not {len(args)}")
+        if not self.expr(args[0])[1]:
+            raise CompileError(f"line {line}: argument 1 of icall: a number where a pointer is needed")
+        self.op("P_OP", "PO_ICAL")          # pops the address, pushes the result
+        self.straight = 0
 
     def syscall(self, name, args, line):
         """read(fd, buf, n), write(fd, buf, n), open(path, flags), close(fd), exit(status): one
