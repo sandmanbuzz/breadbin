@@ -62,6 +62,34 @@ Therefore, the right source for reconstructing the drive-side transformation is 
 
 The SJD64 C3 BASIC program checks the exact KERNAL signature `JIFFYDOS V6.01` at C64 address `$E4DC`, loads a 138-byte machine-code routine at `$C000`, executes it, initializes device 8, then saves the memory range `$4000-$5FFF` under a generated filename. The routine copies `$E000-$FFFF` into `$4000-$5FFF`, then performs a further pointer-driven transformation that remains to be fully annotated. C2 uses the same BASIC scaffold but a shorter 29-byte routine. This is useful only if we separately work on the C64-side SJD64 product.
 
+## SJD41 documented behavior and performance baseline
+
+The supplied drive-side instructions file `S41-PCUS.TXT` gives the following timings (seconds; transcribed from that document):
+
+| Operation | CBM 1541 | JD 1541 | SJD 1541 |
+|---|---:|---:|---:|
+| New/format, 35 tracks | 95.4 | 22.2 | 22.5 |
+| Load 202 blocks, at configured gap | 127.2 | 13.2 | 8.7 |
+| Load 202 blocks, gap 9.5 | 127.2 | 20.7 | 14.7 |
+| Save 154 blocks | 105.3 | 43.4 | 21.0 |
+| Scratch 202 blocks | 24.9 | 14.9 | 4.3 |
+| Scratch 664 blocks / 144 files | 361.7 | 260.3 | 17.9 |
+| Validate 664 blocks / 144 files | 239.0 | 139.6 | 10.9 |
+| Find 144th directory file | 5.3 | 4.7 | 1.1 |
+| IECOUT, 100 bytes | 0.146 | 0.0335 | 0.0335 |
+| IECIN, 100 bytes | 0.204 | 0.0216 | 0.0216 |
+
+The same instructions identify the mechanisms and compatibility caveats:
+
+- Fast open uses gap 3 instead of 22.
+- One special LOAD handles PRGs saved with the CBM gap 9.5; another decodes GCR to host-data format while reading and uses gap 4.
+- Fast save verifies written blocks. It still uses the original C64-side routines; a long C64 IRQ caused by pressing a key during SAVE can slow the operation.
+- Fast scratch and validate calculate checksums while reading disk bytes.
+- SJD supports 40 tracks, automatic or fixed track selection, optional use of otherwise-reserved free sectors on directory track 18, GEOS-aware lock/unlock/scratch/validate behavior, three-digit error numbers, and a fast reset without RAM/ROM tests.
+- On 1541C/1541-II, SJD uses the full `$8000-$FFFF` ROM area. On the old two-ROM 1541, replacing only one EPROM omits check, fast lock/unlock, fast scratch, fast validate, fast save, and some DOS bug fixes.
+
+For Breadbin, the high-value distinction is that SJD's IEC byte transport is not faster than JD's: its own timing table gives identical 100-byte IECOUT/IECIN times for JD and SJD. The large gains are in DOS/drive-side operations—directory search, scratch/validate, and disk read/write work. That is consistent with preserving Breadbin's existing JiffyDOS byte transport while investigating the drive-side block path.
+
 ## SJD41 generator findings
 
 The correct drive-side generator disk, `ajnsjd41.d64`, is now parsed and its staged process is mapped:
