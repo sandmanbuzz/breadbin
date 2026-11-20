@@ -130,6 +130,11 @@ The following are **not** established by the public SJD41 notes or the source in
 
 The old notes' candidate addresses ($FF8B, $FBD8, $E9D0) are leads, not a callable ABI. They must be checked by disassembling the actual image and tracing callers/callees. No source in this branch should call them until that work is done.
 
+
+### Additional static check on candidate transport addresses
+
+A byte-level scan of this exact 32 KiB image found no absolute `JSR $FF8B`, `JMP $FF8B`, `JSR $FBD8`, `JMP $FBD8`, `JSR $E9D0`, or `JMP $E9D0` instruction encodings. This does **not** prove the addresses are wrong: they may be reached by fall-through, indirect control flow, or a different entry point. It does mean they cannot be presented as established public subroutine entry points. The disassembly task must include control-flow and caller tracing, not just dumping bytes at those offsets.
+
 ## 6. Bring-up sequence
 
 1. Confirm ROM identity on the target drive (readable ROM bytes/hash or a known revision signature).
