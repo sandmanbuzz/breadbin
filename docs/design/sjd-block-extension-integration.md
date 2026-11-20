@@ -1,84 +1,55 @@
-# S-JiffyDOS integration: host-side plan
+# S-JiffyDOS integration: Breadbin host path
 
-Status: integration design; no drive ABI or ROM hooks are claimed yet.
-
-## Goal
-
-Use the existing Breadbin JiffyDOS host transport when the addressed drive is JiffyDOS, and transparently select a Breadbin drive-ROM extension when the drive advertises it. A plain JiffyDOS drive must continue to use the existing DOS U1/U2 block path. A stock drive continues to use standard IEC.
-
-This is an optional capability layered on the existing transport, not a replacement for JiffyDOS and not the stock-drive uploaded-loader path.
+Status: design correction based on the author's SJD41 instructions. SJD41 is a transparent JiffyDOS 1541 DOS replacement, not a new host-side byte protocol.
 
 ## What is already implemented
 
-src/kernel/iec.s contains a clean-room JiffyDOS byte transport. jif_first probes each TALK/LISTEN session; io_jif records whether that session is using JiffyDOS. bus_ciout and bus_acptr select JiffyDOS transmit/receive for data bytes when that session was detected. The command/ATN phase remains standard IEC.
+src/kernel/iec.s contains a clean-room JiffyDOS byte transport. jif_first probes each TALK/LISTEN session; io_jif records whether that session is using JiffyDOS. bus_ciout and bus_acptr select JiffyDOS transmit/receive for data bytes when that session was detected. The command/ATN phase remains ordinary IEC.
 
-src/kernel/blk.s currently reads and writes 256-byte blocks using DOS U1/U2 and data channel 2. Since iec_ch_open, iec_in_*, and iec_out_* already select JiffyDOS at the IEC byte layer, the existing block path already gets ordinary JiffyDOS byte acceleration without any S-JiffyDOS-specific host code.
+src/kernel/blk.s reads and writes 256-byte blocks using DOS U1/U2 and data channel 2. These commands already use JiffyDOS byte framing when the drive answers the JiffyDOS probe. No SJD-specific host framing is needed.
 
-## Required distinction: JiffyDOS vs Breadbin extension
+## What SJD41 actually promises
 
-There are two independent questions:
+Jochen Adler's SJD41 instructions say that SJD41 is a patch for JiffyDOS 1541, uses the original JD IEC bus routines, and works with ordinary JiffyDOS computers and speeder cartridges. SJD41 and the C64-side SJD64 are independent. The SJD41 drive ROM adds faster DOS operations (including fast open/load/save, scratch and validate) and GCR-to-HD optimizations while retaining the JD IEC transport.
 
-1. Does this addressed drive support the JiffyDOS byte protocol? The existing per-session IEC probe answers this.
-2. Does it also implement the Breadbin drive extension? This needs a separate, explicit capability handshake.
+Therefore, for operations SJD41 accelerates through its normal DOS entry points, Breadbin should simply continue issuing the same ordinary DOS commands over the existing JiffyDOS transport. The host should not invent a new SJD handshake or assume a private block RPC exists.
 
-Do not infer (2) from (1), from the drive model, or from a ROM size. Never send an extension command until the handshake has positively identified the extension and its ABI version.
+## What remains to prove for Breadbin
 
-## Proposed host state
+The current Breadbin block path uses U1/U2. The SJD41 documentation describes fast save/load and other DOS operations, but does not explicitly promise that U1/U2 are accelerated in the way Breadbin needs. We must test that exact path against JD41 and SJD41 before deciding whether a Breadbin-specific drive hook is needed.
 
-Maintain per-device capability state for IEC drives 8–11:
+Test matrix:
 
-- unknown: not probed since reset / device change
-- plain: no Breadbin extension (includes stock and ordinary JiffyDOS drives)
-- BBX v1: extension positively identified and version accepted
-- disabled: extension failed during a transfer; do not retry it until reprobed/reset
+- same C64/JiffyDOS host, same drive, same disk image;
+- plain JD41 vs SJD41 drive ROM;
+- Breadbin's U1 read path and U2/B-P write path;
+- compare returned 256-byte checksums, status bytes, write verification, and elapsed time;
+- also test ordinary DOS SAVE/LOAD to distinguish the author's advertised fast paths from our block API.
 
-The existing JiffyDOS session selection remains authoritative for byte framing. Capability state only chooses the block operation.
+If U1/U2 already take the optimized SJD41 internal paths, the correct integration is almost nothing in the host: keep existing commands and benefit transparently. If they do not, then and only then design a Breadbin-specific command/hook, with an explicit versioned capability probe and safe fallback.
 
-## Probe and fallback semantics
+## S-ifier work
 
-The drive-side ROM extension must expose a harmless query operation that can be issued through the ordinary DOS command channel. It must return a fixed magic, protocol major/minor, and capability bits. The query must not alter disk state, the DOS job queue, channel state beyond the command/status exchange, or the current track/sector buffer.
+The current ROM composer is a safe image-layout/patching scaffold, not a functional S-ifier. The next reverse-engineering work is to compare the user's JD 1541 ROM with the SJD41 1541C ROM, map changed entry points and extension-bank routines, and obtain the actual SJD41 generator disk. The uploaded ajnsjd64.d64 is the SJD64/C64 generator disk and is not that drive-side generator.
 
-The exact command spelling and hook address are intentionally not frozen until the ROM dispatch path is reverse-engineered. The probe response must be unambiguous; a DOS syntax error, timeout, malformed response, unknown major version, or absent response means plain drive, not a fatal boot error.
+Do not infer the SJD41 transformation from the SJD64 C2/C3 programs. The drive-side instructions describe a separate SJD41 generator workflow and separate interim files.
 
-After a positive probe, the host may select the extension for block reads/writes. Any transfer timeout or malformed completion disables the extension for that device and returns an I/O error for the current operation; it must not silently retry a possibly partial write through DOS. Reads may be retried through the plain path only after the extension has explicitly aborted/reset the transfer and the host knows the drive is back at a clean command boundary.
+## Compatibility and fallback
 
-## Block ABI requirements
-
-The extension needs sector-level operations, not a second file protocol:
-
-- READ: device, track, sector -> exactly 256 data bytes plus an explicit completion/status result.
-- WRITE: device, track, sector, exactly 256 data bytes -> completion/status result.
-- The extension must preserve normal 1541 DOS semantics outside the extension operation.
-- It must report write protection, missing header/sector, checksum failure, and write verification failure distinctly enough for the host to map to EIO.
-- A write is not successful until the drive has completed the physical write and any required verify.
-- The host retains ownership of retry policy and must know whether a failed operation may already have modified media.
-
-The data phase should use the existing JiffyDOS byte transport. The extension must not introduce a new C64-side bit protocol. It may use the drive's fast GCR/bit-cell routines internally to read/write sectors, then stream the sector over the already-established JiffyDOS channel.
-
-## Integration point in Breadbin
-
-Keep the public block API (bread/bwrite) unchanged. Add an internal backend selection below iec_read/iec_write:
-
-- no BBX capability: existing U1/U2 path unchanged;
-- BBX READ/WRITE capability: invoke the extension's sector operation;
-- operation-level failure: apply the explicit failure policy above.
-
-Probe lazily on first block I/O to each drive, or during the existing drive initialization if that is guaranteed to happen before all block access. Do not probe every sector.
-
-The JiffyDOS detection is per TALK/LISTEN session in iec.s; the BBX capability is per physical IEC device in blk.s. Keep these state lifetimes separate.
-
-## Reverse-engineering gates before implementation
-
-1. Finish tracing the S-JiffyDOS generator's C3 and EPROM-GEN stages so we understand how the extension is assembled and mapped.
-2. Identify the exact JiffyDOS 6.01 drive-side dispatch points for command handling, channel open/talk/listen, and DOS block read/write.
-3. Trace the corresponding S-JiffyDOS changes to establish which hooks are necessary and which are merely SJD features unrelated to Breadbin.
-4. Implement a minimal PING/INFO extension first; prove the host can negotiate it while ordinary JiffyDOS remains unchanged.
-5. Implement READ, test against known sectors and checksums, then WRITE with write-protect and read-back verification tests.
-6. Build private ROM images only from the user's local ROM inputs; never check ROMs or generated derivatives into the repository.
+- A stock drive continues to use the standard IEC byte protocol and ordinary DOS commands.
+- A JiffyDOS drive continues to use the existing JiffyDOS byte protocol.
+- An SJD41 drive should be transparent to the same host protocol; it is still a JiffyDOS drive.
+- Any future Breadbin-only drive command must be separately negotiated. A plain JiffyDOS drive must never receive it.
+- A failed optional extension operation must not silently retry a possibly partial write through the ordinary path.
 
 ## Non-goals
 
-- Do not change the stock-drive fastboot1541-style path.
-- Do not make the host require S-JiffyDOS for ordinary JiffyDOS.
-- Do not copy S-JiffyDOS or JiffyDOS ROM code into Breadbin.
-- Do not treat the existing JiffyDOS byte transport as a generic block RPC; the drive-side operation ABI is new work.
+- Do not change the stock-drive uploaded-loader path.
+- Do not require the C64-side SJD64 KERNAL.
+- Do not copy JiffyDOS or SJD41 ROM code into Breadbin or commit generated derivatives.
+- Do not treat JiffyDOS byte framing as a generic block RPC.
+
+## Sources
+
+- Jochen Adler, S-JiffyDOS 1541 instructions: https://retro-bobbel.de/nlq/ajnsjd41.html
+- Jochen Adler, S-JiffyDOS home page: https://retro-bobbel.de/nlq/ajnhome.html
