@@ -109,7 +109,15 @@ repeat:
 
 This is a small table-driven patch/relocation engine, not a byte-for-byte ROM diff routine. The records carry their own destination and payload, so the same 6502 helper can apply different patch sets to the CBM and SJD variants.
 
-**Still unresolved:** the BASIC loader's KERNAL LOAD parameters, the exact memory mapping under `$E000-$FFFF` while the helper reads it, the location of the zero marker/record stream, and the precise destination ranges used by the embedded records. The BASIC program sets the KERNAL call parameters and later saves a 8 KiB output range, but the relationship between the helper's initial `$4000-$5FFF` copy and that saved range needs to be traced from the actual C64 memory map and record contents. Do not yet describe the record stream as a specific set of ROM hooks.
+The BASIC scaffold's KERNAL parameters are now decoded:
+
+- It sets `$B9=0` (secondary address), `$BA=8` (device), `A=0` (LOAD), and `X/Y=$6000` (relocated load address). Under the documented C64 KERNAL contract, the input PRG payload is therefore loaded at `$6000`, not at its embedded PRG address.
+- After the helper runs, the program saves `$6000-$7FFF` (8 KiB) back to disk. Thus the input buffer and generated output occupy the same C64 address range.
+- The helper itself does not write the 6510 processor port `$01`. Under the normal post-reset C64 mapping, reads from `$E000-$FFFF` return KERNAL ROM, even though writes go to underlying RAM.
+
+That leaves a concrete unresolved discrepancy: the helper's first phase reads `$E000-$FFFF`, while the BASIC program relocates the input file to `$6000`, and the helper contains no visible `$01` bank-switch. We need to establish whether some external/earlier environment has banked out the KERNAL, whether another memory-map side effect is in play, or whether this copy is intentionally of the visible KERNAL ROM. Do not silently claim that the first copy is a copy of the loaded JD image.
+
+The exact record destinations and their payloads still need to be extracted from a controlled runtime memory image. Do not yet describe the record stream as a specific set of ROM hooks.
 
 ## Final EPROM generator: 1541C / 1541-II
 
