@@ -4,10 +4,11 @@
 ; assembles this file with the kernel's zero-page and label addresses and runs it in py65.
 ;
 ; Bank 0 layout (the kernel will choose; constants here for the POC):
-;   BMP   $2000-$3F3F  bitmap, VIC cell order (40x25 cells x 8 bytes)
-;   FONT  8 pages      row-planar: page I holds glyph row I of all 256 screen codes (kernel
-;                      order, what to_screen returns), the 4 pixel columns in the high nibble
-;                      AND the low nibble of every byte
+;   BMP   $2000-$3F3F  bitmap, VIC cell order (40x25 cells x 8 bytes); the BSS sits in the
+;                      192 bytes after it ($3F40-$3FFF), which c80_clear zeroes with the bitmap
+;   FONT  808 bytes    glyph-major, 8 bytes per screen code 0-$64 (what to_screen returns), the 4
+;                      pixel columns in the high nibble AND the low nibble of every byte; FONT is
+;                      page aligned (a glyph pointer is code*8, its low byte alone)
 ; Stock zero page keeps its meaning: $D3 = column (0-79 here), $D6 = row.
 ; Scratch: p1/p2 (the con_write buffer), p3/p4 and tmp0-tmp3, all the kernel's.
 ;
@@ -19,6 +20,7 @@ BMP  = $2000
 .ifndef FONT
 FONT = $4000
 .endif
+.assert <FONT = 0, error, "FONT must be page aligned"
 .include "kernel_syms.inc"      ; test-generated: r0 r1 p1-p4 tmp0-tmp3 to_screen
 
 .export c80_init, c80_write, lastpos
@@ -27,13 +29,12 @@ COLD = $d3
 ROWD = $d6
 dp   = p3                       ; destination pointer into the bitmap
 sp   = p4                       ; source pointer for scroll copies
-lc   = tmp0                     ; left glyph code
-rc   = tmp1                     ; right glyph code
-mk   = tmp2                     ; mask of the half being drawn
-nl   = tmp3                     ; scratch
+pp   = p4                       ; put: first source (shares sp: scroll and draw never overlap)
+qq   = tmp0                     ; put: second source (tmp0/tmp1)
+nl   = tmp2                     ; scratch
 
 .segment "CODE"
-; c80_init: blank the bitmap, home the cursor
+; c80_init: blank the bitmap (and the BSS after it), home the cursor
 c80_init:
         ; fall through
 c80_clear:
@@ -41,7 +42,7 @@ c80_clear:
         sta dp
         lda #>BMP
         sta dp+1
-        ldx #32                 ; 8192 bytes: the 8000 and the rest of the page
+        ldx #32                 ; 8192 bytes: the 8000 and the BSS tail (lastpos = 0)
         ldy #0
         tya
 @p:     sta (dp),y
@@ -52,11 +53,6 @@ c80_clear:
         bne @p
         sty COLD
         sty ROWD
-        ldx #24
-@l:     tya
-        sta lastpos,x
-        dex
-        bpl @l
         rts
 
 ; c80_write: r0 = buffer, r1 = count
@@ -119,12 +115,7 @@ nextline:
 lookahead:
         ldx #1
         ldy #0
-        lda p2+1
-        beq @l
-        lda #255
-        .byte $2c               ; bit: skip the next lda
-@l:     lda p2
-        sta nl                  ; bytes to scan
+        jsr limit               ; nl = bytes to scan
 @s:     cpy nl
         bcs @d
         lda (p1),y
@@ -142,6 +133,15 @@ lookahead:
 @d:     txa
         rts
 
+; limit: nl = min(255, p2)
+limit:  lda p2+1
+        beq @a
+        lda #255
+        .byte $2c               ; bit: skip the next lda
+@a:     lda p2
+        sta nl
+        rts
+
 ; adv1: one byte of the buffer consumed (keeps X, Y)
 adv1:   inc p1
         bne @a
@@ -157,12 +157,7 @@ run:    lda #80
         sec
         sbc COLD
         sta rlim
-        lda p2+1                ; scan at most 255 bytes of the buffer
-        beq @a
-        lda #255
-        .byte $2c
-@a:     lda p2
-        sta nl
+        jsr limit
         ldx #0                  ; X = chars collected, Y = bytes consumed
         ldy #0
 @c:     cpy nl
@@ -182,14 +177,14 @@ run:    lda #80
         inx
         jmp @c
 @e:     stx rn
-        tya                     ; consume Y bytes
+        sty nl                  ; consume Y bytes
+        tya
         clc
         adc p1
         sta p1
         bcc @1
         inc p1+1
-@1:     sty nl
-        lda p2
+@1:     lda p2
         sec
         sbc nl
         sta p2
@@ -208,19 +203,22 @@ run:    lda #80
 @r:     rts
 
 ; draw: rb[0..rn) at (COLD, ROWD): an odd first char, whole pairs, an odd last char
-draw:   ldx ROWD
-        jsr setdp
+draw:   lda ROWD
+        ldx #dp
+        jsr setp
         lda COLD
         lsr a
+        php
         jsr addcell             ; dp += (COLD/2)*8
+        plp
         ldx #0
-        lda COLD
-        and #1
-        beq @pairs
-        lda rb                  ; first char is the right half of its cell
-        sta lc
-        lda #$0f
-        jsr one
+        bcc @pairs
+        lda rb                  ; odd column: the first char is the right half of its cell
+        ldx #qq
+        jsr gp
+        ldx #pp
+        jsr cpdp
+        jsr put
         jsr nextcell
         ldx #1
 @pairs: stx di
@@ -230,22 +228,28 @@ draw:   ldx ROWD
         cmp #2
         bcc @last
         ldx di
-        lda rb,x
-        sta lc
         lda rb+1,x
-        sta rc
-        jsr pair
+        pha
+        lda rb,x
+        ldx #pp
+        jsr gp
+        pla
+        ldx #qq
+        jsr gp
+        jsr put
         jsr nextcell
         inc di
         inc di
-        jmp @pl
+        bne @pl                 ; (always: di < 80)
 @last:  tax
         beq @hw                 ; none left
         ldx di
         lda rb,x
-        sta lc
-        lda #$f0
-        jsr one
+        ldx #pp
+        jsr gp
+        ldx #qq
+        jsr cpdp
+        jsr put                 ; the left half: the glyph first, the old cell second
 @hw:    lda COLD                ; high-water mark: columns drawn on this row
         clc
         adc rn
@@ -255,11 +259,55 @@ draw:   ldx ROWD
         sta lastpos,x
 @ok:    rts
 
-; setdp: X = row -> dp = its first cell
-setdp:  lda rowlo,x
-        sta dp
-        lda rowhi,x
-        sta dp+1
+; put: (dp)[0..7] = (pp & $f0) | (qq & $0f), the eor form so that a half can come from the old
+; cell itself (pointing pp or qq at dp)
+put:    ldy #7
+@l:     lda (qq),y
+        eor (pp),y
+        and #$0f
+        eor (pp),y
+        sta (dp),y
+        dey
+        bpl @l
+        rts
+
+; gp: A = screen code, X = zero page pointer -> that pointer = FONT + A*8 (FONT page aligned)
+gp:     sta 0,x
+        lda #0
+        asl 0,x
+        rol a
+        asl 0,x
+        rol a
+        asl 0,x
+        rol a
+        adc #>FONT              ; (carry is clear: A was under 32)
+        sta 1,x
+        rts
+
+; cpdp: X = zero page pointer -> that pointer = dp
+cpdp:   lda dp
+        sta 0,x
+        lda dp+1
+        sta 1,x
+        rts
+
+; setp: A = row, X = zero page pointer -> that pointer = BMP + row*320 (= (row*5)<<6)
+setp:   sta nl
+        asl a
+        asl a
+        adc nl                  ; 5*row (at most 120)
+        pha
+        lsr a
+        lsr a
+        clc
+        adc #>BMP
+        sta 1,x
+        pla
+        and #3
+        lsr a
+        ror a
+        ror a
+        sta 0,x
         rts
 
 ; addcell: dp += A*8 (A = 0-39)
@@ -292,39 +340,6 @@ nextcell:
         inc dp+1
 @r:     rts
 
-; pair: lc, rc -> the cell at dp, whole bytes, no read
-pair:
-.repeat 8, I
-        ldx lc
-        lda FONT+256*I,x
-        and #$f0
-        sta mk
-        ldx rc
-        lda FONT+256*I,x
-        and #$0f
-        ora mk
-        ldy #I
-        sta (dp),y
-.endrepeat
-        rts
-
-; one: lc drawn into the half of the cell at dp that A masks ($f0 left, $0f right)
-one:    sta mk
-        eor #$ff
-        sta mi
-        ldx lc
-.repeat 8, I
-        lda FONT+256*I,x
-        and mk
-        sta nl
-        ldy #I
-        lda (dp),y
-        and mi
-        ora nl
-        sta (dp),y
-.endrepeat
-        rts
-
 ; scroll: A = rows (1-24) up. Each row copies only as far as the wider of the two rows'
 ; high-water marks; the rows left at the bottom are blanked as far as they were drawn.
 scroll: sta scn
@@ -340,14 +355,13 @@ scroll: sta scn
         cmp lastpos,x
         bcs @w
         lda lastpos,x
-@w:     jsr bytes               ; cnt = bytes to move
-        ldx ssrc
-        lda rowlo,x
-        sta sp
-        lda rowhi,x
-        sta sp+1
-        ldx srow
-        jsr setdp
+@w:     jsr cells
+        lda ssrc
+        ldx #sp
+        jsr setp
+        lda srow
+        ldx #dp
+        jsr setp
         jsr copy
         ldx srow
         ldy ssrc
@@ -361,9 +375,10 @@ scroll: sta scn
         bne @row
 @clr:   ldx srow
         lda lastpos,x
-        jsr bytes
-        ldx srow
-        jsr setdp
+        jsr cells
+        lda srow
+        ldx #dp
+        jsr setp
         jsr fill
         ldx srow
         lda #0
@@ -374,84 +389,51 @@ scroll: sta scn
         bne @clr
         rts
 
-; bytes: A = columns -> cnt = ((A+1)/2)*8
-bytes:  clc
+; cells: A = columns -> A, cnt = cells ((A+1)/2)
+cells:  clc
         adc #1
         lsr a
         sta cnt
-        lda #0
-        sta cnt+1
-        asl cnt
-        rol cnt+1
-        asl cnt
-        rol cnt+1
-        asl cnt
-        rol cnt+1
         rts
 
-; copy: cnt bytes (a multiple of 8) from (sp) to (dp), ascending, eight to the loop
-copy:   ldx cnt+1
-        beq @rem
-@pg:    ldy #0
-@p:
-.repeat 8
-        lda (sp),y
-        sta (dp),y
-        iny
-.endrepeat
-        bne @p
-        inc sp+1
-        inc dp+1
-        dex
-        bne @pg
-@rem:   lda cnt
+; copy: cnt cells (8 bytes each) from (sp) to (dp), ascending, a cell to the loop
+copy:   ldx cnt
         beq @d
         ldy #0
-@r:
+@c:
 .repeat 8
         lda (sp),y
         sta (dp),y
         iny
 .endrepeat
-        cpy cnt
-        bne @r
-@d:     rts
-
-; fill: cnt zero bytes at (dp)
-fill:   ldx cnt+1
-        beq @rem
-@pg:    ldy #0
-        tya
-@p:     sta (dp),y
-        iny
-        bne @p
+        bne @n                  ; Y wraps every 32 cells
+        inc sp+1
         inc dp+1
-        dex
-        bne @pg
-@rem:   ldy cnt
-        beq @d
-        lda #0
-@r:     dey
-        sta (dp),y
-        bne @r
+@n:     dex
+        bne @c
 @d:     rts
 
-.segment "RODATA"
-rowlo:  .repeat 25, I
-        .byte <(BMP+I*320)
-        .endrepeat
-rowhi:  .repeat 25, I
-        .byte >(BMP+I*320)
-        .endrepeat
+; fill: cnt cells of zeros at (dp)
+fill:   ldx cnt
+        beq @d
+@c:     ldy #7
+        lda #0
+@b:     sta (dp),y
+        dey
+        bpl @b
+        jsr nextcell
+        dex
+        bne @c
+@d:     rts
 
-.segment "BSS"
-lastpos: .res 25
+.segment "BSS"                  ; link at BMP+8000 (the tail of the bitmap's last page)
+lastpos: .res 25                ; first: c80_clear zeroes it with the bitmap
+.assert lastpos = BMP+8000, error, "lastpos must be the first byte after the bitmap"
 rb:     .res 80                 ; the run being drawn, as screen codes
 rn:     .res 1
 rlim:   .res 1
 di:     .res 1
-mi:     .res 1
 scn:    .res 1
 srow:   .res 1
 ssrc:   .res 1
-cnt:    .res 2
+cnt:    .res 1

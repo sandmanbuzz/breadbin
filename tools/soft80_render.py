@@ -79,9 +79,12 @@ def kernel_order(font):
     return bytes(f)
 
 
-def planar(font):
-    """The 6502 driver's font: page I = glyph row I of all 256 codes."""
-    return bytes(font[c * 8 + i] for i in range(8) for c in range(256))
+NGLYPH = 101                     # screen codes 0-$64: all that to_screen returns
+
+
+def glyphs(font):
+    """The 6502 driver's font: the first NGLYPH glyphs, 8 bytes each, in code order."""
+    return bytes(font[:NGLYPH * 8])
 
 
 class Soft80:

@@ -53,7 +53,7 @@ class Demo(unittest.TestCase):
         body = prg[2:]
         for i, b in enumerate(body):
             mem[0x0801 + i] = b
-        cpu = MPU(memory=mem, pc=0x5800)
+        cpu = MPU(memory=mem, pc=0x5000)
         last, n = None, 0
         while n < 60_000_000:
             cpu.step()

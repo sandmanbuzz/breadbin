@@ -31,12 +31,11 @@ TYPE_CMD, TYPE_NARR, SETTLE, NARR_HOLD = 4, 1, 25, 45
 BORDER, COLOUR = 14, (14 << 4) | 6      # light blue on blue
 
 CFG = """MEMORY {
-  FNT: start = $4000, size = $0800, file = %O, fill = yes;
-  DRV: start = $4800, size = $1000, file = %O, fill = yes;
-  GL:  start = $5800, size = $4000, file = %O;
-  B:   start = $9800, size = $0400, file = "";
+  FNT: start = $4000, size = $1000, file = %O, fill = yes;
+  GL:  start = $5000, size = $4800, file = %O;
+  B:   start = $3F40, size = $00C0, file = "";
 }
-SEGMENTS { FONTSEG: load = FNT, type = ro; CODE: load = DRV, type = ro; RODATA: load = DRV, type = ro;
+SEGMENTS { FONTSEG: load = FNT, type = ro; CODE: load = FNT, type = ro; RODATA: load = FNT, type = ro;
            BSS: load = B, type = bss; GLUE: load = GL, type = ro; }
 """
 ZP = {"p1": 0x50, "p2": 0x52, "p3": 0x54, "p4": 0x56, "tmp0": 0x58, "tmp1": 0x59, "tmp2": 0x5A, "tmp3": 0x5B}
@@ -137,8 +136,8 @@ def build(font, ops, tmp):
         f.write("r0 = $02\nr1 = $04\n")
         f.write("".join("%s = $%02X\n" % kv for kv in ZP.items()))
         f.write("DEMO_BORDER = %d\nDEMO_COLOUR = $%02X\n" % (BORDER, COLOUR))
-    with open(os.path.join(tmp, "font_planar.bin"), "wb") as f:
-        f.write(m.planar(font))
+    with open(os.path.join(tmp, "font_glyph.bin"), "wb") as f:
+        f.write(m.glyphs(font))
     with open(os.path.join(tmp, "script.bin"), "wb") as f:
         f.write(encode(ops))
     with open(os.path.join(tmp, "d.cfg"), "w") as f:
@@ -149,8 +148,8 @@ def build(font, ops, tmp):
                     "-o", os.path.join(tmp, "d.bin"), os.path.join(tmp, "d.o")], check=True)
     with open(os.path.join(tmp, "d.bin"), "rb") as f:
         payload = f.read()
-    # $0801: 10 SYS 22528 ($5800), then zeros up to the payload at $4000
-    stub = bytes([0x0B, 0x08, 0x0A, 0x00, 0x9E]) + b"22528" + bytes([0, 0, 0])
+    # $0801: 10 SYS 20480 ($5000), then zeros up to the payload at $4000
+    stub = bytes([0x0B, 0x08, 0x0A, 0x00, 0x9E]) + b"20480" + bytes([0, 0, 0])
     return b"\x01\x08" + stub + bytes(0x4000 - 0x0801 - len(stub)) + payload
 
 

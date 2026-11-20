@@ -23,7 +23,7 @@ import soft80_render as m  # noqa: E402
 
 SRC = os.path.join(ROOT, "experiments", "con80", "con80.s")
 FONT, BMP, CODE = 0x4000, 0x2000, 0x4800
-CFG = """MEMORY { M: start = $4800, size = $1000, file = %O; B: start = $5800, size = $400, file = ""; }
+CFG = """MEMORY { M: start = $4800, size = $1000, file = %O; B: start = $3F40, size = $C0, file = ""; }
 SEGMENTS { CODE: load = M, type = ro; RODATA: load = M, type = ro; BSS: load = B, type = bss; }
 """
 SYMS = ("p1", "p2", "p3", "p4", "tmp0", "tmp1", "tmp2", "tmp3", "to_screen")
@@ -66,8 +66,7 @@ class Con80(unittest.TestCase):
     def setUp(self):
         s = self.sim
         s.mem.b[CODE:CODE + len(self.bin)] = self.bin
-        s.mem.b[0x5800:0x5C00] = bytes(0x400)
-        s.mem.b[FONT:FONT + 2048] = m.planar(self.font)
+        s.mem.b[FONT:FONT + m.NGLYPH * 8] = m.glyphs(self.font)
         s.lbl.update(self.lab)
         s.call("c80_init")
         self.model = m.Soft80(self.font)
