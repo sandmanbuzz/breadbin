@@ -26,6 +26,20 @@ class PatchTableTests(unittest.TestCase):
         body.extend((0, 0))
         return bytes.fromhex("01 08") + bytes(body)
 
+    def make_data_prg(self, data_lines):
+        body = bytearray()
+        address = 0x0801
+        for number, values in enumerate(data_lines, 1):
+            content = bytes((0x83,)) + ",".join(str(v) for v in values).encode("ascii")
+            next_address = address + 5 + len(content)
+            body.extend((next_address & 0xFF, next_address >> 8))
+            body.extend((number & 0xFF, number >> 8))
+            body.extend(content)
+            body.append(0)
+            address = next_address
+        body.extend((0, 0))
+        return bytes.fromhex("01 08") + bytes(body)
+
     def make_prg(self, records):
         # BASIC at $0801: one line, then the final 00 00 link pointer.
         # The line terminator plus that pointer form the three-zero marker.
@@ -75,6 +89,28 @@ class PatchTableTests(unittest.TestCase):
         capture = bytes([0xAA]) * 0x2000
         result = module.reconstruct_c000(capture, prg)
         self.assertEqual(len(result), 0x2000)
+        self.assertEqual(result[0x70:0x7F], bytes(range(15)))
+        self.assertEqual(result[0xD92:0xD94], bytes((112, 192)))
+        self.assertEqual(result[0x1CBB:0x1CD9], bytes(range(30, 60)))
+        self.assertEqual(result[0], 0xAA)
+
+    def test_decodes_stage1_c000_manual_pokes(self):
+        prg = self.make_data_prg([
+            [1, -1], [2, -1], [3, -1], list(range(60)),
+        ])
+        patches = module.stage1_c000_patches(prg)
+        self.assertEqual(
+            [(p.address, len(p.payload)) for p in patches],
+            [(0x6070, 15), (0x609F, 15), (0x6D92, 2),
+             (0x7367, 4), (0x7CBB, 30)],
+        )
+        self.assertEqual(patches[-1].payload, bytes(range(30, 60)))
+
+    def test_reconstructs_c000_capture(self):
+        prg = self.make_data_prg([
+            [1, -1], [2, -1], [3, -1], list(range(60)),
+        ])
+        result = module.reconstruct_c000(bytes([0xAA]) * 0x2000, prg)
         self.assertEqual(result[0x70:0x7F], bytes(range(15)))
         self.assertEqual(result[0xD92:0xD94], bytes((112, 192)))
         self.assertEqual(result[0x1CBB:0x1CD9], bytes(range(30, 60)))
