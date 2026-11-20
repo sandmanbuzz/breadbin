@@ -92,6 +92,8 @@ The supplied SJD image confirms the intended design pattern: preserve the JD DOS
 | `$EBC2` | `$C049` | Confirmed wrapper around `$F259` that sets zero-page state |
 | `$DCD6` | `$C075` | Short DOS job/status cleanup helper |
 
+A separate in-place replacement at `$E91D-$E998` is a high-confidence GCR read/decode path: it samples VIA registers, rotates the incoming bitstream, and writes decoded bytes into the DOS buffer. This aligns with SJD41's documented GCR-to-HD decoding while reading. The nearby `$E781-$E7A1` patch reconfigures VIA registers and appears to support this controller path.
+
 The first three are the key extension-bank entries for further analysis. Their exact semantics remain hypotheses until callers and callees are traced; do not bake guessed names or behavior into Breadbin's implementation. See the hook table and evidence in `docs/research/sjd41-generator-disk.md`.
 
 ## Next implementation gates
