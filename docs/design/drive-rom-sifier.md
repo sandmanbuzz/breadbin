@@ -113,6 +113,18 @@ The clean-room DOS source trace shows that Breadbin's ordinary U1 block reads en
 
 The U2 write path enters ~WRIGHT~ at ~$F56E~. That routine and its ~JSR $F510~ header-search path remain byte-identical to the supplied JD base; the SJD sector-allocation/format hooks do not apply to an explicit track/sector write. Static analysis confirms U1 reaches the SJD read dispatcher (with a conditional optimized branch), but not a fast-write benefit. Measure U1 and U2 separately on VICE and the C64 Ultimate before deciding whether any additional work is warranted.
 
+## U1/U2 validation plan
+
+The supplied SJD instructions expose an `sj` on/off setting and a separate `ic` JD/CBM IEC-bus setting. Keep the IEC setting fixed to JD while testing the drive-side read optimization. Do not assume the `sj` command spelling from the PETSCII-rendered text until its exact bytes are decoded.
+
+1. Use the same disk image and device configuration for JD and SJD.
+2. Run Breadbin U1 against a fixed known-good track/sector, verify the 256-byte checksum, and time repeated reads. Repeat with SJD mode enabled and disabled if possible.
+3. Run U2 only against a disposable image or scratch sector. Verify the write by reading it back, compare checksums, and restore the original image afterward.
+4. Record read/write elapsed time separately. Do not infer U2 performance from file SAVE timings.
+5. Run first in VICE, then on the C64 Ultimate if results agree.
+
+Expected from static analysis: U1 enters the SJD read dispatcher and may take its GCR-to-HD path; U2 enters the stock WRIGHT path. The benchmark is still required to establish actual gains and verify fallback behavior.
+
 ## First SJD41 hook map
 
 The supplied SJD image confirms the intended design pattern: preserve the JD DOS/IEC foundation, redirect selected DOS paths into extension-bank code, and return through ordinary DOS machinery where appropriate. The first statically confirmed extension call-ins are:
