@@ -107,6 +107,12 @@ The C000-DFFF bank differs by 68 bytes after applying the literal first-stage PO
 
 See `docs/research/sjd41-generator-disk.md` for the full evidence and the local inspector invocation. The original 1541C track-zero sensor routine is documented in [Wolfgang Moser's 1541C-to-1541-II ROM comparison](https://www.zimmers.net/anonftp/pub/cbm/firmware/drives/new/1541/1541C-to-1541-II.txt).
 
+## U1/U2 compatibility consequence
+
+The clean-room DOS source trace shows that Breadbin's ordinary U1 block reads enter the controller READ job (the ~block.s~ → ~drtrd~ → ~doit2~ path). SJD replaces the READ job's call at ~$F4D1~ from ~$F50A~ (~DSTRT~) to ~$B2F7~. That extension path reads the GCR block via ~$B2C0~, decodes it via ~$B132~, and returns to the common read completion path. Therefore U1 reads should use the SJD drive-side read optimization without any Breadbin host protocol change.
+
+The U2 write path enters ~WRIGHT~ at ~$F56E~. That routine and its ~JSR $F510~ header-search path remain byte-identical to the supplied JD base; the SJD sector-allocation/format hooks do not apply to an explicit track/sector write. Static analysis therefore confirms a read-side benefit but not a fast-write benefit. Measure U1 and U2 separately on VICE and the C64 Ultimate before deciding whether any additional work is warranted.
+
 ## First SJD41 hook map
 
 The supplied SJD image confirms the intended design pattern: preserve the JD DOS/IEC foundation, redirect selected DOS paths into extension-bank code, and return through ordinary DOS machinery where appropriate. The first statically confirmed extension call-ins are:
@@ -116,11 +122,12 @@ The supplied SJD image confirms the intended design pattern: preserve the JD DOS
 | `$FB15` | `$A003` | Format-track path trampoline from the original `FORMT` routine; extension behavior still to disassemble |
 | `$F15C` | `$B4DD` | Replaces the disk-full path; scans tracks 36-40 before failing, confirming 40-track overflow handling |
 | `$F173` | `$B842` | Replaces `FNDNXT`, the optimum next-sector allocator; uses sector increment and track geometry, consistent with configurable gap/interleave |
+| `$F4D1` | `$B2F7` | Replaces `DSTRT` in the standard controller READ job with the SJD GCR-to-HD read path |
 | `$FA32` | `$C010` | Confirmed 1541C track-zero routine relocation |
 | `$EBC2` | `$C049` | Confirmed wrapper around `$F259` that sets zero-page state |
 | `$DCD6` | `$C075` | Short DOS job/status cleanup helper |
 
-A separate in-place replacement at `$E91D-$E998` is a high-confidence GCR read/decode path: it samples VIA registers, rotates the incoming bitstream, and writes decoded bytes into the DOS buffer. This aligns with SJD41's documented GCR-to-HD decoding while reading. The nearby `$E781-$E7A1` patch reconfigures VIA registers and appears to support this controller path.
+The `$E91D-$E998` replacement is a serial-bus/handshake path candidate, not the GCR decoder: it uses VIA/IEC-related registers and calls the `$E9xx` and `$FEF3/$FEFB` helpers. The actual GCR-to-HD decoder is in the extension bank, reached through the standard read-job hook `$F4D1 -> $B2F7`; `$B2F7` reads GCR through `$B2C0`, decodes through `$B132`, then rejoins the common read completion path. The nearby `$E781-$E7A1` patch also reconfigures VIA registers and appears related to serial/controller signaling.
 
 The first three are the key extension-bank entries for further analysis, but they are not all read paths. `$A003` is reached from FORMAT; `$B4DD` is the 40-track disk-full fallback; `$B842` is the next-sector allocator. The GCR-to-HD LOAD optimization is a separate in-place routine at `$E91D-$E998`. This corrects the earlier tentative classification of `$FB15` as a fast-load hook. Do not bake guessed behavior into Breadbin's implementation. See the hook table and evidence in `docs/research/sjd41-generator-disk.md`.
 
