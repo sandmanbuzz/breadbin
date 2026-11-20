@@ -128,7 +128,7 @@ pname:  ldx idx
         lsr a
         lsr a
         beq @r
-        cmp #5
+        cmp #6
         bcc @nm
         lda #0              ; unknown id: "?"
 @nm:    asl a
@@ -159,7 +159,8 @@ n_cbm:  .byte "cbm", 0
 n_uci:  .byte "uci", 0
 n_fast: .byte "fast", 0
 n_d81:  .byte "d81", 0
-names:  .word n_unk, n_cbm, n_uci, n_fast, n_d81
+n_c80:  .byte "con80", 0
+names:  .word n_unk, n_cbm, n_uci, n_fast, n_d81, n_c80
 s_cls:  .byte ", class ", 0
 .segment "BSS"
 buf: .res 12

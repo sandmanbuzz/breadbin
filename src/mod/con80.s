@@ -30,7 +30,7 @@ FONT    = fontdata
         jmp init
         jmp fini
         .word KAPI_HASH
-        .byte $02               ; class 2: character device
+        .byte $52               ; class 2: character device; name id 5 (src/bin/mod.s)
 
 .segment "BSS"
 cb:     .res 1                  ; the byte con_putc is writing
