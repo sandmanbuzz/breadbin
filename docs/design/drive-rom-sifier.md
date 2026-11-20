@@ -79,6 +79,21 @@ The C000-DFFF bank differs by 68 bytes after applying the literal first-stage PO
 
 See `docs/research/sjd41-generator-disk.md` for the full evidence and the local inspector invocation. The original 1541C track-zero sensor routine is documented in [Wolfgang Moser's 1541C-to-1541-II ROM comparison](https://www.zimmers.net/anonftp/pub/cbm/firmware/drives/new/1541/1541C-to-1541-II.txt).
 
+## First SJD41 hook map
+
+The supplied SJD image confirms the intended design pattern: preserve the JD DOS/IEC foundation, redirect selected DOS paths into extension-bank code, and return through ordinary DOS machinery where appropriate. The first statically confirmed extension call-ins are:
+
+| Existing DOS hook | Extension entry | Status |
+|---|---:|---|
+| `$FB15` | `$A003` | Fast file-load path candidate; caller conditions not yet fully disassembled |
+| `$F15C` | `$B4DD` | Read/sector path candidate |
+| `$F173` | `$B842` | Companion read-path helper candidate |
+| `$FA32` | `$C010` | Confirmed 1541C track-zero routine relocation |
+| `$EBC2` | `$C049` | Confirmed wrapper around `$F259` that sets zero-page state |
+| `$DCD6` | `$C075` | Short DOS job/status cleanup helper |
+
+The first three are the key extension-bank entries for further analysis. Their exact semantics remain hypotheses until callers and callees are traced; do not bake guessed names or behavior into Breadbin's implementation. See the hook table and evidence in `docs/research/sjd41-generator-disk.md`.
+
 ## Next implementation gates
 
 1. Resolve the nine E000-FFFF byte differences and the C000-DFFF source discrepancy; obtain a full, model-correct captured input if needed.
