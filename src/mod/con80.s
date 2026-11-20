@@ -58,6 +58,7 @@ init:   lda mod_busy
         sec
         sbc #32
         sta free_pages
+        inc con_busy            ; no blink between the hide and the switch
         jsr cursor_hide         ; the 40-column cursor is on screen RAM we are about to reuse
         jsr c80_init            ; matrix and a clear bitmap, before the VIC looks at them
         ldy #0
@@ -66,6 +67,7 @@ init:   lda mod_busy
         sta $d018
         lda #$3b                ; hires bitmap
         sta $d011
+        dec con_busy
         clc
         rts
 @nomem: lda #ENOMEM
@@ -74,7 +76,8 @@ init:   lda mod_busy
         sec
         rts
 
-fini:   jsr c80_curhide
+fini:   inc con_busy
+        jsr c80_curhide
         ldy #8
         jsr patch               ; the stubs run the 40-column code again
         lda #$1b                ; text mode, lowercase set, screen at $0400
@@ -88,6 +91,7 @@ fini:   jsr c80_curhide
         jsr scr_color
         lda #$0c
         jsr con_putc            ; clear the screen (it is full of colour matrix)
+        dec con_busy
         clc
         rts
 
@@ -135,6 +139,7 @@ core:   inc con_busy
         cpx #11
         bne @r
         dec con_busy
+        ldy #0                  ; as c40_write returns
         rts
 
 ; con_putc: A = the byte. Preserves A, X, Y and p1/p2.
