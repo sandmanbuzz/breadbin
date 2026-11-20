@@ -399,3 +399,15 @@ The per-block series for `wc /bin/as` (62 blocks, same stamps, per block job wai
 ### 18.7 Which path wins on a 1541 (decision rule, owner 2026-11-20)
 
 The aim is the fastest path for anything we touch. If the drive-code path with batch reads beats JiffyDOS on 1541s, 1541s stop using the JiffyDOS path and it stays for non-1541 drives only. That is to be decided by measurement: the same operation on the same build, a JiffyDOS-ROM drive with the JiffyDOS kernel path against `fast.km`, both under VICE at real speed (the JiffyDOS ROMs are outside the repo, `BREADBIN_CI_JIFFY`). The earlier figures (`wc /bin/as` 20.7 s JiffyDOS against 28.3 s `fast.km` today) come from different sessions and drive ROMs and do not settle it. Non-1541 drives (1571, 1581) keep the JiffyDOS path where the drive has it and the standard path otherwise; a 1581 drive-code path would be bespoke work, since the TFR image has nothing for it.
+
+### 18.8 The job queue does not chain (measured 2026-11-20)
+
+Experiment: with the 18.6 stamps, the drive code posted extra read jobs in buffer slots 3 (and 4) next to the requested sector in slot 2, and waited for all of them before sending. `wc /bin/as`, VICE at real speed, stock 1541 ROM, steady-state job wait per command:
+
+| jobs posted | job wait |
+|---|---|
+| 1 (as shipped) | 145 ms |
+| 2: n, n+1 | 265 ms |
+| 3: n, n+2, n+4 | 380 ms |
+
+Each extra job costs about 115 ms (about half a revolution) whatever sector it targets: the DOS does not start the next job in time for even the next-but-one sector, so a batch through the stock job queue gives about 227 ms a block against 245 today (about 8%), and slot 4 is the BAM buffer, which a batch would have to treat as dirty. **Batching through the job queue is dead.** What is left is reading the sectors ourselves from the raw GCR stream (18.2), where consecutive sectors follow each other 10 ms apart: a pass reads two or three, then the drive sends them. Raw GCR is 325 bytes a sector, so the free buffers (2, 3 and 4, 768 bytes) hold two raw sectors, decoded while sending.
