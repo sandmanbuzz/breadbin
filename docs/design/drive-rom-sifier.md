@@ -109,9 +109,9 @@ See `docs/research/sjd41-generator-disk.md` for the full evidence and the local 
 
 ## U1/U2 compatibility consequence
 
-The clean-room DOS source trace shows that Breadbin's ordinary U1 block reads enter the controller READ job (the ~block.s~ → ~drtrd~ → ~doit2~ path). SJD replaces the READ job's call at ~$F4D1~ from ~$F50A~ (~DSTRT~) to ~$B2F7~. That extension path reads the GCR block via ~$B2C0~, decodes it via ~$B132~, and returns to the common read completion path. Therefore U1 reads should use the SJD drive-side read optimization without any Breadbin host protocol change.
+The clean-room DOS source trace shows that Breadbin's ordinary U1 block reads enter the controller READ job (`block.s` → `drtrd` → `doit2`). SJD replaces the READ job's call at `$F4D1` from `$F50A` (`DSTRT`) to `$B2F7`. That extension path tests bit 7 of `$1C0A` (VIA2 shift register): one branch falls back to the stock sync/read path, while the other reads the GCR block via `$B2C0`, decodes it via `$B132` using tables at `$BA00` and `$BC00`, and returns to the common read completion path. Therefore U1 reads enter the SJD read dispatcher and are eligible for the optimization when its condition is satisfied, without any Breadbin host protocol change.
 
-The U2 write path enters ~WRIGHT~ at ~$F56E~. That routine and its ~JSR $F510~ header-search path remain byte-identical to the supplied JD base; the SJD sector-allocation/format hooks do not apply to an explicit track/sector write. Static analysis confirms U1 reaches the SJD read dispatcher (with a conditional optimized branch), but not a fast-write benefit. Measure U1 and U2 separately on VICE and the C64 Ultimate before deciding whether any additional work is warranted.
+The U2 write path enters `WRIGHT` at `$F56E`. Its main GCR emission loop and `JSR $F510` search call remain byte-identical to JD, but WRIGHT then calls `WTOBIN` to restore the data buffer and schedules a verify job. SJD changes the `WTOBIN` tail at `$F674-$F682` to route through the ATN-service routine at `$E85B`; the verify job at `$F691` still calls stock `$F50A` directly and compares encoded bytes rather than using `$B2F7`. SJD also clears a BINGCR tail that appears unused on the ordinary path. So U2 has a small buffer/ATN-path change, but no clear fast-write acceleration is established. Measure U1 and U2 separately on VICE and the C64 Ultimate.
 
 ## Read-hook smoke image
 
@@ -135,7 +135,7 @@ The supplied SJD instructions expose an `sj` on/off setting and a separate `ic` 
 4. Record read/write elapsed time separately. Do not infer U2 performance from file SAVE timings.
 5. Run first in VICE, then on the C64 Ultimate if results agree.
 
-Expected from static analysis: U1 enters the SJD read dispatcher and may take its GCR-to-HD path; U2 enters the stock WRIGHT path. The benchmark is still required to establish actual gains and verify fallback behavior.
+Expected from static analysis: U1 enters the SJD read dispatcher and may take its GCR-to-HD path; U2 uses stock write emission and verify with a small ATN/buffer-restoration modification. The benchmark is still required to establish actual gains and verify fallback behavior.
 
 ## First SJD41 hook map
 
@@ -155,14 +155,14 @@ The `$E91D-$E998` replacement is a serial-bus/handshake path candidate, not the 
 
 Other confirmed replacements align with SJD's documented feature set: `$E6D1` redirects `BCDDEC` to the three-digit error formatter; `$EBFC` redirects `PARSXQ` to the extension command parser; `$EE3D` redirects `FORMAT`; `$EF28` redirects `AVCK`; `$EF3A` redirects `SETBPT`; `$EF4F` redirects `NUMFRE`; and `$EFC5` redirects the disk-full check. These are the expected hooks for error reporting, SJD commands, format, and extended BAM/track geometry. The complete candidate inventory is in the research note; the raw scanner deliberately marks unverified byte patterns as candidates.
 
-The first three are the key extension-bank entries for further analysis, but they are not all read paths. `$A003` is reached from FORMAT; `$B4DD` is the 40-track disk-full fallback; `$B842` is the next-sector allocator. The GCR-to-HD LOAD optimization is a separate in-place routine at `$E91D-$E998`. This corrects the earlier tentative classification of `$FB15` as a fast-load hook. Do not bake guessed behavior into Breadbin's implementation. See the hook table and evidence in `docs/research/sjd41-generator-disk.md`.
+The first three are the key extension-bank entries for further analysis, but they are not all read paths. `$A003` is reached from FORMAT; `$B4DD` is the 40-track disk-full fallback; `$B842` is the next-sector allocator. The GCR-to-HD read path is `$F4D1 -> $B2F7 -> $B2C0/$B132`; `$E91D-$E998` is a separate serial-bus/ATN path. This corrects the earlier tentative classification of `$FB15` as a fast-load hook and `$E91D` as the GCR decoder. Do not bake guessed behavior into Breadbin's implementation. See the hook table and evidence in `docs/research/sjd41-generator-disk.md`.
 
 ## Next implementation gates
 
 1. Resolve the nine E000-FFFF byte differences and the C000-DFFF source discrepancy; obtain a full, model-correct captured input if needed.
 2. Disassemble the changed SJD41 drive-ROM regions against the exact captured JD/CBM baseline, mapping new routines, hooks, and call paths.
 3. Separate SJD's transparent DOS optimizations from optional features Breadbin does not need.
-4. Prove whether Breadbin's existing U1/U2 block read/write path benefits from SJD41 without host changes. The documentation does not explicitly specify U1/U2 behavior.
+4. Benchmark U1 and U2 separately. U1 statically enters the SJD read dispatcher and conditional GCR decode path; U2 retains stock write emission/verify with a small ATN/buffer-restoration change.
 5. Only if U1/U2 need an additional operation, define a Breadbin-specific ABI and byte-verified hooks. Keep the existing JiffyDOS host byte protocol unchanged.
 6. Build private images and test them in VICE, then the C64 Ultimate emulated drive, before physical hardware.
 
