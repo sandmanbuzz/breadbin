@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 import unittest
 
+BREADBIN_TEST_KIND = "host"  # pure tooling tests; no VICE session
+
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "sjd41" / "crossrefs.py"
 SPEC = importlib.util.spec_from_file_location("sjd41_crossrefs", SCRIPT)
 module = importlib.util.module_from_spec(SPEC)
