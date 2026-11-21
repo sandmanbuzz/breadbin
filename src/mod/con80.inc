@@ -8,7 +8,7 @@
 ;                      192 bytes after it ($3F40-$3FFF), which c80_clear zeroes with the bitmap
 ;   FONT  404 bytes    glyph-major, 4 bytes per screen code 0-$64 (what to_screen returns): byte j =
 ;                      row j in the high nibble, row j+4 in the low (4 pixel columns a nibble);
-;                      gp unpacks a glyph into a doubled-nibble 8-byte buffer
+;                      gp unpacks a glyph into the 20-byte gl/gr buffers that put reads
 ; Stock zero page keeps its meaning: $D3 = column (0-79 here), $D6 = row.
 ; Scratch: p1/p2 (the con_write buffer), p3/p4 and tmp0-tmp3, all the kernel's.
 ;
@@ -181,52 +181,41 @@ escape: cpx #2
         stx esc_st
         cmp #'='
         bne @n1
-        lda #2
-        bne @set
-@n1:    cmp #'R'
+        ldx #2
+@set:   stx esc_st
+        rts
+@n1:    cmp #'C'
         bne @n2
-        lda #$12
-        sta REV
-        rts
+        ldx #4
+        bne @set
 @n2:    cmp #'r'
+        beq @rev                ; (X = 0)
+        cmp #'R'
         bne @n3
-        stx REV
+        ldx #$12
+@rev:   stx REV
         rts
-@n3:    cmp #'C'
-        bne @n4
-        lda #4
-@set:   sta esc_st
-        rts
-@n4:    cmp #'K'
-        beq eol
-        rts
+@n3:    cmp #'K'
+        bne @set                ; (X = 0: esc_st stays 0)
+        ; fall through
 
-; eol: blank from the cursor to the end of the row (only as far as the row was drawn)
-eol:    ldx ROWD
-        lda lastpos,x
-        cmp COLD
-        bcc @r
-        beq @r
+; eol: blank from the cursor to the end of the row (only as far as the row was drawn), a half
+; cell at a time; the high-water mark comes down to the cursor
+eol:    lda COLD
+        pha
+@l:     ldx ROWD
+        lda COLD
+        cmp lastpos,x
+        bcs @d
         jsr cellp
-        bcc @f
         eor #$ff
-        jsr clrh                ; odd column: the right half of its cell
-        jsr nextcell
-@f:     ldx ROWD
-        lda lastpos,x
-        jsr cells               ; cnt = cells drawn
-        lda COLD
-        clc
-        adc #1
-        lsr a
-        sta nl                  ; first whole cell
-        lda cnt
-        sec
-        sbc nl
-        sta cnt
-        jsr fill
-        ldx ROWD
-        lda COLD
+        jsr clrh
+        inc COLD
+        bne @l                  ; (always: COLD < 80)
+@d:     pla
+        sta COLD
+        cmp lastpos,x
+        bcs @r
         sta lastpos,x
 @r:     rts
 
@@ -253,13 +242,17 @@ clrh:   sta nl
 clrr:   rts
 
 ; the cursor: the half cell at (COLD, ROWD) XORed, with a flag
-c80_curshow:
-        lda cur_vis
-        beq tog
-        rts
 c80_curhide:
+        clc
+        .byte $24               ; bit zp: skip the sec
+c80_curshow:
+        sec
+; c80_cur: C = wanted state; toggles only when cur_vis (0 / 1) + C = 1
+c80_cur:
         lda cur_vis
-        beq clrr
+        adc #0
+        lsr a
+        bcc clrr
 tog:    jsr cellp
         sta nl
         ldy #7
@@ -443,7 +436,7 @@ draw:   jsr cellp
         lda rb,x
         ldx #0
         jsr gp
-        ldx #8
+        ldx #12
         jsr cpdp
         lda #$f0
         jsr sx
@@ -464,9 +457,9 @@ sx:     ldx REV
 @r:     sta xv
         rts
 
-; put: (dp)[0..7] = (gl & $f0) | (gq & $0f), then ^ xv: gl and gq are 8-byte glyph or old-cell buffers
+; put: (dp)[0..7] = (gl & $f0) | (gr & $0f), then ^ xv: gl and gr are 8-byte glyph or old-cell buffers
 put:    ldy #7
-@l:     lda gq,y
+@l:     lda gr,y
         eor gl,y
         and #$0f
         eor gl,y
@@ -476,50 +469,34 @@ put:    ldy #7
         bpl @l
         rts
 
-; gp: A = screen code, X = buffer (0 = gl, 8 = gq) <- that glyph, doubled. The font holds 4 bytes a
-; glyph: byte j = row j in the high nibble, row j+4 in the low; each nibble is doubled into both
-; halves of a buffer byte, so a half cell can be picked with a mask. (X, Y trashed)
-gp:     sta sp
-        lda #0
-        sta sp+1
-        asl sp
-        rol sp+1
-        asl sp
-        rol sp+1                ; code*4
-        lda sp
-        clc
-        adc #<FONT
-        sta sp
-        lda sp+1
-        adc #>FONT
-        sta sp+1
-        ldy #0
-@u:     lda (sp),y
-        sta nl
-        and #$f0
-        sta xv
-        lsr a
-        lsr a
-        lsr a
-        lsr a
-        ora xv
+; gp: A = screen code, X = buffer (0 = gl, 8 = gr-4) <- that glyph. The font holds 4 bytes a glyph:
+; byte j = row j in the high nibble, row j+4 in the low. Stored: byte j at X+j and X+8+j, its nibbles
+; swapped at X+4+j, so gl+y has row y in its high nibble and gr+y (= gl+12+y) row y in its low one,
+; which is what put reads. (X, Y trashed; the font operand below is patched with the page.)
+gp:     asl a
+        asl a                   ; C = code >= 64, A = the rest of code*4
+        tay
+        lda #>FONT
+        adc #0
+        sta @f+2
+@f:     lda FONT,y
         sta gl,x
-        lda nl
-        and #$0f
-        sta xv
+        sta gl+8,x
+        asl a                   ; swap the nibbles
+        adc #$80
+        rol a
         asl a
-        asl a
-        asl a
-        asl a
-        ora xv
+        adc #$80
+        rol a
         sta gl+4,x
-        inx
         iny
-        cpy #4
-        bne @u
+        inx
+        txa
+        and #3
+        bne @f
         rts
 
-; cpdp: X = buffer (0 / 8) <- the 8 bytes at (dp), the old cell
+; cpdp: X = buffer (0 = gl / 12 = gr) <- the 8 bytes at (dp), the old cell
 cpdp:   ldy #0
 @l:     lda (dp),y
         sta gl,x
@@ -579,68 +556,57 @@ nextcell:
 @r:     rts
 
 ; scroll: A = rows (1-24) up. Each row copies only as far as the wider of the two rows'
-; high-water marks; the rows left at the bottom are blanked as far as they were drawn.
+; high-water marks; a row whose source is below the screen copies itself through a zero mask,
+; as far as it was drawn, which blanks it.
 scroll: sta scn
-        lda #0
-        sta srow
-@row:   lda srow
+        ldx #0
+@row:   stx srow
+        txa
         clc
         adc scn
-        sta ssrc
-        tay
+        ldy #$ff                ; the mask: copy
+        cmp #25
+        bcc @on
+        txa                     ; below the screen: blank (source = dest, mask 0)
+        iny
+@on:    sta ssrc
+        tya
+        pha
+        ldy ssrc
         lda lastpos,y
-        ldx srow
         cmp lastpos,x
         bcs @w
         lda lastpos,x
-@w:     jsr cells
+@w:     lsr a
+        adc #0
+        sta cnt                 ; cells = (columns+1)/2
         lda ssrc
         ldx #sp
         jsr setp
         lda srow
         ldx #dp
         jsr setp
+        pla
+        sta nl
         jsr copy
         ldx srow
         ldy ssrc
         lda lastpos,y
+        and nl
         sta lastpos,x
-        inc srow
-        lda #25
-        sec
-        sbc scn
-        cmp srow
+        inx
+        cpx #25
         bne @row
-@clr:   ldx srow
-        lda lastpos,x
-        jsr cells
-        lda srow
-        ldx #dp
-        jsr setp
-        jsr fill
-        ldx srow
-        lda #0
-        sta lastpos,x
-        inc srow
-        lda srow
-        cmp #25
-        bne @clr
         rts
 
-; cells: A = columns -> A, cnt = cells ((A+1)/2)
-cells:  clc
-        adc #1
-        lsr a
-        sta cnt
-        rts
-
-; copy: cnt cells (8 bytes each) from (sp) to (dp), ascending, a cell to the loop
+; copy: cnt cells (8 bytes each) from (sp) to (dp), ANDed with nl, ascending, a cell to the loop
 copy:   ldx cnt
         beq @d
         ldy #0
 @c:
 .repeat 8
         lda (sp),y
+        and nl
         sta (dp),y
         iny
 .endrepeat
@@ -648,19 +614,6 @@ copy:   ldx cnt
         inc sp+1
         inc dp+1
 @n:     dex
-        bne @c
-@d:     rts
-
-; fill: cnt cells of zeros at (dp)
-fill:   ldx cnt
-        beq @d
-@c:     ldy #7
-        lda #0
-@b:     sta (dp),y
-        dey
-        bpl @b
-        jsr nextcell
-        dex
         bne @c
 @d:     rts
 
@@ -676,8 +629,8 @@ ssrc    = srow+1
 cnt     = ssrc+1
 esc_st  = cnt+1                 ; escape sequence state (as con.s)
 erow    = esc_st+1
-gl      = erow+2                ; glyph buffers (gl, gq = gl+8; erow+1 is cur_vis when standalone)
-gq      = gl+8
+gl      = erow+2                ; glyph buffers, 20 bytes (gl, gr = gl+12; erow+1 is cur_vis when standalone)
+gr      = gl+12
 .ifndef CUR_EXT
 cur_vis = erow+1                ; cursor drawn (the kernel's own flag in the module: the IRQ blink reads it)
 .endif
