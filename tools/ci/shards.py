@@ -6,7 +6,7 @@
                             prints "count <n>" and exits 0, or names the problems and exits 1
 
 Test modules are VICE by default. A host-only tooling module sets
-BREADBIN_TEST_KIND = "host" so it is tested by test-host, not assigned to a VICE shard.
+BREADBIN_TEST_KIND = "host" so it is run by a host-tooling test step, not assigned to a VICE shard.
 """
 import importlib.util
 import os
