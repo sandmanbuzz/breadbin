@@ -388,6 +388,21 @@ class Language(unittest.TestCase):
         self.assertEqual(self.out(nest(7) + nest(8) + "PRINT -INT(-ABS(-SGN(2.5)))\n"),
                          " 1 \n?FORMULA TOO COMPLEX ERROR\n 1 \n")
 
+    def test_the_deepest_nesting_fits_the_frame_stack(self):
+        # the frame stack (fstack in bas.c) holds: each nested IF counts against the same nesting
+        # budget as the formula after it, so eight IF THENs and any depth of parentheses or ABS(
+        # end in a value or ?FORMULA TOO COMPLEX, never a frame overflow (the process exiting)
+        for ni in range(9):
+            if_ = "10 " + "IF 1 THEN " * ni
+            for n in range(17):
+                for body, want in (("A=" + "1+(" * n + "1" + ")" * n + ":PRINT A", n + 1),
+                                   ("PRINT " + "ABS(" * n + "1" + ")" * n, 1)):
+                    o = self.out(if_ + body + "\nRUN\n")
+                    self.assertTrue(o.strip() == str(want) or "FORMULA TOO COMPLEX" in o or "TOO" in o,
+                                    (ni, n, body[:6], o))
+        if_ = "10 " + "IF 1 THEN " * 4
+        self.assertEqual(self.out(if_ + "A=" + "1+(" * 8 + "1" + ")" * 8 + ":PRINT A\nRUN\n"), " 9 \n")
+
     def test_bytes_free(self):
         self.assertEqual(self.out("", tty=True), FREE + "READY.\n")
 

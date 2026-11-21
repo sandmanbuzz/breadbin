@@ -92,6 +92,16 @@ class Refused(unittest.TestCase):
         self.fails("int f(%s) { return 0; }\nint main() { return f(1,2,3,4,5,6,7,8,9); }" % params,
                    "at most 8 fit")
 
+    def test_no_second_return_after_a_return(self):
+        # a function that ends in return has no implicit return 0 behind it (4 bytes each in bas);
+        # one that ends in a label (an if's end) keeps it, as the label is reachable
+        one = cc_pcode.compile_pcode("int f(int a) { return a; }\nint main() { return f(1); }")
+        f = one[one.index("fn_f:"):one.index("fn_main:")]
+        self.assertEqual(f.count("PO_LEAVE"), 1)
+        two = cc_pcode.compile_pcode("int f(int a) { if (a) return 1; }\nint main() { return f(1); }")
+        f = two[two.index("fn_f:"):two.index("fn_main:")]
+        self.assertEqual(f.count("PO_LEAVE"), 2)
+
     def test_the_type_rules_are_the_native_ones(self):
         self.fails("int main() { int *p; int x; x = p; return 0; }", "a pointer where a number is needed")
 

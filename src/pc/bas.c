@@ -17,7 +17,7 @@
    against src/pvm/pvm.inc. */
 
 /* xops */
-/* fstack 768 */   /* the VM's frame stack: 256 bytes under the 1024 default, for memory (cc_pcode) */
+/* fstack 640 */   /* the VM frame stack: 256 bytes under the 1024 default; nested IFs count in the `deep` budget */
 
 extern int rt_mark();   /* bas-rt.s, for the compiled code: these take their arguments from the */
 extern int rt_go();     /* eval stack and the number stack as the comments there say; the */
@@ -41,16 +41,17 @@ extern int c_crunch(char *buf, char *kwt);
 extern int c_find(char *mem, int top, int n);
 extern int c_sp(); /* xop 232 */      /* bas-rt.s: the scanner and the code emitter, on these globals */
 extern int c_digit(); /* xop 242 */
-extern int c_letter(); /* xop 252 */
+extern int c_letter();
 extern int c_tok(int t); /* xop 234 */
-extern int c_ult(int a, int b); /* xop 254 */
+extern int c_ult(int a, int b);
 extern int c_emit(int b); /* xop 236 */
 extern int c_room(int n); /* xop 248 */
 extern int c_op1(int b); /* xop 238 */
 extern int c_opw(int b, int w); /* xop 250 */
 extern int c_ncall(char *f); /* xop 244 */
-extern int c_xop(int b);
+extern int c_xop(int b); /* xop 254 */
 extern int c_xopw(int b, int w);
+extern int c_fail(int e); /* xop 252 */   /* err = e, unless one came first */
 extern int c_grow(int n);       /* up to n pages from the kernel for mem (bas-rt.s); the pages granted */
 
 char *mem;              /* MEM: the arena, msz bytes of pages the kernel grants at start (c_grow) */
@@ -78,39 +79,24 @@ int ed;                 /* and on the eval stack */
 int vint;               /* the last variable parsed is an integer (A%) */
 int ifs[8];             /* this line's IFs: where their branch offsets go */
 int nif;
-int fpos[32];           /* forward GOTOs: where the address goes, the target, the line */
-int ftgt[32];
-int fln[32];
+int *inul;              /* 0, for fx */
+int *fx;                /* forward GOTOs, in ctl while compiling (a run starts with it empty): where
+                           the address goes (fx[0-31]), the target (fx[32-63]), the line (fx[64-95]) */
 int nfix;
-char ctl[192];          /* GOSUB and FOR entries, each with its tag last: G (3 bytes) the return
+char ctl[193];          /* GOSUB and FOR entries, each with its tag last: G (3 bytes) the return
                            address; F (13) the variable, the body, the limit and the step */
 int csp;
-char kbuf[4];
-char ibuf[64];         /* standard input */
-int ipos;
-int ilen;
-char obuf[64];         /* standard output, flushed at each newline and before each read */
-int olen;
+char pb[4];             /* scratch: the byte outc writes, and the number rt_pow keeps */
 int col;                /* the output column */
 char *nul;              /* 0: an address minus nul is the address as an int */
 
 /* ---- output ---- */
 
-int flush() {
-    if (olen) write(1, obuf, olen);
-    olen = 0;
-    return 0;
-}
-
-int outc(int c) {
-    if (olen == 64) flush();
-    obuf[olen] = c;
-    olen = olen + 1;
+int outc(int c) {       /* a write each: the kernel buffers the console, and obuf was 66 bytes */
+    pb[0] = c;
+    write(1, pb, 1);
     col = col + 1;
-    if (c == '\n') {
-        col = 0;
-        flush();
-    }
+    if (c == '\n') col = 0;
     return 0;
 }
 
@@ -142,18 +128,11 @@ int getline() {         /* the next line of stdin into lbuf: its length, -1 at t
     int over = 0;
     int c;
     while (1) {
-        if (ipos == ilen) {
-            flush();
-            ilen = read(0, ibuf, 64);
-            ipos = 0;
-            if (ilen <= 0) {
-                ilen = 0;
-                if (n == 0 && !over) return -1;
-                break;
-            }
+        if (read(0, pb, 1) <= 0) {      /* a byte a call: no read-ahead to keep, and no buffer */
+            if (n == 0 && !over) return -1;
+            break;
         }
-        c = ibuf[ipos];
-        ipos = ipos + 1;
+        c = pb[0];
         if (c == '\n' || c == '\r') break;
         if (n < 160) {
             lbuf[n] = c;
@@ -174,22 +153,18 @@ int normal() {          /* lbuf in place (c_crunch): keywords to tokens and the 
 
 /* ---- parsing: c_sp, c_digit, c_letter and c_tok (bas-rt.s) read src[si] ---- */
 
-int fail(int e) {       /* error e, unless one came first */
-    if (!err) err = e;
-    return 0;
-}
 
 int number() {          /* a line number at si (0 to 63999, unsigned), spaces among its digits
                            and after it skipped, as MS; none or too big is a syntax error */
     int n = 0;
-    if (!c_digit()) fail(1);
+    if (!c_digit()) c_fail(1);
     while (c_digit()) {
-        if (n > 6399) fail(1);
+        if (n > 6399) c_fail(1);
         n = n * 10 + src[si] - '0';
         si = si + 1;
         c_sp();
     }
-    if (c_ult(63999, n)) fail(1);
+    if (c_ult(63999, n)) c_fail(1);
     return n;
 }
 
@@ -254,7 +229,7 @@ int store(int n, int t, int len) {  /* line n is lbuf from t, len bytes; none de
     if (p < ptop && lineno(p) == n) old = next(p) - p;
     if (len) add = len + 6;
     if (ptop - old + add > msz) {
-        fail(2);
+        c_fail(2);
         return 0;
     }
     move(mem + p + add, mem + p + old, ptop - p - old);
@@ -268,14 +243,25 @@ int store(int n, int t, int len) {  /* line n is lbuf from t, len bytes; none de
     return clearv();    /* as MS: an edit clears the variables */
 }
 
+int outn(char *t, int n) {      /* entry n (from 0) of the |-ended list t */
+    int k = 0;
+    while (n > 0) {
+        if (t[k] == '|') n = n - 1;
+        k = k + 1;
+    }
+    while (t[k] != '|') {
+        outc(t[k]);
+        k = k + 1;
+    }
+    return 0;
+}
+
 int list(int a, int b) {
     int p = 0;
     int n;
     int i;
     int c;
     int q;              /* 1 in a string, 2 in a REM: no tokens there */
-    int k;
-    int t;
     while (p < ptop) {
         n = lineno(p);
         if (!c_ult(n, a) && !c_ult(b, n)) {
@@ -287,15 +273,7 @@ int list(int a, int b) {
                 if (c == '"' && q < 2) q = 1 - q;
                 if (c < 128 || q) outc(c);
                 else {          /* a token: its keyword */
-                    k = 0;
-                    for (t = 128; t < c; t = t + 1) {
-                        while (kwt[k] != '|') k = k + 1;
-                        k = k + 1;
-                    }
-                    while (kwt[k] != '|') {
-                        outc(kwt[k]);
-                        k = k + 1;
-                    }
+                    outn(kwt, c - 128);
                     if (c == 145 /* tk REM */) q = 2;
                 }
             }
@@ -336,16 +314,6 @@ int begin() {           /* a bytecode function's header: JSR pvm_interp, as main
     return 0;
 }
 
-int prologue() {        /* the entry of a run: an error comes back here (rt_mark then gives 1),
-                           and the run returns */
-    begin();
-    c_ncall(&rt_mark);
-    c_opw(76 /* PO_BRFLS */, 4);  /* to the body, past the CN 0 and RET */
-    c_emit(0 /* PO_CN 0 */);
-    c_emit(92 /* PO_RET */);
-    return 0;
-}
-
 int finish() {
     c_room(2);
     c_emit(0 /* PO_CN 0 */);
@@ -353,19 +321,29 @@ int finish() {
     return 0;
 }
 
+int prologue() {        /* the entry of a run: an error comes back here (rt_mark then gives 1),
+                           and the run returns */
+    begin();
+    c_ncall(&rt_mark);
+    c_opw(76 /* PO_BRFLS */, 4);  /* to the body, past the CN 0 and RET */
+    return finish();
+}
+
 /* ---- the runtime the compiled code calls ---- */
 
-int rt_prs(char *s) {   /* a CS string: length, then the text */
+int outb(char *b, int n) {       /* n bytes */
     int i;
-    for (i = 1; i <= s[0]; i = i + 1) outc(s[i]);
+    for (i = 0; i < n; i = i + 1) outc(b[i]);
     return 0;
+}
+
+int rt_prs(char *s) {   /* a CS string: length, then the text */
+    return outb(s + 1, s[0]);
 }
 
 int rt_prn() {          /* PRINT a number: a sign or a space before it, a space after */
     char b[12];
-    int n = c_fmt(b);
-    int i;
-    for (i = 0; i < n; i = i + 1) outc(b[i]);
+    outb(b, c_fmt(b));
     outc(' ');
     return 0;
 }
@@ -381,7 +359,6 @@ int rt_tab() {          /* PRINT's comma: to the next column of 10 */
     return 0;
 }
 
-char pb[4];
 int rt_pow() {          /* the number under the top to the power on top, by squaring; the power
                            must be a whole number (-32768 to 32767) */
     int e;
@@ -482,13 +459,13 @@ int rt_next(int v) {    /* step the loop on v (0: the innermost): the body's add
 
 int npush(int d) {
     nd = nd + d;
-    if (nd > 14) fail(11);      /* bas-rt.s holds 16; rt_pow and rt_next use 2 */
+    if (nd > 14) c_fail(11);      /* bas-rt.s holds 16; rt_pow and rt_next use 2 */
     return 1;
 }
 
 int epush(int d) {
     ed = ed + d;
-    if (ed > 6) fail(11);
+    if (ed > 6) c_fail(11);
     return 2;
 }
 
@@ -526,14 +503,14 @@ int var() {             /* the variable at si (a letter): its value's address, m
         si = si + 1;
         vint = 1;
         c2 = c2 | 128;
-    } else if (src[si] == '$') fail(1);       /* strings come with L3d */
+    } else if (src[si] == '$') c_fail(1);       /* strings come with L3d */
     while (p < msz) {
         if (mem[p] == c1 && mem[p + 1] == c2) return addr(p + 2);
         p = p + 6 - (mem[p + 1] & 128) / 64;
     }
     size = 6 - vint * 2;
     if (vbot - size < cend) {
-        fail(2);
+        c_fail(2);
         return 0;
     }
     vbot = vbot - size;
@@ -549,17 +526,15 @@ int constant() {        /* a number at si: digits, a point, digits (spaces among
     int ip = 0;
     int big = 0;
     int fd = 0;
-    int f[4];
+    int nz = 0;
+    int l = 0;
     int r = 0;
     int any = 0;
     int d;
     int i;
-    for (i = 0; i < 4; i = i + 1) {
-        kbuf[i] = 0;
-        f[i] = 0;
-    }
+    for (i = 0; i < 4; i = i + 1) pb[i] = 0;
     c_nclr();
-    c_ldv(kbuf);
+    c_ldv(pb);
     while (c_digit()) {
         d = src[si] - '0';
         o = o | c_mac(d);
@@ -569,63 +544,72 @@ int constant() {        /* a number at si: digits, a point, digits (spaces among
         c_sp();
         any = 1;
     }
-    if (src[si] == '.') {
-        si = si + 1;
+    if (c_tok('.')) {
         c_sp();
         while (c_digit()) {
             d = src[si] - '0';
-            if (fd < 4) f[fd] = d;
-            else if (fd == 4) r = d >= 5;
+            if (fd < 4) nz = nz | d;
+            if (fd < 3) o = o | c_mac(d);
+            else if (fd == 3) l = d;
+            else if (fd == 4) {
+                r = d >= 5;
+                nz = nz | r;
+            }
             if (fd < 5) fd = fd + 1;
             si = si + 1;
             c_sp();
             any = 1;
         }
     }
-    if (!any) fail(1);
-    for (i = 0; i < 3; i = i + 1) o = o | c_mac(f[i]);
-    o = o | c_mac(f[3] + r);
-    c_stv(kbuf);
-    if (o) fail(4);
-    if (!big && !(f[0] | f[1] | f[2] | f[3] | r)) {
+    if (!any) c_fail(1);
+    while (fd < 3) {
+        o = o | c_mac(0);
+        fd = fd + 1;
+    }
+    o = o | c_mac(l + r);
+    c_stv(pb);
+    if (o) c_fail(4);
+    if (!big && !nz) {
         pushint(ip);
         c_xop(226 /* x FROMI */);
         return npush(1);
     }
     c_room(5);
     c_emit(204 /* x LDK */);
-    for (i = 0; i < 4; i = i + 1) c_emit(kbuf[i]);
+    for (i = 0; i < 4; i = i + 1) c_emit(pb[i]);
     straight = 0;       /* the VM renormalises IP past the operand */
     return npush(1);
 }
 
 int deep;
 int fn(int f) {       /* a function of one number: f(...) */
-    c_sp();
-    if (src[si] != '(') {
-        fail(1);
+    if (c_sp() != '(') {
+        c_fail(1);
         return 1;
     }
     deep = deep + 1;       /* a function's frames count as a second level of nesting */
-    if (deep > 15) fail(11);
-    else tonum(primary());
+    tonum(primary());      /* its '(' enters climb, which holds the limit */
     deep = deep - 1;
     c_xop(f);
     return 1;
 }
 
+int need(int t) {       /* the token t after spaces, or a syntax error */
+    c_sp();
+    if (c_tok(t)) return 1;
+    c_fail(1);
+    return 0;
+}
+
 int primary() {
     int k;
-    c_sp();
-    if (src[si] == '(') {
-        si = si + 1;
-        k = expr();
-        c_sp();
-        if (src[si] == ')') si = si + 1;
-        else fail(1);
+    int c = c_sp();
+    if (c_tok('(')) {
+        k = climb(1);
+        need(')');
         return k;
     }
-    if (c_digit() || src[si] == '.') return constant();
+    if (c_digit() || c == '.') return constant();
     if (c_tok(128 /* tk ABS */)) return fn(222 /* x ABS */);
     if (c_tok(137 /* tk INT */)) return fn(220 /* x INT */);
     if (c_tok(148 /* tk SGN */)) return fn(224 /* x SGN */);
@@ -638,7 +622,7 @@ int primary() {
         c_xopw(200 /* x LDV */, k);
         return npush(1);
     }
-    fail(1);
+    c_fail(1);
     return 1;
 }
 
@@ -657,7 +641,7 @@ int operand() {         /* a primary, or - + NOT and theirs. Each ( and unary op
     int k = 1;
     int c;
     deep = deep + 1;
-    if (deep > 15) fail(11);
+    if (deep + nif > 15) c_fail(11);
     else {
         c = c_sp();
         if (c == '-') {         /* binds looser than ^, as MS: -2^2 is -4 */
@@ -688,6 +672,24 @@ int binop(int c) {      /* the precedence of the binary operator c; 0 for none *
     return 0;
 }
 
+int cmpops(int c) {     /* the relation's characters from si: < = > as bits 1, 2, 4 */
+    int m = 0;
+    int b;
+    while (1) {
+        b = 0;
+        if (c == '<') b = 1;
+        if (c == '=') b = 2;
+        if (c == '>') b = 4;
+        if (!b) break;
+        if (m & b) c_fail(1);
+        m = m | b;
+        si = si + 1;
+        c = c_sp();
+    }
+    if (m == 7) c_fail(1);
+    return m;
+}
+
 int climb(int min) {    /* the operators of precedence min and up, each left to right (as MS:
                            2^3^2 is 64). Returns the result's kind: 1 a number, 2 an int.
                            Relations (= < > <= >= <>, and =< => >< as MS) give -1 or 0; the
@@ -695,26 +697,12 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
     int k = operand();
     int c;
     int p;
-    int m;
-    int b;
     while (!err) {
         c = c_sp();
         p = binop(c);
         if (p < min) return k;      /* none is 0 */
         if (p == 6) {
-            m = 0;
-            while (1) {
-                b = 0;
-                if (c == '<') b = 1;
-                if (c == '=') b = 2;
-                if (c == '>') b = 4;
-                if (!b) break;
-                if (m & b) fail(1);
-                m = m | b;
-                si = si + 1;
-                c = c_sp();
-            }
-            if (m == 7) fail(1);
+            p = cmpops(c);   /* the relation's bits: p is not needed again here */
             tonum(k);
             tonum(climb(7));
             c_xop(218 /* x CMP */);
@@ -722,7 +710,7 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
             epush(1);
             c_op1(0 /* PO_CN 0 */);
             epush(1);
-            relop(m);
+            relop(p);
             k = epush(-1);
             continue;
         }
@@ -747,10 +735,6 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
     return k;
 }
 
-int expr() {
-    return climb(1);
-}
-
 /* ---- statements ---- */
 
 int assign(int a, int isint, int k) {
@@ -771,18 +755,13 @@ int let() {             /* [LET] v = expression */
     int i;
     c_sp();
     if (!c_letter()) {
-        fail(1);
+        c_fail(1);
         return 0;
     }
     a = var();
     i = vint;
-    c_sp();
-    if (src[si] != '=') {
-        fail(1);
-        return 0;
-    }
-    si = si + 1;
-    return assign(a, i, expr());
+    if (!need('=')) return 0;
+    return assign(a, i, climb(1));
 }
 
 int prints() {          /* PRINT: strings and numbers; ; between them, or after the last for no
@@ -790,40 +769,32 @@ int prints() {          /* PRINT: strings and numbers; ; between them, or after 
     int nl = 1;
     int i;
     int n;
+    int c;
     while (!err) {
-        c_sp();
-        if (src[si] == 0 || src[si] == ':') break;
-        if (src[si] == ';') {
-            si = si + 1;
-            nl = 0;
-            continue;
-        }
-        if (src[si] == ',') {
-            si = si + 1;
+        c = c_sp();
+        if (c == 0 || c == ':') break;
+        nl = 0;
+        if (c_tok(';')) continue;
+        if (c_tok(',')) {
             ecall(&rt_tab);
-            nl = 0;
             continue;
         }
         nl = 1;
-        if (src[si] != '"') {
-            tonum(expr());
+        if (!c_tok('"')) {
+            tonum(climb(1));
             ecall(&rt_prn);
             npush(-1);
             continue;
         }
-        si = si + 1;
         i = si;
         while (src[si] && src[si] != '"') si = si + 1;
         n = si - i;
-        if (src[si]) si = si + 1;   /* an unclosed string ends at the end of the line, as MS */
+        c_tok('"');                 /* an unclosed string ends at the end of the line, as MS */
         if (n) {
             c_room(2);
             c_emit(46 /* PO_CS */);
             c_emit(n);
-            while (i < si && src[i] != '"') {
-                c_emit(src[i]);
-                i = i + 1;
-            }
+            for (c = 0; c < n; c = c + 1) c_emit(src[i + c]);
             straight = n + 1;       /* CS moves the base to the string: the next op is past it */
             ecall(&rt_prs);
         }
@@ -839,19 +810,19 @@ int jump(int t) {       /* JUMP to line t: a line not compiled yet is fixed up w
     straight = 0;
     if (cur != -1 && c_ult(cur, t)) {
         if (nfix == 32) {
-            fail(2);
+            c_fail(2);
             return 0;
         }
-        fpos[nfix] = cend;
-        ftgt[nfix] = t;
-        fln[nfix] = cur;
+        fx[nfix] = cend;
+        fx[32 + nfix] = t;
+        fx[64 + nfix] = cur;
         nfix = nfix + 1;
         c_emit(0);
         return c_emit(0);
     }
     p = find(t);
     if (p == ptop || lineno(p) != t || (cur == -1 && !pend)) {
-        fail(10);
+        c_fail(10);
         return 0;
     }
     p = addr(getw(mem + p + 3));
@@ -862,21 +833,21 @@ int jump(int t) {       /* JUMP to line t: a line not compiled yet is fixed up w
 int gotol() {
     c_sp();
     if (!c_digit()) {
-        fail(1);
+        c_fail(1);
         return 0;
     }
     return jump(number());
 }
 
 int ifs_() {            /* IF e THEN n | statements, IF e GOTO n: false goes to the next line */
-    int k = expr();
+    int k = climb(1);
     if (k == 1) {
         c_xop(230 /* x TST */);
         npush(-1);
         epush(1);
     }
     if (nif == 8) {
-        fail(11);
+        c_fail(11);
         return 0;
     }
     c_room(3);
@@ -889,7 +860,7 @@ int ifs_() {            /* IF e THEN n | statements, IF e GOTO n: false goes to 
     c_sp();
     if (c_tok(134 /* tk GOTO */)) return gotol();
     if (!c_tok(152 /* tk THEN */)) {
-        fail(1);
+        c_fail(1);
         return 0;
     }
     c_sp();
@@ -901,26 +872,17 @@ int fors() {            /* FOR v = a TO b [STEP c] */
     int a;
     c_sp();
     if (!c_letter()) {
-        fail(1);
+        c_fail(1);
         return 0;
     }
     a = var();
-    if (vint) fail(1);  /* as MS: the variable is a number */
+    if (vint) c_fail(1);  /* as MS: the variable is a number */
+    if (!need('=')) return 0;
+    assign(a, 0, climb(1));
+    if (!need(153 /* tk TO */)) return 0;
+    tonum(climb(1));
     c_sp();
-    if (src[si] != '=') {
-        fail(1);
-        return 0;
-    }
-    si = si + 1;
-    assign(a, 0, expr());
-    c_sp();
-    if (!c_tok(153 /* tk TO */)) {
-        fail(1);
-        return 0;
-    }
-    tonum(expr());
-    c_sp();
-    if (c_tok(149 /* tk STEP */)) tonum(expr());
+    if (c_tok(149 /* tk STEP */)) tonum(climb(1));
     else {
         c_op1(2 /* PO_CN 1 */);
         c_xop(226 /* x FROMI */);
@@ -942,14 +904,13 @@ int nexts() {           /* NEXT [v [, w ...]] */
         a = 0;
         if (c_letter()) {
             a = var();
-            if (vint) fail(1);
+            if (vint) c_fail(1);
         }
         c_opw(44 /* PO_CW */, a);
         c_ncall(&rt_next);
         c_ncall(&rt_go);
         c_sp();
-        if (src[si] != ',') return 0;
-        si = si + 1;
+        if (!c_tok(',')) return 0;
     }
     return 0;
 }
@@ -973,9 +934,7 @@ int stmt() {
     }
     if (c_tok(134 /* tk GOTO */)) return gotol();
     if (c_tok(135 /* tk GO */)) {     /* GO TO */
-        c_sp();
-        if (c_tok(153 /* tk TO */)) return gotol();
-        fail(1);
+        if (need(153 /* tk TO */)) return gotol();
         return 0;
     }
     if (c_tok(146 /* tk RETURN */)) {
@@ -993,23 +952,17 @@ int stmt() {
         return c_ncall(&c_throw);
     }
     if (c_letter()) return let();
-    fail(1);
+    c_fail(1);
     return 0;
 }
 
 int stmts() {           /* the statements of src from si, : between them */
     while (!err) {
-        c_sp();
-        if (src[si] == 0) return 0;
-        if (src[si] == ':') {
-            si = si + 1;
-            continue;
-        }
+        if (!c_sp()) return 0;
+        if (c_tok(':')) continue;
         stmt();
         if (err) return 0;
-        c_sp();
-        if (src[si] == ':') si = si + 1;
-        else if (src[si]) fail(1);
+        if (c_sp() && !c_tok(':')) c_fail(1);
     }
     return 0;
 }
@@ -1026,19 +979,19 @@ int cline(int p) {      /* compile the line at p */
     int i = 0;
     putw(mem + p + 3, cend);
     while (i < nfix) {  /* the GOTOs waiting for this line, or for one that is not there */
-        if (ftgt[i] == n) putw(mem + fpos[i], addr(cend));
-        else if (c_ult(ftgt[i], n)) {
-            fail(10);
-            eline = fln[i];
+        if (fx[32 + i] == n) putw(mem + fx[i], addr(cend));
+        else if (c_ult(fx[32 + i], n)) {
+            c_fail(10);
+            eline = fx[64 + i];
             return 0;
         } else {
             i = i + 1;
             continue;
         }
         nfix = nfix - 1;
-        fpos[i] = fpos[nfix];
-        ftgt[i] = ftgt[nfix];
-        fln[i] = fln[nfix];
+        fx[i] = fx[nfix];
+        fx[32 + i] = fx[32 + nfix];
+        fx[64 + i] = fx[64 + nfix];
     }
     cur = n;
     c_xop(206 /* x LN */);
@@ -1066,8 +1019,8 @@ int compile() {         /* the program into code from ptop: pend, or err and eli
     }
     finish();
     if (nfix && !err) {
-        fail(10);
-        eline = fln[0];
+        c_fail(10);
+        eline = fx[64];
     }
     if (!err) pend = cend;
     return 0;
@@ -1076,21 +1029,10 @@ int compile() {         /* the program into code from ptop: pend, or err and eli
 /* ---- commands ---- */
 
 int report(int e, int line) {   /* error e as MS prints it; line -1 for none */
-    int i = 0;
     fresh();
-    if (e == 9) outs("BREAK");
-    else {
-        outc('?');
-        while (e > 1) {
-            if (emsg[i] == '|') e = e - 1;
-            i = i + 1;
-        }
-        while (emsg[i] != '|') {
-            outc(emsg[i]);
-            i = i + 1;
-        }
-        outs(" ERROR");
-    }
+    if (e != 9) outc('?');     /* BREAK is a message and no error */
+    outn(emsg, e - 1);
+    if (e != 9) outs(" ERROR");
     if (line != -1) {
         outs(" IN ");
         outu(line);
@@ -1128,10 +1070,23 @@ int run(int t, int has) {       /* RUN [t] */
     return go(pend);
 }
 
-int ended() {           /* nothing after a command but spaces, and no error so far */
-    c_sp();
-    if (src[si]) fail(1);
-    return !err;
+int ended() {           /* nothing after a command but spaces, and no error so far: else reported */
+    if (c_sp()) c_fail(1);
+    if (!err) return 1;
+    report(err, -1);
+    return 0;
+}
+
+int body() {            /* an immediate line's code, from cend: its statements, and the end of the run */
+    cur = -1;
+    nd = 0;
+    ed = 0;
+    nif = 0;
+    prologue();
+    c_xop(206 /* x LN */);
+    stmts();
+    endline();
+    return finish();
 }
 
 int immediate() {       /* compile the line after the program's code (compiling the program
@@ -1146,15 +1101,7 @@ int immediate() {       /* compile the line after the program's code (compiling 
     cend = pend;
     if (!cend) cend = ptop;
     at = cend;
-    cur = -1;
-    nd = 0;
-    ed = 0;
-    nif = 0;
-    prologue();
-    c_xop(206 /* x LN */);
-    stmts();
-    endline();
-    finish();
+    body();
     return at;
 }
 
@@ -1169,17 +1116,16 @@ int command() {         /* a line without a number */
             b = a;
         }
         c_sp();
-        if (src[si] == '-') {
-            si = si + 1;
+        if (c_tok('-')) {
             c_sp();
             b = -1;
             if (c_digit()) b = number();
         }
-        if (!ended()) return report(err, -1);
+        if (!ended()) return 0;
         return list(a, b);
     }
     if (c_tok(140 /* tk NEW */)) {
-        if (!ended()) return report(err, -1);
+        if (!ended()) return 0;
         ptop = 0;
         return clearv();
     }
@@ -1189,12 +1135,11 @@ int command() {         /* a line without a number */
             a = number();
             b = 1;
         }
-        if (!ended()) return report(err, -1);
+        if (!ended()) return 0;
         return run(a, b == 1);
     }
     if (c_tok(130 /* tk BYE */) || c_tok(151 /* tk SYSTEM */)) {
-        if (!ended()) return report(err, -1);
-        flush();
+        if (!ended()) return 0;
         exit(0);
     }
     at = immediate();
@@ -1204,11 +1149,7 @@ int command() {         /* a line without a number */
         cend = ptop;
         si = 0;
         at = ptop;
-        prologue();
-        c_xop(206 /* x LN */);
-        stmts();
-        endline();
-        finish();
+        body();
     }
     if (err) return report(err, -1);
     return go(at);
@@ -1216,6 +1157,7 @@ int command() {         /* a line without a number */
 
 int main() {
     int tty = isatty(0);
+    fx = inul + ((ctl + 1 - nul) >> 1);   /* ctl, or its next byte if the address is odd: a word view */
     int n;
     int t;
     msz = c_grow(120) * 256;    /* as many pages as are free, to 30,720 bytes: ints stay positive */
@@ -1262,6 +1204,5 @@ int main() {
             outs("READY.\n");
         }
     }
-    flush();
     return 0;
 }
