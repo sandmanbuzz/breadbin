@@ -49,6 +49,27 @@ The exact startup text may vary by build. The `help` command displays the comman
 
 **Keyboard note:** on a C64 keyboard, the pipe character `|` is typed with **SHIFT + -**. RUN/STOP sends an interrupt to the foreground command.
 
+### The C64 keyboard: symbols and control-key notation
+
+A C64 keyboard is not a small PC keyboard. Some characters used constantly in shell examples are printed differently, are produced with a modifier, or appear on the screen as a platform-specific glyph. This is worth knowing before copying Unix examples.
+
+| What you see in a command or document | What to do on a C64 keyboard |
+|---|---|
+| `|` (pipe) | Press **SHIFT + -** (the minus key). This is the shell pipeline operator: `a | b`. |
+| `^` (caret) | The C64's keycap/glyph is an **up-arrow**. The character code used for the caret is displayed as that up-arrow in the C64 character set. It is the same character in source and command text; do not substitute a cursor-up action. |
+| `^O`, `^X`, `^K` in key instructions | This is conventional control-key notation: hold **CTRL** and press the letter. It does not mean type a caret followed by a letter. On the C64 screen, the caret may look like an up-arrow. |
+| `#` | The hash character is available with **SHIFT + 3**. In shell scripts, `#` begins a comment when it is not quoted or part of a word. |
+| `_` | The underscore is on the C64's **LEFT-ARROW** key position; the shifted and unshifted legends differ from a PC keyboard. |
+| `DEL` | The key marked **DEL** deletes backward in the shell line editor and in `edit`. It is not the same as the PC Delete key's forward-delete behaviour. |
+
+A few application-specific keys are useful to remember:
+
+- **Shell line editing:** DEL erases the character before the cursor; **CTRL-I** is TAB completion; **CTRL-D** on an empty command line signals end-of-input (and exits an interactive shell). The cursor **UP/DOWN** keys recall the four most recent command lines.
+- **Full-screen `edit`:** cursor keys move around; **HOME** goes to the start of the current line; DEL backspaces; RETURN inserts a new line. **CTRL-O** or **F1** saves; **CTRL-X** or **F7** quits; **CTRL-K** deletes the current line. If there are unsaved changes, quitting requires a second quit command.
+- **At the shell prompt:** **RUN/STOP** interrupts the foreground command. It is not a general-purpose power-off or reset key.
+
+The C64's character set also differs from the ASCII/Unicode glyphs used in modern documentation. A character that looks like an arrow on the C64 may occupy the same character position that a modern terminal or editor renders as punctuation. When a command example looks odd on the machine, distinguish the *character code* from the shape of the glyph drawn for it.
+
 ### A first taste
 
 These examples are intended to be typed at the Breadbox prompt:
