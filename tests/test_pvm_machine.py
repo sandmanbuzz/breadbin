@@ -289,7 +289,7 @@ class SharedVM(unittest.TestCase):
             self.assertEqual(sorted(refs), [0, 2], refs)                # used by both
             prog = two - one
             lib_pages = max(v.mem(lib_np, lib_np + 1))
-            self.assertEqual(lib_pages, 11)                             # 2,7xx bytes (XOP: the table and the handler)
+            self.assertEqual(lib_pages, 8)                              # 1,992 bytes (the opcode table and the handlers)
             self.assertEqual(one - base, prog + lib_pages)              # the second paid no library
             self.assertIn("exec format", v.run("/home/pvmbadid", clear=False))
             self.assertIn("exec format", v.run("/home/pvmnolib", clear=False))
