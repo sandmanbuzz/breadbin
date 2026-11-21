@@ -95,6 +95,10 @@ class Timing(unittest.TestCase):
         assert 0 <= i < len(self.img), f"drive ${a:04X} is outside the module image"
         return self.img[i]
 
+    def need_write_path(self):
+        if "d_rw" not in self.lbl:      # WR=0 in fast.s: the write path is out of the drive blob for now
+            self.skipTest("the write path (d_rw, d_rtab) is not built (WR=0)")
+
     def table(self, name):
         return [self.mem(self.lbl[name] + n) for n in range(16)]
 
@@ -123,6 +127,7 @@ class Timing(unittest.TestCase):
         self.assertEqual(got, [("w", c) for c in sk])
 
     def test_receive_port_accesses_at_their_cycles(self):
+        self.need_write_path()
         rk = schedule("FAST_RK", RK)
         self.assertEqual(len(rk), 5, "FAST_RK needs five values")
         got = walk(self.mem, self.loop_body("d_rw"), self.lbl["d_recv_end"], 2)
@@ -142,10 +147,12 @@ class Timing(unittest.TestCase):
             self.assertEqual((v1 >> 1) & 1, 1 - ((n >> 3) & 1), f"n={n}: DATA bit, next pair")
 
     def test_rtab_matches_definition(self):
+        self.need_write_path()
         want = [((n & 8) << 1) | ((n & 4) << 4) | ((n & 2) << 4) | ((n & 1) << 7) for n in range(16)]
         self.assertEqual(self.table("d_rtab"), want)
 
     def test_receive_nibbles_rebuild_every_byte(self):
+        self.need_write_path()
         rtab = self.table("d_rtab")
         bit = lambda b, k: (b >> k) & 1
         for b in range(256):
@@ -161,8 +168,12 @@ class Timing(unittest.TestCase):
         l = self.lbl
         self.assertEqual(l["d_send"], DRV)
         for lo, hi in (("d_sw", "d_send_end"), ("d_rw", "d_recv_end")):
+            if lo not in l:
+                continue
             self.assertEqual(l[lo] >> 8, (l[hi] - 1) >> 8, f"{lo}..{hi} crosses a page")
         for t in ("d_stab", "d_rtab"):
+            if t not in l:
+                continue
             self.assertEqual(l[t] >> 8, (l[t] + 15) >> 8, f"{t} crosses a page")
         self.assertEqual((l["d_end"] - DRV) % 32, 0)
         self.assertLessEqual(l["d_end"] - DRV, 0x200)
