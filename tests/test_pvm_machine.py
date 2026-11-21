@@ -36,7 +36,7 @@ f_rec:  P_FUNC
         P_B PO_LEAVE, 2
 @r:     P_B PO_LLW, 0
         P_B PO_LLW, 0
-        P_OP PO_DECR
+        P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
         P_OP PO_ADD
         P_B PO_LEAVE, 2
