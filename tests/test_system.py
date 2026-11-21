@@ -240,6 +240,25 @@ class Boot(unittest.TestCase):
         time.sleep(3)
         self.assertEqual(self.run_("cat /home/e.txt | wc"), "     1      2     12")
 
+    def test_24b_editor_ctrl_l_redraws(self):
+        # something printed over the screen (a background job) is gone after ^L
+        import time
+        self.v.type("clear\n")
+        self.v.wait_for("$")
+        self.v.type("edit /home/e.txt\n")
+        self.v.wait_for("edit:", timeout=60)
+        time.sleep(2)
+        self.v._cmd("> 0428 2a")                # a '*' on row 1 (screen RAM)
+        self.v._cmd("> 07e6 2a")                # and near the status line's end
+        self.v._cmd("x")
+        self.v.keybuf(b"\x0c")                  # ^L
+        time.sleep(2)
+        rows = self.v.screen_lines()
+        self.assertNotIn("*", rows[1])
+        self.assertNotIn("*", rows[24])
+        self.v.keybuf(b"\x18")                  # ^X quit
+        time.sleep(3)
+
     def test_28_basic_depth_limit_survives_switches(self):
         # STKSAVE is 128: the deepest legal expression (11 levels, about 106 bytes of saved
         # stack) must survive 600 timer-driven context switches (at 96 it was killed
@@ -372,7 +391,22 @@ class Boot(unittest.TestCase):
             self.v.wait_for("GAME OVER", timeout=30)
         self.v.wait_shell()
 
-    def test_32_du(self):
+    def test_32_calc(self):
+        """calc: arguments (joined) and stdin, precedence and parentheses, / truncates and % takes the
+        dividend's sign, and the errors go to the screen."""
+        self.assertEqual(self.run_("calc 2+3*4"), "14")
+        self.assertEqual(self.run_("calc 2*(3+4)"), "14")
+        self.assertEqual(self.run_("calc 2 + 3"), "5")
+        self.assertEqual(self.run_("calc -7/2"), "-3")
+        self.assertEqual(self.run_("calc -7%3"), "-1")
+        self.assertEqual(self.run_("calc 7%-3"), "1")
+        self.assertEqual(self.run_("echo 6*7 | calc"), "42")
+        self.assertIn("divide by zero", self.run_("calc 1/0"))
+        self.assertIn("overflow", self.run_("calc 32767+1"))
+        self.assertIn("syntax error", self.run_("calc 2+"))
+        self.assertEqual(self.run_("calc " + "(" * 6 + "5" + ")" * 6), "5")
+        self.assertIn("nested too deeply", self.run_("calc " + "(" * 7 + "5" + ")" * 7))
+    def test_33_du(self):
         """du: a file is its size; a directory is the sum of everything below it, its own size
         included (checked against stat); no argument is the current directory; a missing path
         is an error."""

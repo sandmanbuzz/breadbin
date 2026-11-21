@@ -3,14 +3,18 @@
 
   python3 tools/cc.py prog.c > prog.s        then on the C64:  as prog.s prog
 
-Subset: `int` (16 bit) and `char` (8 bit, zero-extended when read), pointers to int or char,
+Subset: `int` (16 bit, signed: `<` `>` `<=` `>=` compare signed, `/` truncates toward zero, and
+x / 0 is 0, as the VM's DIV gives), `char` (8 bit, zero-extended when read), pointers to int or char,
 arrays of int or char (local, static storage), functions with parameters (passed on the
 software stack and stored in each function's static parameter slots), local variables, unary
 `- * &`, `+ - == != < > <= >=`, indexing `a[i]`, calls, `if`/`else`, `while`, `for`, `return`,
 blocks, decimal and 0x numbers, and `puts("...")` (the one builtin: prints a string literal).
 
-Not in this slice: `* /` as binary operators (`*` is only the dereference), globals, pointers to
-pointers, `char` return types, `#include`, recursion (static locals), `&&` `||` `!`.
+`* /` binary, globals, string literals as char pointers (docs/design/s14-compiler.md, slice 3).
+Not in this back end: pointers to pointers, `char` return types, `#include`, recursion (static
+locals). The native back end is frozen at this language: `%`, `&&` `||` `!`, `break`, `continue`,
+the syscall builtins and `extern` are p-code only (`--pcode`, tools/cc_pcode.py) and refused
+here by name. Character literals are numbers to the lexer, so both back ends take them.
 
 Emitted code: `as` syntax (labels, .byte, .res, `#<`, `(zp),y`); symbols at most 14 characters.
 Calling convention: the value of an expression is in `acc` (16 bit, lo then hi); a binary
@@ -21,7 +25,10 @@ slots, then calls. Pointers are dereferenced through `cc_ptr`, which is in zero 
 import re
 import sys
 
-KEYWORDS = {"int", "char", "if", "else", "while", "for", "return"}
+KEYWORDS = {"int", "char", "if", "else", "while", "for", "return", "break", "continue", "extern"}
+SYSCALLS = ("read", "write", "open", "close", "exit", "isatty")   # p-code back end builtins
+BUILTINS = SYSCALLS + ("icall",)                                  # and the call through an address
+PCODE_ONLY = "is p-code only (cc.py --pcode): the native back end is frozen at the L2 language"
 MAX_DEPTH = 32                       # values pushed at once: cc_stk holds 32 two-byte values
 SYMMAX = 14                          # `as` keeps 14 characters of a symbol (getname: cpx #14)
 LINE_BYTES = 16                      # .byte values per emitted line (as keeps at most 254 characters a line)
@@ -32,11 +39,12 @@ TOKEN = re.compile(r"""
     (?P<ws>\s+) | (?P<lc>//[^\n]*) | (?P<bc>/\*.*?\*/) |
     (?P<num>0[xX][0-9a-fA-F]+|[0-9]+) |
     (?P<str>"(?:\\.|[^"\\\n])*") |
+    (?P<chr>'(?:\\.|[^'\\\n])') |
     (?P<id>[A-Za-z_][A-Za-z_0-9]*) |
-    (?P<op>==|!=|<=|>=|[-+*/<>=(){};,&\[\]])
+    (?P<op>==|!=|<<|>>|<=|>=|&&|\|\||[-+*/%<>=!(){};,&|^~\[\]])
 """, re.X | re.S)
 
-ESCAPES = {"n": 10, "t": 9, "r": 13, "0": 0, "\\": 92, '"': 34}
+ESCAPES = {"n": 10, "t": 9, "r": 13, "0": 0, "\\": 92, '"': 34, "'": 39}
 
 
 class CompileError(Exception):
@@ -57,6 +65,8 @@ def lex(src):
             toks.append(("num", v, line))
         elif kind == "str":
             toks.append(("str", unescape(text[1:-1], line), line))
+        elif kind == "chr":                     # 'A': a number, as in C
+            toks.append(("num", unescape(text[1:-1], line, nul=True)[0], line))
         elif kind == "id":
             toks.append(("kw" if text in KEYWORDS else "id", text, line))
         elif kind == "op":
@@ -67,26 +77,28 @@ def lex(src):
     return toks
 
 
-def unescape(body, line):
+def unescape(body, line, nul=False):
     out, i = [], 0
     while i < len(body):
         c = body[i]
         if c == "\\":
             i += 1
             if i >= len(body) or body[i] not in ESCAPES:
-                raise CompileError(f"line {line}: bad escape in string literal")
+                raise CompileError(f"line {line}: bad escape in {'character' if nul else 'string'} literal")
             out.append(ESCAPES[body[i]])
         else:
             if ord(c) > 255:
                 raise CompileError(f"line {line}: string literal characters must be Latin-1 (as stores 8 bits)")
             out.append(ord(c))
         i += 1
-    if 0 in out:
+    if 0 in out and not nul:
         raise CompileError(f"line {line}: a \\0 in a string would end it early; not in this slice")
     return bytes(out)
 
 
-LEVELS = [("==", "!="), ("<", ">", "<=", ">="), ("+", "-"), ("*", "/")]
+LEVELS = [("||",), ("&&",), ("|",), ("^",), ("&",), ("==", "!="), ("<", ">", "<=", ">="), ("<<", ">>"),
+          ("+", "-"), ("*", "/", "%")]
+PREC = {op: i for i, ops in enumerate(LEVELS) for op in ops}
 TYPES = ("int", "char")
 
 
@@ -120,7 +132,14 @@ class Parser:
     def program(self):
         funcs, globs = [], []
         while not self.at("eof"):
-            if self.is_function():
+            if self.at("kw", "extern"):
+                line = self.take()[2]
+                if not self.is_function():
+                    raise CompileError(f"line {line}: extern declares a function: extern int name(...);")
+                name, params, _, _ = self.function(body=False)
+                self.expect("op", ";")
+                funcs.append((name, params, None, line))     # no body: a native routine, linked in
+            elif self.is_function():
                 funcs.append(self.function())
             else:
                 d = self.decl()
@@ -136,7 +155,7 @@ class Parser:
             return False            # the file ends here: decl() reports what is missing
         return self.t[j + 1][:2] == ("op", "(")
 
-    def function(self):
+    def function(self, body=True):
         self.expect("kw", "int")
         name, line = self.expect("id")[1], self.peek()[2]
         self.expect("op", "(")
@@ -156,7 +175,7 @@ class Parser:
                     break
                 self.take()
         self.expect("op", ")")
-        return name, params, self.block(), line
+        return name, params, self.block() if body else None, line
 
     def block(self):
         self.expect("op", "{")
@@ -233,6 +252,10 @@ class Parser:
             return ("while", cond, self.stmt(), line)
         if self.at("kw", "for"):
             return self.for_stmt(line)
+        if self.at("kw", "break") or self.at("kw", "continue"):
+            kind = self.take()[1]
+            self.expect("op", ";")
+            return (kind, line)
         if self.at("kw", "return"):
             self.take()
             value = None if self.at("op", ";") else self.expr()
@@ -245,7 +268,8 @@ class Parser:
         return s
 
     def for_stmt(self, line):
-        """for (init; cond; step) body  ==  { init; while (cond) { body; step; } }"""
+        """for (init; cond; step) body  ==  { init; for (cond; step) body }: the loop node keeps
+        the step apart so that `continue` runs it."""
         self.take()
         self.expect("op", "(")
         init = None
@@ -266,8 +290,7 @@ class Parser:
             step = self.simple()
         self.expect("op", ")")
         body = self.stmt()
-        inner = [body] + ([step] if step else [])
-        loop = ("while", cond, ("block", inner, line), line)
+        loop = ("for", cond, body, step, line)
         return ("block", ([init] if init else []) + [loop], line)
 
     def paren_expr(self):
@@ -280,18 +303,24 @@ class Parser:
         return self.binary(0)
 
     def binary(self, level):
-        if level == len(LEVELS):
-            return self.unary()
-        left = self.binary(level + 1)
-        while self.peek()[0] == "op" and self.peek()[1] in LEVELS[level]:
+        """Precedence climbing: operators at level or tighter, left-associative. One recursion
+        per operator, not per level, so nesting depth costs the same at any number of levels."""
+        left = self.unary()
+        while self.peek()[0] == "op" and PREC.get(self.peek()[1], -1) >= level:
             op, line = self.take()[1], self.peek()[2]
-            left = ("bin", op, left, self.binary(level + 1), line)
+            left = ("bin", op, left, self.binary(PREC[op] + 1), line)
         return left
 
     def unary(self):
+        if self.at("op", "!"):
+            line = self.take()[2]
+            return ("not", self.unary(), line)
         if self.at("op", "-"):
             line = self.take()[2]
             return ("neg", self.unary(), line)
+        if self.at("op", "~"):
+            line = self.take()[2]
+            return ("comp", self.unary(), line)
         if self.at("op", "*"):
             line = self.take()[2]
             return ("deref", self.unary(), line)
@@ -386,18 +415,17 @@ cc_swap:                        ; tmp <-> acc
         sta acc+1
         stx tmp+1
         rts
-cc_lt:                          ; acc = 1 if tmp < acc (unsigned), else 0
+cc_lt:                          ; acc = 1 if tmp < acc (signed), else 0
         sec
         lda tmp
         sbc acc
         lda tmp+1
         sbc acc+1
-        bcc *+11                ; borrow: the 1 below (relative: no label to spend)
+        bvc *+4                 ; signed: on overflow N is the inverse of the sign of the difference
+        eor #$80                ; so flip it back
+        asl a                   ; carry = N = tmp < acc (relative branch and no label: no symbol spent)
         lda #0
-        sta acc
-        sta acc+1
-        rts
-        lda #1
+        rol a
         sta acc
         lda #0
         sta acc+1
@@ -481,7 +509,34 @@ cc_mul_2:
         lda cc_mr+1
         sta acc+1
         rts
-cc_div:                         ; acc = tmp / acc (unsigned; dividing by 0 gives 65535)
+cc_div:                         ; acc = tmp / acc, signed: the quotient truncates toward zero (-7 / 2 is -3)
+        lda acc                 ; x / 0 is 0, as the VM's DIV (src/pvm/pvm.s _DIV) gives
+        ora acc+1
+        bne *+9                 ; relative branches, no labels: every label is an `as` symbol in every program
+        sta acc                 ; A is 0
+        sta acc+1
+        rts
+        lda tmp+1               ; by sign and magnitude: bit 7 of the signs' xor (kept on the stack)
+        eor acc+1               ; says whether to negate the quotient
+        pha
+        lda tmp+1
+        bpl *+19                ; over the 17 bytes negating tmp
+        sec
+        lda #0
+        sbc tmp
+        sta tmp
+        lda #0
+        sbc tmp+1
+        sta tmp+1
+        lda acc+1
+        bpl *+19                ; over the 17 bytes negating acc
+        sec
+        lda #0
+        sbc acc
+        sta acc
+        lda #0
+        sbc acc+1
+        sta acc+1
         lda acc
         sta cc_dv
         lda acc+1
@@ -524,6 +579,15 @@ cc_div_2:
         lda cc_q
         sta acc
         lda cc_q+1
+        sta acc+1
+        pla
+        bpl *+19                ; over the 17 bytes negating the quotient
+        sec
+        lda #0
+        sbc acc
+        sta acc
+        lda #0
+        sbc acc+1
         sta acc+1
         rts
 """
@@ -652,6 +716,9 @@ class Gen:
             raise CompileError("no function main")
         if self.params["main"]:
             raise CompileError(f"line {self.funcs['main']}: main takes no parameters (start passes none)")
+        for name, _, body, line in funcs:
+            if body is None:
+                raise CompileError(f"line {line}: extern {PCODE_ONLY}")
         for d in globs:
             self.global_var(d)
         self.lab("start")
@@ -859,6 +926,11 @@ class Gen:
             self.stmt(body)
             self.ins(f"jmp {top_l}")
             self.lab(end_l)
+        elif kind == "for":
+            _, cond, body, step, line = s
+            self.stmt(("while", cond, ("block", [body] + ([step] if step else []), line), line))
+        elif kind in ("break", "continue"):
+            raise CompileError(f"line {s[1]}: {kind} {PCODE_ONLY}")
         elif kind == "block":
             for x in s[1]:
                 self.stmt(x)
@@ -953,6 +1025,8 @@ class Gen:
             else:
                 self.call(name, args, line)
             return ("int", False)
+        if kind == "comp":
+            raise CompileError(f"line {e[2]}: ~ {PCODE_ONLY}")
         if kind == "neg":
             if self.expr(e[1])[1]:
                 raise CompileError(f"line {e[2]}: - of a pointer is not in this slice")
@@ -975,11 +1049,15 @@ class Gen:
             return (t[0], False)
         if kind == "bin":
             return self.binary(e)
+        if kind == "not":
+            raise CompileError(f"line {e[2]}: ! {PCODE_ONLY}")
         raise CompileError(f"internal: unknown expression {kind}")
 
     def addr_of(self, e):
         x, line = e[1], e[2]
         if x[0] == "var":
+            if x[1] not in self.vars and x[1] not in self.globals and x[1] in self.funcs:
+                raise CompileError(f"line {line}: the address of a function {PCODE_ONLY}")
             v = self.var(x[1], x[2])
             if v.ptr and v.arr is None:
                 raise CompileError(f"line {line}: pointers to pointers are not in this slice")
@@ -996,6 +1074,8 @@ class Gen:
 
     def binary(self, e):
         _, op, a, b, line = e
+        if op in ("%", "&&", "||", "&", "|", "^", "<<", ">>"):
+            raise CompileError(f"line {line}: {op} {PCODE_ONLY}")
         ta = self.expr(a)
         self.push()
         tb = self.expr(b)
@@ -1014,6 +1094,8 @@ class Gen:
         return ("int", False)
 
     def call(self, name, args, line):
+        if name not in self.funcs and name in BUILTINS:
+            raise CompileError(f"line {line}: the builtin {name} {PCODE_ONLY}")
         if name not in self.funcs:
             raise CompileError(f"line {line}: undefined function {name}")
         params = self.params[name]
@@ -1097,13 +1179,20 @@ def compile_program(src):
 
 
 def main(argv):
+    pcode = len(argv) == 3 and argv[1] == "--pcode"
+    if pcode:
+        argv = argv[:1] + argv[2:]
     if len(argv) != 2:
-        print("usage: cc.py prog.c > prog.s", file=sys.stderr)
+        print("usage: cc.py [--pcode] prog.c > prog.s", file=sys.stderr)
         return 2
     with open(argv[1], encoding="utf-8") as f:
         src = f.read()
     try:
-        sys.stdout.write(compile_c(src))
+        if pcode:
+            from cc_pcode import compile_pcode     # ca65 source for the VM (tools/cc_pcode.py)
+            sys.stdout.write(compile_pcode(src))
+        else:
+            sys.stdout.write(compile_c(src))
     except CompileError as e:
         print(f"{argv[1]}: {e}", file=sys.stderr)
         return 1
