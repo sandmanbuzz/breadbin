@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+BREADBIN_TEST_KIND = "host"  # pure tooling tests; no VICE session
+
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "sjd41" / "rom_image.py"
 SPEC = importlib.util.spec_from_file_location("rom_image", SCRIPT)
 rom_image = importlib.util.module_from_spec(SPEC)
