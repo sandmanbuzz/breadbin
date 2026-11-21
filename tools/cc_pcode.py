@@ -497,11 +497,17 @@ class PGen(cc.Gen):
 
     def store_var(self, v):
         char = v.base == "char" and not v.ptr
-        if isinstance(v, Local):
-            self.op("P_B", "PO_SLB" if char else "PO_SLW", v.off)
+        if char:                        # no SLB/SAB in the VM: the address on top, then SB
+            self.push()
+            self.op(*(("P_B", "PO_LLA", v.off) if isinstance(v, Local) else ("P_W", "PO_LA", v.label)))
+            self.op("P_OP", "PO_SB")
+            self.pop(2)
+        elif isinstance(v, Local):
+            self.op("P_B", "PO_SLW", v.off)
+            self.pop()
         else:
-            self.op("P_W", "PO_SAB" if char else "PO_SAW", v.label)
-        self.pop()
+            self.op("P_W", "PO_SAW", v.label)
+            self.pop()
 
     def assign(self, lhs, rhs, line):
         if lhs[0] == "var":
@@ -554,9 +560,8 @@ class PGen(cc.Gen):
             return ("I", e[1])
         if e[0] == "var":
             v = self.var(e[1], e[2])
-            if v.arr is None and not v.ptr:
-                char = v.base == "char"
-                return ("L", v.off, char) if isinstance(v, Local) else ("A", v.label, char)
+            if v.arr is None and not v.ptr and v.base != "char":     # a byte goes through LLB/LAB and ADD
+                return ("L", v.off) if isinstance(v, Local) else ("A", v.label)
         return None
 
     def add_simple(self, x, scaled, neg=False):
@@ -566,11 +571,13 @@ class PGen(cc.Gen):
             if n:
                 self.op("P_B", "PO_SUBI" if neg else "PO_ADDI", n)
             return
-        size = "B" if x[2] else "W"
         if x[0] == "L":
-            self.op("P_B", f"PO_{'IDX' if scaled else 'ADD'}L{size}", x[1])
+            self.op("P_B", "PO_IDXLW" if scaled else "PO_ADDLW", x[1])
+        elif scaled:                    # no IDXAW in the VM: three uses did not pay for its 43 bytes
+            self.op("P_W", "PO_LAW", x[1])
+            self.op("P_OP", "PO_IDXW")
         else:
-            self.op("P_W", f"PO_{'IDX' if scaled else 'ADD'}A{size}", x[1])
+            self.op("P_W", "PO_ADDAW", x[1])
 
     def load_var(self, v):
         if v.arr is not None:
@@ -580,10 +587,13 @@ class PGen(cc.Gen):
                 self.op("P_W", "PO_LA", v.label)
         else:
             char = v.base == "char" and not v.ptr
-            if isinstance(v, Local):
-                self.op("P_B", "PO_LLB" if char else "PO_LLW", v.off)
+            if char:                    # no LLB/LAB in the VM: the address, then LB
+                self.op(*(("P_B", "PO_LLA", v.off) if isinstance(v, Local) else ("P_W", "PO_LA", v.label)))
+                self.op("P_OP", "PO_LB")
+            elif isinstance(v, Local):
+                self.op("P_B", "PO_LLW", v.off)
             else:
-                self.op("P_W", "PO_LAB" if char else "PO_LAW", v.label)
+                self.op("P_W", "PO_LAW", v.label)
         self.push()
 
     def expr(self, e):
