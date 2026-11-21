@@ -66,6 +66,9 @@ Where JiffyDOS gives us what C does not: file-level LOAD semantics and the Jiffy
 | JiffyDOS ROM images | **No** (not in the repo; for experiments only) | observing bus behaviour: yes |
 | sd2iec | **No** (GPLv2 vs MIT) | yes, read-only, for understanding |
 | Epyx, AR, FC | **No** | techniques are public |
+| **PLASMA** VM (David Schmenk, <https://github.com/dschmenk/PLASMA>, `src/vmsrc/c64/plvmc64.s` at `f209e30`) | **Yes: MIT.** Ported as `src/pvm/pvm.s`, notice, URL and commit in its header (`docs/design/pvm.md`). `src/pvm/test/bench.s` is upstream's compiler output | yes |
+| **BASIC-M6502** (Microsoft, <https://github.com/microsoft/BASIC-M6502>) | **Yes: MIT**, literal or derived (the owner, 2026-11-18); for the BASIC (E1 L3). Commodore's BASIC ROM is not this and stays out | yes |
+| Lawless Legends (Apache-2.0), UCSD p-System (non-commercial) | **No** (Apache only if backed into a corner, the owner's call; UCSD's licence does not allow it) | yes |
 
 For B, the open-roms method is the one to follow: write the host routines from the descriptions, then compare with **bus traces from VICE running the JiffyDOS ROMs as the reference device** (record CLK/DATA transitions with timestamps per byte; compare against our implementation talking to the same ROM). The JiffyDOS images the user has are acceptable as a test oracle in that sense and stay out of the repo, as already decided.
 
