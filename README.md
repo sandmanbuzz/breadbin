@@ -6,7 +6,8 @@ Breadbox is a fork of [Breadbin](https://github.com/kpatr1981/breadbin) by Konst
 
 - The name is temporary and may be renamed. The version number restarts at 0.1 on purpose and makes no claim of tracking upstream's numbering.
 - How and why this fork differs from upstream: [docs/why-this-fork.md](docs/why-this-fork.md).
-- File and command names keep the old name for now: `build/breadbin.d64`, the `BREADBIN` boot file, `include/breadbin.inc`.\n- **[User Guide](docs/user-guide.md)** — building, platform options, everyday use, filesystems, commands, and design notes.
+- File and command names keep the old name for now: `build/breadbin.d64`, the `BREADBIN` boot file, `include/breadbin.inc`.
+- **[User Guide](docs/user-guide.md)** — building, platform options, everyday use, filesystems, commands, and design notes.
 
 It is a real kernel, not a shell that prints canned output:
 
