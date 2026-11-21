@@ -372,6 +372,28 @@ class Boot(unittest.TestCase):
             self.v.wait_for("GAME OVER", timeout=30)
         self.v.wait_shell()
 
+    def test_32_cut(self):
+        self.run_("echo a:b:c:d > /home/cut.txt")
+        self.run_("echo x,y,z >> /home/cut.txt")
+        self.assertEqual(self.run_("cut -d: -f2,4 /home/cut.txt"), "b:d\nx,y,z")   # no delimiter: whole line
+        self.assertEqual(self.run_("cut -f2 -d: /home/cut.txt"), "b\nx,y,z")
+        self.assertEqual(self.run_("cut -c2-3 /home/cut.txt"), ":b\n,y")
+        self.assertEqual(self.run_("cut -c3- /home/cut.txt"), "b:c:d\ny,z")
+        self.assertEqual(self.run_("cat /home/cut.txt | cut -d: -f1"), "a\nx,y,z")
+        self.assertIn("usage: cut", self.run_("cut /home/cut.txt"))
+        self.assertIn("bad list", self.run_("cut -c0 /home/cut.txt"))
+
+    def test_33_uniq(self):
+        self.run_("echo b > /home/uniq.txt")
+        for line in ("a", "a", "a", "c", "c", "b"):
+            self.run_("echo %s >> /home/uniq.txt" % line)
+        self.assertEqual(self.run_("uniq /home/uniq.txt"), "b\na\nc\nb")
+        self.assertEqual(self.run_("uniq -d /home/uniq.txt"), "a\nc")
+        self.assertEqual(self.run_("uniq -u /home/uniq.txt"), "b\nb")
+        self.assertEqual(self.run_("uniq -c /home/uniq.txt"),
+                         "      1 b\n      3 a\n      2 c\n      1 b")
+        self.assertEqual(self.run_("cat /home/uniq.txt | uniq -c").split()[:2], ["1", "b"])
+
 
 class Persistence(unittest.TestCase):
     """Files written by Breadbin survive a reboot and are readable on the host."""
