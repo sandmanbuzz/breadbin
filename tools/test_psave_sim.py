@@ -32,6 +32,7 @@ try:
     from uci_sim import Sim, Mem, KernelError
 except ImportError:
     uci_sim = None
+    Mem = object                    # keep the test class importable; its suite is skipped below
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build")

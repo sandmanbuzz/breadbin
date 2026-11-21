@@ -406,6 +406,25 @@ class Boot(unittest.TestCase):
         self.assertIn("syntax error", self.run_("calc 2+"))
         self.assertEqual(self.run_("calc " + "(" * 6 + "5" + ")" * 6), "5")
         self.assertIn("nested too deeply", self.run_("calc " + "(" * 7 + "5" + ")" * 7))
+    def test_33_du(self):
+        """du: a file is its size; a directory is the sum of everything below it, its own size
+        included (checked against stat); no argument is the current directory; a missing path
+        is an error."""
+        self.run_("mkdir /home/dutree")
+        self.run_("echo hi > /home/dutree/a")           # 3 bytes
+        self.run_("mkdir /home/dutree/s")
+        self.run_("echo hello > /home/dutree/s/b")      # 6 bytes
+
+        def size(path):
+            return int(re.search(r"size: (\d+)", self.run_("stat " + path)).group(1))
+
+        total = size("/home/dutree") + size("/home/dutree/s") + 3 + 6
+        self.assertEqual(self.run_("du /home/dutree/a"), "3 /home/dutree/a")
+        self.assertEqual(self.run_("du /home/dutree"), "%d /home/dutree" % total)
+        self.run_("cd /home/dutree")
+        self.assertEqual(self.run_("du"), "%d ." % total)
+        self.run_("cd /")
+        self.assertIn("no such file", self.run_("du /home/nope"))
 
 
 class Persistence(unittest.TestCase):
