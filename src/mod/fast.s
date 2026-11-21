@@ -89,6 +89,7 @@ g_h:    .res 1
 g_x:    .res 1
 ft_pt:  .res 1          ; the last block's track and sector (for hint)
 ft_ps:  .res 1
+ft_s1:  .res 1          ; the stride of the last request on this track
 ft_nf:  .res 1          ; blocks that fell back to the standard path (tests/test_fast.py reads both)
 ft_ng:  .res 2          ; blocks carried
 
@@ -284,35 +285,48 @@ ft_start:
 @bus:   sec
         rts
 
-; hint: a stride predictor. The block after this one is guessed to lie as far past it as this
-; one lies past the last (c64fs blocks carry no link, so the disk cannot say). Only a guess on
-; the same track counts; the drive takes it while the host is busy and the next request is
-; served from it if it was right.
+; hint: a stride predictor over pairs. The drive reads two sectors a pass, so a file is laid out
+; in pairs and the guess for the block after this one is this sector plus the stride the request
+; before this one had (modulo the track): the second of a pair is next to the first, the first of
+; the next pair is a pitch away, and a uniform stride predicts itself. c64fs blocks carry no link,
+; so the disk cannot say. Only a guess on the same track counts; the drive takes it while the
+; host is busy and the next request is served from it if it was right.
 hint:   lda #0
         sta cmdbuf+14           ; 0: the DOS reads it (the head may be elsewhere)
         lda ft_pt
         cmp trk
-        bne @n
+        bne @new
         inc cmdbuf+14           ; 1: the head is on this track: read the sector raw
+        jsr h_spt
+        sta g_h
         lda sct
         sec
         sbc ft_ps
-        bcc @n
-        beq @n
+        bcs @p
+        adc g_h                 ; carry clear
+@p:     sta g_x                 ; this request's stride
+        lda ft_s1
+        beq @upd                ; no stride yet
         clc
         adc sct
-        sta g_h
-        jsr h_spt
         cmp g_h
-        beq @n
-        bcc @n
-        lda g_h
+        bcc @ok
+        sbc g_h
+@ok:    cmp sct
+        beq @upd
+        pha
         jsr senc
         stx cmdbuf+12
         ora cmdbuf+8
         sta cmdbuf+13
+        pla
         inc cmdbuf+14           ; 2: and the guessed one in the same pass
-@n:     lda trk
+@upd:   lda g_x
+        sta ft_s1
+        jmp @st
+@new:   lda #0
+        sta ft_s1
+@st:    lda trk
         sta ft_pt
         lda sct
         sta ft_ps
