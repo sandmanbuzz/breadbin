@@ -2,7 +2,7 @@
 file-to-file tool needs answered in Python. For testing programs like `as` without VICE:
 there is no kernel, no scheduler, no disk, only the program's own 6502 code and the library linked
 into it. Syscalls handled: OPEN, CLOSE, READ, WRITE, UNLINK, RENAME, EXIT, CONMODE (recorded in r.conmodes); fds 1 and 2
-collect output. With stdin=bytes, fd 0 serves those bytes (EOF after them) and `r.marks` records len(r.out)
+collect output. Every syscall overwrites $08-$1F, the kernel's scratch. With stdin=bytes, fd 0 serves those bytes (EOF after them) and `r.marks` records len(r.out)
 at every read of fd 0, so a test can see what one key made the program draw; without it fd 0 is EBADF.
 
     from asim import run
@@ -29,7 +29,9 @@ with open(os.path.join(ROOT, "include", "breadbin.inc")) as _f:
         if _m:
             SYS[0xCF00 + 3 * int(_m.group(2))] = _m.group(1)
 ENOENT = 2
+ENOSYS = 38
 EBADF = 9
+EINVAL = 22
 ENOSPC = 28
 ENAMETOOLONG = 36
 
@@ -46,6 +48,7 @@ class Result:
         self.err = b""
         self.files = {}
         self.steps = 0
+        self.cycles = 0
         self.conmodes = []            # the mode argument of each CONMODE call, in order
         self.marks = []               # len(out) at each read of fd 0 (stdin=...)
         self.header = None            # the CX header of the program's image, for inspection
@@ -54,35 +57,60 @@ class Result:
         self.mem = None              # the 64 KB memory at exit, for tests that look at the program's variables
 
 
-def cx_load(data, page):
-    """(image bytes with relocations applied, bss size, header dict) of a CX file loaded at `page`."""
-    assert data[:3] == b"CX\x01", "not a CX file"
+PVM_FETCHOP = 0x25                 # the VM's zero-page fetch: LDA IP,Y (src/pvm/pvm.s FETCHOP; IP follows it)
+LIB_PAGE = 0xB0                   # where a format 2 program's library is loaded (below argv)
+
+
+def cx_load(data, page, lib_page=None, formats=(1, 2)):
+    """(image bytes with relocations applied, bss size, header dict) of a CX file loaded at `page`.
+    Format 2 (tools/cx.py) adds lib_page to its library relocations; the header names the library
+    (path, id). Format 3 is a library."""
+    assert data[:2] == b"CX" and data[2] in formats, "not a CX file of format %s" % (formats,)
+    fmt = data[2]
     img, bss, nrel = (int.from_bytes(data[3 + 2 * i:5 + 2 * i], "little") for i in range(3))
-    out = bytearray(data[9:9 + img])
-    rel = data[9 + img:9 + img + 2 * nrel]
-    for i in range(nrel):
+    hdr = {"format": fmt, "image": img, "bss": bss, "relocs": nrel}
+    start = 9
+    if fmt == 2:
+        hdr["lib_relocs"] = int.from_bytes(data[9:11], "little")
+        hdr["lib_id"] = int.from_bytes(data[11:13], "little")
+        hdr["lib"] = data[13:29].split(b"\0")[0].decode()
+        start = 29
+    out = bytearray(data[start:start + img])
+    rel = data[start + img:]
+    for i in range(nrel + hdr.get("lib_relocs", 0)):
         off = rel[2 * i] | rel[2 * i + 1] << 8
-        out[off] = (out[off] + page) & 0xFF
-    return bytes(out), bss, {"image": img, "bss": bss, "relocs": nrel}
+        out[off] = (out[off] + (page if i < nrel else lib_page)) & 0xFF
+    return bytes(out), bss, hdr
 
 
-def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None):
+def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_write=None, fail_rename=None, fail_read_open=None, rename_noreplace=False, fail_create=None, tty=False, dirs=(), kbd=False, yield_jiffies=1, jiffy0=0, cooked=False, poke=None, libs=None, profile=None, brk=64):
     """Run build/root/bin/<prog> (or `path`) with argv = [prog] + args. `files` maps path -> bytes.
+    A format 2 program's library is loaded at LIB_PAGE from libs[its path] (a host file) or build/root.
     fail_write=n makes the n-th WRITE (1 is the first) fail with ENOSPC, as a full disk would;
     fail_rename=n makes the n-th RENAME fail; rename_noreplace=True models the CBM DOS path (cbm_rename sends R0:new=old, DOS answers 63 FILE EXISTS, the kernel returns EIO), asim only, not run on a drive; fail_create=path makes a write-open of that path fail with EIO; fail_read_open=(path, errno) makes a read-open of that path fail with errno. Names: a component over 14 characters is ENAMETOOLONG (c64fs).
     cooked=True makes a read of fd 0 stop after the first LF, as the console's cooked mode does (a read at the end of stdin returns 0 bytes).
     poke maps an offset in the program image (a link address, e.g. a label from build/p/<prog>.lbl) to bytes written there before the first instruction: a board or a table to start from.
-    kbd=True models the keyboard and clock a game polls: KEYCNT ($C6) is 1 while stdin has bytes left, the jiffy clock ($A0-$A2, big-endian) starts at jiffy0 and each YIELD advances it by yield_jiffies, and TIME answers it (A/X/Y = lo/mid/hi)."""
+    kbd=True models the keyboard and clock a game polls: KEYCNT ($C6) is 1 while stdin has bytes left, the jiffy clock ($A0-$A2, big-endian) starts at jiffy0 and each YIELD advances it by yield_jiffies, and TIME answers it (A/X/Y = lo/mid/hi).
+    brk is the most pages BRK (MEMINFO with r0+1 = 0) will grant in all, as the pool above the program allows: the default 64 is a 16,384-byte arena.
+    profile, if a dict, collects 6502 cycles by image offset: native code's PC, and for code the VM
+    runs, the IP of the opcode being run (attribute them to the labels of the -Ln file)."""
     if MPU is None:
         raise RuntimeError("py65 not installed")
     with open(path or os.path.join(ROOT, "build", "root", "bin", prog), "rb") as f:
-        image, bss, header = cx_load(f.read(), BASE_PAGE)
+        image, bss, header = cx_load(f.read(), BASE_PAGE, LIB_PAGE)
     res = Result()
     res.header = header
     res.files = dict(files or {})
     mem = [0] * 65536
     base = BASE_PAGE << 8
     mem[base:base + len(image)] = list(image)
+    if header["format"] == 2:         # the library, from libs (its path -> a host file) or build/root
+        lp = (libs or {}).get(header["lib"]) or os.path.join(ROOT, "build", "root", header["lib"].lstrip("/"))
+        with open(lp, "rb") as f:
+            limage, lbss, _ = cx_load(f.read(), LIB_PAGE, formats=(3,))
+        assert lbss == 0 and limage[0] | limage[1] << 8 == header["lib_id"], "library id mismatch"
+        assert base + len(image) + bss <= LIB_PAGE << 8, "program overlaps the library"
+        mem[LIB_PAGE << 8:(LIB_PAGE << 8) + len(limage)] = list(limage)
     for off, b in (poke or {}).items():
         mem[base + off:base + off + len(b)] = list(b)
     # argv: strings and the pointer array well above the program (the real layout puts them at the
@@ -102,6 +130,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
     mem[0x20], mem[0x21], mem[0x22] = top & 0xFF, top >> 8, len(ptrs)
     cpu = MPU(memory=mem, pc=base)
     jf = [jiffy0]
+    ip = [-1]
 
     def sync():
         if kbd:
@@ -112,6 +141,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
     writes = [0]
     renames = [0]
     next_fd = [3]
+    brk_got = [0]
 
     def cstr(addr):
         s = bytearray()
@@ -139,6 +169,7 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
         name = SYS.get(cpu.pc)
         if name:
             fd = cpu.a
+            mem[0x08:0x20] = [0xA5] * 0x18   # $08-$1F is the kernel's syscall scratch: a syscall may change it
             if name == "EXIT":
                 res.exit = cpu.a
                 res.mem = bytes(mem)
@@ -216,6 +247,15 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
                     ret(True, EBADF)
                     continue
                 ret(False, 0)
+            elif name == "MEMINFO":           # r0+1 = 0: BRK, A = n pages, the free ones after the program; else not modelled
+                if not mem[3]:
+                    first = (base + len(image) + bss + 255 >> 8) + brk_got[0]
+                    got = max(0, min(fd, brk - brk_got[0], LIB_PAGE - first))
+                    brk_got[0] += got
+                    cpu.x = got
+                    ret(False, first)
+                else:
+                    ret(True, ENOSYS)
             elif name == "UNLINK":            # r0 = path
                 p = cstr(r(2))
                 if p in res.files:
@@ -235,8 +275,8 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
                     ret(False, 0)
                 else:
                     ret(True, ENOENT)
-            elif name == "ISATTY":            # fd 0 is the console when tty=True
-                ret(not (fd == 0 and tty), 0)
+            elif name == "ISATTY":            # fds 0-2 are the console when tty=True; else EINVAL, as file.s
+                ret(not (fd <= 2 and tty), 0 if fd <= 2 and tty else EINVAL)
             elif name == "GETCWD":            # r0 = buffer, A = its size
                 cwd_b = res.cwd.encode() + b"\0"
                 if len(cwd_b) > fd:
@@ -291,10 +331,19 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
             continue
         if mem[cpu.pc] == 0:
             raise RuntimeError("BRK at $%04X after %d steps" % (cpu.pc, n))
-        cpu.step()
+        if profile is None:
+            cpu.step()
+        else:                            # cycles by image offset: native code by its PC, the VM by the IP
+            c0, pc = cpu.processorCycles, cpu.pc
+            if pc == PVM_FETCHOP:
+                ip[0] = mem[PVM_FETCHOP + 1] + (mem[PVM_FETCHOP + 2] << 8) + cpu.y - base
+            key = pc - base if base <= pc < base + len(image) else ip[0]
+            cpu.step()
+            profile[key] = profile.get(key, 0) + cpu.processorCycles - c0
         n += 1
         if n > limit:
             raise RuntimeError("no exit after %d steps, pc $%04X" % (n, cpu.pc))
     res.steps = n
+    res.cycles = cpu.processorCycles  # 6502 cycles, the modelled syscalls excluded
     res.mem = mem
     return res

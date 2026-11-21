@@ -105,8 +105,51 @@ page_free:
         bne @l
 @r:     rts
 
+; brk (meminfo with no buffer, r0+1 = 0; a buffer is never in page 0): A = pages wanted;: grow the caller's run by as many of them as are free directly after it
+; (exit frees p_mpage for p_mlen pages, so a longer run is freed with it). A = the first new
+; page, X = how many (0: none), carry clear.
+mem_grow:
+        sta tmp0
+        ldx cur
+        lda p_mpage,x
+        clc
+        adc p_mlen,x
+        sta tmp1                ; the first page past the run
+        sec
+        sbc #POOL_FIRST
+        tax                     ; its pg_used index
+        ldy #0
+@l:     cpy tmp0
+        beq @d
+        cpx #NPOOL
+        bcs @d
+        lda pg_used,x
+        bne @d
+        lda #1
+        sta pg_used,x
+        inx
+        iny
+        bne @l
+@d:     sty tmp0
+        ldx cur
+        tya
+        clc
+        adc p_mlen,x
+        sta p_mlen,x
+        lda free_pages
+        sec
+        sbc tmp0
+        sta free_pages
+        lda tmp1
+        ldx tmp0
+        clc
+        rts
+
 ; meminfo(r0 = buf): free pages, total pages, reu banks, procs used, max procs
+; (r0+1 = 0, no buffer, is brk, above)
 sys_meminfo:
+        ldx r0+1
+        beq mem_grow
         ldy #0
         lda free_pages
         sta (r0),y

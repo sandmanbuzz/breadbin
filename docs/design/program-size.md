@@ -67,8 +67,8 @@ The smallest programs (192 to 228 bytes: `clear`, `pwd`, `echo`) are 158 bytes o
    and should wait for the M0-7 space pass decision.
 2. **Relocation encoding: about 4.3 KB (about 17 blocks) est.** Store each offset as a 1-byte delta from the
    previous one. The earlier measurement found only 3 of 4,491 relocs with a gap over 254, which need an escape;
-   not re-checked on the 4,289 relocs of `main`. This changes the CX format (version 2, `tools/cx.py` and the
-   loader), so it is a loader change, not a library one.
+   not re-checked on the 4,289 relocs of `main`. This changes the CX format (a new version byte, `tools/cx.py` and the
+   loader; 2 and 3 went to shared libraries in L1s, `docs/design/pvm.md` §4 item 3), so it is a loader change, not a library one.
 3. **Block rounding: 172 bytes now (under one block), unrecoverable by itself.** Nothing to gain here unless items 1
    and 2 change the sizes first.
 4. **`lib.o` and `num.o` split: under 1 KB est.** `lib.o` (158 bytes) is linked into all 43 programs, including

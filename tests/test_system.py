@@ -240,6 +240,25 @@ class Boot(unittest.TestCase):
         time.sleep(3)
         self.assertEqual(self.run_("cat /home/e.txt | wc"), "     1      2     12")
 
+    def test_24b_editor_ctrl_l_redraws(self):
+        # something printed over the screen (a background job) is gone after ^L
+        import time
+        self.v.type("clear\n")
+        self.v.wait_for("$")
+        self.v.type("edit /home/e.txt\n")
+        self.v.wait_for("edit:", timeout=60)
+        time.sleep(2)
+        self.v._cmd("> 0428 2a")                # a '*' on row 1 (screen RAM)
+        self.v._cmd("> 07e6 2a")                # and near the status line's end
+        self.v._cmd("x")
+        self.v.keybuf(b"\x0c")                  # ^L
+        time.sleep(2)
+        rows = self.v.screen_lines()
+        self.assertNotIn("*", rows[1])
+        self.assertNotIn("*", rows[24])
+        self.v.keybuf(b"\x18")                  # ^X quit
+        time.sleep(3)
+
     def test_28_basic_depth_limit_survives_switches(self):
         # STKSAVE is 128: the deepest legal expression (11 levels, about 106 bytes of saved
         # stack) must survive 600 timer-driven context switches (at 96 it was killed
