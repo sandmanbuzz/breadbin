@@ -180,8 +180,8 @@ class PCodeOnly(unittest.TestCase):
                    'if (9 / z == 0) if ((0 - 9) / z == 0) puts("Y"); return 0; }')
 
     def test_fused_operands_every_kind(self):
-        # x + v and a[v] carry v in the op (ADDLW ADDLB ADDAW ADDAB, IDXLW IDXLB IDXAW IDXAB,
-        # ADDI SUBI): locals and globals, int and char, scaled and not
+        # x + v and a[v] carry v in the op (ADDLW ADDAW, IDXLW, ADDI SUBI; bytes and a global's IDX go
+        # through the plain loads): locals and globals, int and char, scaled and not
         self.check("int g = 3; char gc = 2; int ga[6]; char gs[6];\n"
                        "int main() { int *p; char *q; int i = 4; char c = 1;\n"
                        "  ga[g] = 30; ga[gc] = 20; gs[g] = 7; gs[gc] = 8; ga[i] = 40; ga[c] = 10; gs[i] = 9; gs[c] = 6;\n"

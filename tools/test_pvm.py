@@ -66,7 +66,8 @@ PDEC = """
 f_pdec: P_FUNC
         P_ENTER 4, 1            ; 0: n, 2: i, the next digit's index in buf
         P_B PO_CB, 10
-        P_W PO_SAB, buf+8
+        P_W PO_LA, buf+8
+        P_OP PO_SB
         P_CN 8
         P_B PO_SLW, 2
 @lp:    P_B PO_LLW, 0
@@ -238,7 +239,8 @@ f_main: P_FUNC
         P_CN 7
         P_SYS SYSN_WRITE
         P_W PO_SAW, buf
-        P_W PO_LAB, pvm_errno
+        P_W PO_LA, pvm_errno
+        P_OP PO_LB
         P_W PO_SAW, buf+2
         P_W PO_SAW, buf+4
         P_CN 6
@@ -406,8 +408,8 @@ f_main: P_FUNC
                     self.assertEqual(words(r.out), [66])
         # the 12th push through every guarded op, in a framed function so the local loads work.
         twelfth = ["P_OP PO_MINUS1", "P_CN 3", "P_B PO_CB, 3", "P_W PO_CW, 3",
-                   'P_CS "x"', "P_W PO_LA, buf", "P_B PO_LLA, 0", "P_B PO_LLB, 0", "P_B PO_LLW, 0",
-                   "P_W PO_LAB, buf", "P_W PO_LAW, buf"]
+                   'P_CS "x"', "P_W PO_LA, buf", "P_B PO_LLA, 0", "P_B PO_LLW, 0",
+                   "P_W PO_LAW, buf"]
         for op in twelfth:
             body = "f_main: P_FUNC\n        P_ENTER 2, 0\n" + "        P_CN 1\n" * 11
             # the DROP brings a wrapped index back in range, so LEAVE's check cannot stand in

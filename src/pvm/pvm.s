@@ -175,18 +175,6 @@ XOR:    lda ESTKL+1,x
         eor ESTKH,x
         sta ESTKH+1,x
         jmp DROP
-LLB:    iny
-        lda (IP),y
-        sty IPY
-        tay
-        dex
-        bmi pushov0
-        lda (IFP),y
-        sta ESTKL,x
-        lda #0
-        sta ESTKH,x
-        ldy IPY
-        jmp NEXTOP
 ADD:    lda ESTKL,x
         clc
         adc ESTKL+1,x
@@ -201,6 +189,14 @@ SB:     lda ESTKL,x
         sta (ESTKH-1,x)
         inx
         jmp DROP
+SUB:    lda ESTKL+1,x
+        sec
+        sbc ESTKL,x
+        sta ESTKL+1,x
+        lda ESTKH+1,x
+        sbc ESTKH,x
+        sta ESTKH+1,x
+        jmp DROP
 pushov0:  jmp pvm_overflow       ; for the push guards in branch range
 BAD     = pvm_overflow          ; the upstream opcodes nothing here emits: they trap (exit ENOMEM)
 PRETBL:
@@ -213,12 +209,12 @@ OPTBL:  .word CN,CN,CN,CN,CN,CN,CN,CN                           ; 00 02 04 06 08
         .word DROP,BAD,BAD,BAD,ADDI,SUBI,BAD,BAD        ; 30 32 34 36 38 3A 3C 3E
         .word ISEQ,ISNE,ISGT,ISLT,ISGE,ISLE,BRFLS,BRTRU         ; 40 42 44 46 48 4A 4C 4E
         .word BRNCH,BAD,CALL,ICAL,ENTER,LEAVE,RET,BAD          ; 50 52 54 56 58 5A 5C 5E
-        .word LB,LW,LLB,LLW,LAB,LAW,BAD,BAD                     ; 60 62 64 66 68 6A 6C 6E
-        .word SB,SW,SLB,SLW,SAB,SAW,BAD,BAD                     ; 70 72 74 76 78 7A 7C 7E
+        .word LB,LW,BAD,LLW,BAD,LAW,BAD,BAD                     ; 60 62 64 66 68 6A 6C 6E
+        .word SB,SW,BAD,SLW,BAD,SAW,BAD,BAD                     ; 70 72 74 76 78 7A 7C 7E
         .word LNOT,ADD,SUB,MUL,DIV,MOD,BAD,BAD                     ; 80 82 84 86 88 8A 8C 8E
         .word NEG,COMP,BAND,IOR,XOR,SHL,SHR,IDXW                ; 90 92 94 96 98 9A 9C 9E
         .word BAD,BAD,BAD,BAD,BAD,BAD,BRAND,BROR                      ; A0 A2 A4 A6 A8 AA AC AE
-        .word ADDLB,ADDLW,ADDAB,ADDAW,IDXLB,IDXLW,IDXAB,IDXAW   ; B0 B2 B4 B6 B8 BA BC BE
+        .word BAD,ADDLW,BAD,ADDAW,BAD,IDXLW,BAD,BAD                   ; B0 B2 B4 B6 B8 BA BC BE
         .word BAD,BAD,JUMP,SYS                                       ; C0 C2 C4 C6
 .assert * - OPTBL = OP_SYS + 2, error, "SYS is not at its opcode"
         .word XOP,XOP,XOP,XOP,XOP,XOP,XOP,XOP                   ; C8 CA CC CE D0 D2 D4 D6
@@ -313,14 +309,6 @@ _DIV:   sty IPY
 
 
 ; ---- arithmetic and logic ----
-SUB:    lda ESTKL+1,x
-        sec
-        sbc ESTKL,x
-        sta ESTKL+1,x
-        lda ESTKH+1,x
-        sbc ESTKH,x
-        sta ESTKH+1,x
-        jmp DROP
 IDXW:   lda ESTKL,x             ; TOS * 2 + TOS-1
         asl
         rol ESTKH,x
@@ -517,18 +505,6 @@ LLW:    iny
         sta ESTKH,x
         ldy IPY
         jmp NEXTOP
-ADDLB:  iny
-        lda (IP),y
-        sty IPY
-        tay
-        lda (IFP),y
-        clc
-        adc ESTKL,x
-        sta ESTKL,x
-        bcc :+
-        inc ESTKH,x
-:       ldy IPY
-        jmp NEXTOP
 ADDLW:  iny
         lda (IP),y
         sty IPY
@@ -539,23 +515,6 @@ ADDLW:  iny
         sta ESTKL,x
         iny
         lda (IFP),y
-        adc ESTKH,x
-        sta ESTKH,x
-        ldy IPY
-        jmp NEXTOP
-IDXLB:  iny
-        lda (IP),y
-        sty IPY
-        tay
-        lda (IFP),y
-        ldy #0
-        asl
-        bcc :+
-        iny
-        clc
-:       adc ESTKL,x
-        sta ESTKL,x
-        tya
         adc ESTKH,x
         sta ESTKH,x
         ldy IPY
@@ -581,19 +540,6 @@ IDXLW:  iny
         ldy IPY
         jmp NEXTOP
 pushov3:  jmp pvm_overflow       ; for the push guards in branch range
-LAB:    iny
-        lda (IP),y
-        sta ESTKH-2,x
-        iny
-        lda (IP),y
-        sta ESTKH-1,x
-        lda (ESTKH-2,x)
-        dex
-        bmi pushov3
-        sta ESTKL,x
-        lda #0
-        sta ESTKH,x
-        jmp NEXTOP
 LAW:    iny
         lda (IP),y
         sta TMP
@@ -611,19 +557,6 @@ LAW:    iny
         sta ESTKH,x
         ldy IPY
         jmp NEXTOP
-ADDAB:  iny
-        lda (IP),y
-        sta ESTKH-2,x
-        iny
-        lda (IP),y
-        sta ESTKH-1,x
-        lda (ESTKH-2,x)
-        clc
-        adc ESTKL,x
-        sta ESTKL,x
-        bcc :+
-        inc ESTKH,x
-:       jmp NEXTOP
 ADDAW:  iny
         lda (IP),y
         sta SRC
@@ -638,50 +571,6 @@ ADDAW:  iny
         sta ESTKL,x
         iny
         lda (SRC),y
-        adc ESTKH,x
-        sta ESTKH,x
-        ldy IPY
-        jmp NEXTOP
-IDXAB:  iny
-        lda (IP),y
-        sta ESTKH-2,x
-        iny
-        lda (IP),y
-        sta ESTKH-1,x
-        lda (ESTKH-2,x)
-        sty IPY
-        ldy #0
-        asl
-        bcc :+
-        iny
-        clc
-:       adc ESTKL,x
-        sta ESTKL,x
-        tya
-        adc ESTKH,x
-        sta ESTKH,x
-        ldy IPY
-        jmp NEXTOP
-IDXAW:  iny
-        lda (IP),y
-        sta SRC
-        iny
-        lda (IP),y
-        sta SRC+1
-        sty IPY
-        ldy #0
-        lda (SRC),y
-        asl
-        sta TMP
-        iny
-        lda (SRC),y
-        rol
-        sta TMP+1
-        lda TMP
-        clc
-        adc ESTKL,x
-        sta ESTKL,x
-        lda TMP+1
         adc ESTKH,x
         sta ESTKH,x
         ldy IPY
@@ -701,15 +590,6 @@ SW:     lda ESTKL,x
 @c:     inc ESTKH,x
         sta (ESTKH-1,x)
         inx
-        jmp DROP
-SLB:    iny
-        lda (IP),y
-        sty IPY
-        tay
-        lda ESTKL,x
-        sta (IFP),y
-        ldy IPY
-        bmi FIXDROP
         jmp DROP
 SLW:    iny
         lda (IP),y
@@ -731,23 +611,6 @@ FIXDROP: tya
         bcc :+
         inc IP+1
 :       jmp DROP
-SABFIX: tya
-        clc
-        adc IP
-        sta IP
-        bcc :+
-        inc IP+1
-:       ldy #$FF
-SAB:    iny
-        bmi SABFIX
-        lda (IP),y
-        sta ESTKH-2,x
-        iny
-        lda (IP),y
-        sta ESTKH-1,x
-        lda ESTKL,x
-        sta (ESTKH-2,x)
-        jmp DROP
 SAW:    iny
         lda (IP),y
         sta TMP
