@@ -13,6 +13,10 @@ import shards  # noqa: E402
 
 
 class ShardList(unittest.TestCase):
+    def test_sjd41_tooling_tests_are_host_only(self):
+        ids = shards.discovered()
+        self.assertFalse(any(i.startswith("tests.test_sjd41_") for i in ids), ids)
+
     def test_every_vice_test_is_in_exactly_one_shard(self):
         ids = shards.discovered()
         self.assertGreater(len(ids), 50)
