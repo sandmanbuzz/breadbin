@@ -22,8 +22,8 @@
 .export n_ldv, n_ldk, n_stv, n_dup, n_add, n_sub, n_mul, n_div, n_neg, n_abs, n_int, n_sgn
 .export n_fromi, n_toi, n_cmp, n_tst
 .export rt_mark, rt_go, rt_ln, xtab
-.export c_ldv, c_stv, c_dup, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_mac, c_fmt
-.export c_grow, c_throw, c_err, c_curip, c_nclr, c_crunch, c_find
+.export c_ldv, c_stv, c_dup, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_const, c_fmt
+.export c_grow, c_throw, c_err, c_curip, c_crunch, c_find
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 
 NDEPTH  = 16
@@ -722,32 +722,146 @@ pushay: dex
         sta P_ESTKH,x
         rts
 
-; c_mac(d): the number on top = itself * 10 + d (raw units: d is 0-9). For reading
-; constants: returns 1 past 2^31 - 1 (the top is then meaningless), else 0.
-c_mac:  lda P_ESTKL,x
-        sta t0
-        inx
+; c_const(buf): read a number at si: digits, a point, digits (spaces among them stepped over, as MS);
+; its 4 bytes (units of 1/10000, rounded past 4 decimals) go to buf. Returns the value when it is a whole
+; number under 32768, else -2. FAIL 1 for no digits, 4 for a number past 2^31 - 1.
+; State, all in the lexer's bytes: li digits seen, lo the decimals seen (-1 in the whole part), lc
+; nonzero decimals, lj the 4th decimal + the rounding, lq overflow, tq the whole part (tq+2: past 32767).
+c_const: lda P_ESTKL,x
+        sta dvs
+        lda P_ESTKH,x
+        sta dvs+1
         stx sx
-        jsr popa
+        lda #0
+        ldy #7
+:       sta acc,y
+        dey
+        bpl :-
+        sta li
+        sta lc
+        sta lq
+        sta lj
+        sta nsp                 ; and the number stack is empty (a run that failed can leave it full)
+        lda #$FF
+        sta lo
+@loop:  jsr srcp
+        lda (ptr),y
+        sec
+        sbc #'0'
+        cmp #10
+        bcs @nd
+        sta t0
+        ldy lo
+        bmi @mac                ; a whole-part digit
+        cpy #4
+        bcs @f4
+        lda lc
+        ora t0
+        sta lc
+        cpy #3
+        bcs @f3
+        jsr mac
+        jmp @bump
+@f3:    lda t0                  ; the 4th decimal
+        sta lj
+        bcs @bump
+@f4:    bne @bump               ; the 5th rounds the 4th up, and counts as nonzero
+        lda t0
+        cmp #5
+        bcc @bump
+        inc lj
+        inc lc
+@bump:  lda lo
+        cmp #5
+        bcs @next
+        inc lo
+        bne @next
+@mac:   jsr mac
+@next:  inc g_si
+        bne :+
+        inc g_si+1
+:       jsr c_sp
+        inx
+        inc li
+        bne @loop
+@nd:    ldy lo
+        bpl @pad                ; the decimals are over
+        inc lo                  ; the whole part is: keep it, and look for the point
+        lda acc
+        sta tq
+        lda acc+1
+        sta tq+1
+        and #$80
+        ora acc+2
+        ora acc+3
+        sta tq+2
+        ldy #0
+        lda (ptr),y
+        cmp #'.'
+        beq @next               ; step over the point (it counts in li, so a bare . is a number: 0, as MS)
+@pad:   lda lo                  ; three decimals at least
+        cmp #3
+        bcs @end
+        lda #0
+        sta t0
+        jsr mac
+        inc lo
+        bne @pad
+@end:   lda lj
+        sta t0
+        jsr mac
+        lda dvs
+        sta ptr
+        lda dvs+1
+        sta ptr+1
+        ldy #3
+:       lda acc,y
+        sta (ptr),y
+        dey
+        bpl :-
+        lda li
+        bne :+
+        lda #1
+        jsr seterr
+:       lda lq
+        beq :+
+        lda #E_OVF
+        jsr seterr
+:       ldx sx
+        lda lc
+        ora tq+2
+        ora lq
+        ldy li
+        beq @big
+        tay
+        bne @big
+        lda tq
+        ldy tq+1
+        bpl @ret
+@big:   lda #$FE
+        ldy #$FF
+@ret:   sta P_ESTKL,x
+        tya
+        sta P_ESTKH,x
+        rts
+
+; mac: acc = acc * 10 + t0; lq = 1 past 2^31 - 1
+mac:    jsr clrhi
         jsr mul10
         lda t0
         ldy #0
         jsr setb
         jsr addb
-        jsr pusha
         lda acc+4
         ora acc+5
         ora acc+6
         ora acc+7
         bne :+
         lda acc+3
-        bmi :+
-        lda #0
-        beq :++
-:       lda #1
-:       ldy #0
-        ldx sx
-        jmp pushay
+        bpl @r
+:       sta lq
+@r:     ldx sx                  ; (mul10 used X)
+        rts
 
 ; c_fmt(buf): pop a number and write its text as PRINT shows it to buf (12 bytes at most),
 ; giving the length: a space or -, then the digits (none before the point when the whole part is 0
@@ -880,12 +994,6 @@ putc:   dec t0
         ldy t0
         sta fbuf,y
         rts
-
-; c_nclr(): empty the number stack (before the compiler borrows it for a constant: a run that
-; stopped with an error can leave it full).
-c_nclr: lda #0
-        sta nsp
-        jmp push0
 
 ; ---- the lexer and the line store (basic.md section 7: the compiler's hot helpers, native) ----
 
@@ -1192,13 +1300,17 @@ c_tok:  jsr srcp
         sta P_ESTKH,x
         rts
 
-; c_fail(e): err = e, unless one came first. 0.
-c_fail: lda g_err
+; c_fail(e): err = e, unless one came first. 0. seterr: the same for A.
+c_fail: lda P_ESTKL,x
+        jsr seterr
+        jmp ret0
+seterr: sta t0                  ; (Y is the VM's IP offset when c_fail runs as an XOP: keep it)
+        lda g_err
         ora g_err+1
         bne @r
-        lda P_ESTKL,x
+        lda t0
         sta g_err
-@r:     jmp ret0
+@r:     rts
 
 ; c_ult(a, b): a < b, unsigned (1 or 0).
 c_ult:  ldy #0

@@ -17,7 +17,7 @@
    against src/pvm/pvm.inc. */
 
 /* xops */
-/* fstack 640 */   /* the VM frame stack: 256 bytes under the 1024 default; nested IFs count in the `deep` budget */
+/* fstack 416 */   /* the VM frame stack: a measured size (tools/test_bas.py, the nesting sweep), with the nesting limit in climb */
 
 extern int rt_mark();   /* bas-rt.s, for the compiled code: these take their arguments from the */
 extern int rt_go();     /* eval stack and the number stack as the comments there say; the */
@@ -31,12 +31,11 @@ extern int c_int();
 extern int c_toi();
 extern int c_fromi(int i);
 extern int c_cmp();
-extern int c_mac(int d);
+extern int c_const(char *buf);
 extern int c_fmt(char *buf);
 extern int c_throw(int e);
 extern int c_err();
 extern int c_curip();
-extern int c_nclr();
 extern int c_crunch(char *buf, char *kwt);
 extern int c_find(char *mem, int top, int n);
 extern int c_sp(); /* xop 232 */      /* bas-rt.s: the scanner and the code emitter, on these globals */
@@ -70,7 +69,7 @@ char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|
                            here, written as the number with "tk NAME" in a comment (test_bas checks the
                            numbers; bas-rt.s has PRINT's and REM's); a keyword before its prefixes, as
                            the first that matches wins (so TOTAL is TO TAL, as MS) */
-char lbuf[162];         /* the line being read or compiled, NUL-ended */
+char lbuf[126];         /* the line being read or compiled, NUL-ended */
 char *src;
 int si;                 /* the parse position in src */
 int cur;                /* the line being compiled; -1 in immediate mode */
@@ -134,7 +133,7 @@ int getline() {         /* the next line of stdin into lbuf: its length, -1 at t
         }
         c = pb[0];
         if (c == '\n' || c == '\r') break;
-        if (n < 160) {
+        if (n < 124) {
             lbuf[n] = c;
             n = n + 1;
         } else over = 1;
@@ -521,55 +520,11 @@ int var() {             /* the variable at si (a letter): its value's address, m
 }
 
 int constant() {        /* a number at si: digits, a point, digits (spaces among them skipped,
-                           as MS); past 4 decimals it is rounded */
-    int o = 0;
-    int ip = 0;
-    int big = 0;
-    int fd = 0;
-    int nz = 0;
-    int l = 0;
-    int r = 0;
-    int any = 0;
-    int d;
+                           as MS); past 4 decimals it is rounded. c_const reads it: a whole number
+                           under 32768 comes back, anything else is -2 and its 4 bytes are in pb */
+    int ip = c_const(pb);
     int i;
-    for (i = 0; i < 4; i = i + 1) pb[i] = 0;
-    c_nclr();
-    c_ldv(pb);
-    while (c_digit()) {
-        d = src[si] - '0';
-        o = o | c_mac(d);
-        if (ip > 3276 || (ip == 3276 && d > 7)) big = 1;
-        else ip = ip * 10 + d;
-        si = si + 1;
-        c_sp();
-        any = 1;
-    }
-    if (c_tok('.')) {
-        c_sp();
-        while (c_digit()) {
-            d = src[si] - '0';
-            if (fd < 4) nz = nz | d;
-            if (fd < 3) o = o | c_mac(d);
-            else if (fd == 3) l = d;
-            else if (fd == 4) {
-                r = d >= 5;
-                nz = nz | r;
-            }
-            if (fd < 5) fd = fd + 1;
-            si = si + 1;
-            c_sp();
-            any = 1;
-        }
-    }
-    if (!any) c_fail(1);
-    while (fd < 3) {
-        o = o | c_mac(0);
-        fd = fd + 1;
-    }
-    o = o | c_mac(l + r);
-    c_stv(pb);
-    if (o) c_fail(4);
-    if (!big && !nz) {
+    if (ip >= 0) {
         pushint(ip);
         c_xop(226 /* x FROMI */);
         return npush(1);
@@ -587,9 +542,9 @@ int fn(int f) {       /* a function of one number: f(...) */
         c_fail(1);
         return 1;
     }
-    deep = deep + 1;       /* a function's frames count as a second level of nesting */
-    tonum(primary());      /* its '(' enters climb, which holds the limit */
-    deep = deep - 1;
+    deep = deep + 2;       /* fn and primary's frames, over the climb the '(' enters */
+    tonum(primary());
+    deep = deep - 2;
     c_xop(f);
     return 1;
 }
@@ -636,29 +591,22 @@ int relop(int m) {      /* the VM's compare of n_cmp's -1, 0 or 1 with 0: -1 whe
 }
 
 int operand() {         /* a primary, or - + NOT and theirs. Each ( and unary op nests through
-                           here: past 15 the compiler's own frames would run out (the frame
-                           stack is 768 bytes) */
+                           here (climb counts the frames: see there) */
     int k = 1;
-    int c;
-    deep = deep + 1;
-    if (deep + nif > 15) c_fail(11);
-    else {
-        c = c_sp();
-        if (c == '-') {         /* binds looser than ^, as MS: -2^2 is -4 */
-            si = si + 1;
-            tonum(climb(10));
-            c_xop(216 /* x NEG */);
-        } else if (c == '+') {
-            si = si + 1;
-            k = climb(10);
-        } else if (c == 142 /* tk NOT */) {    /* of the relation after it, as MS */
-            si = si + 1;
-            toint(climb(6));
-            c_op1(146 /* PO_COMP */);
-            k = 2;
-        } else k = primary();
-    }
-    deep = deep - 1;
+    int c = c_sp();
+    if (c == '-') {         /* binds looser than ^, as MS: -2^2 is -4 */
+        si = si + 1;
+        tonum(climb(10));
+        c_xop(216 /* x NEG */);
+    } else if (c == '+') {
+        si = si + 1;
+        k = climb(10);
+    } else if (c == 142 /* tk NOT */) {    /* of the relation after it, as MS */
+        si = si + 1;
+        toint(climb(6));
+        c_op1(146 /* PO_COMP */);
+        k = 2;
+    } else k = primary();
     return k;
 }
 
@@ -694,13 +642,17 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
                            2^3^2 is 64). Returns the result's kind: 1 a number, 2 an int.
                            Relations (= < > <= >= <>, and =< => >< as MS) give -1 or 0; the
                            exponent of ^ is a whole number, which may be negative */
-    int k = operand();
+    int k = 1;
     int c;
     int p;
+    deep = deep + 2;    /* every nesting goes through here, a chain of up to 6 per level: its frames
+                           (and operand's and primary's under it) are all the frame stack holds */
+    if (deep + nif > 24) c_fail(11);
+    else k = operand();
     while (!err) {
         c = c_sp();
         p = binop(c);
-        if (p < min) return k;      /* none is 0 */
+        if (p < min) break;         /* none is 0 */
         if (p == 6) {
             p = cmpops(c);   /* the relation's bits: p is not needed again here */
             tonum(k);
@@ -732,6 +684,7 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
         else c_xop(210 /* x SUB */);
         k = npush(-1);
     }
+    deep = deep - 2;
     return k;
 }
 
