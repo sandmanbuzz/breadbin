@@ -234,6 +234,16 @@ today) and the compiler K. **The peak is T + C + K, and only the peak limits a p
    the last page that fit); the 7 free pages below `bas` are a hole no 47-page image fits. The
    next gains are therefore all in the image, 256 bytes of arena per page saved.
 
+   *Landed (image pass 1, 2026-11-20):* 47 pages to 42 (code 9,206 bytes, BSS 1,266): 17,664 bytes
+   free at the shell (the arena takes 69 pages; measured on VICE). What paid, in bytes: the
+   implicit `return 0` after a final `return` (cc_pcode; 198), `fail` as an XOP (72), the
+   forward-GOTO tables sharing `ctl` (the compiler's and the run's state are never live together;
+   192), output and input unbuffered (a write per character, a read per byte: 66 + 66 of BSS and
+   the flush code), `need`/`c_tok` for expected tokens in place of `src[si]` compares (190), the
+   frame stack 768 to 640 (`climb` split so its frames are smaller: `tools/test_bas.py` pins the
+   every IF depth against the formula limit, never a frame overflow), `outn` shared by `report` and `LIST`,
+   and small dedups. The p-code VM itself (11 library pages) is the next big block: the squish.
+
 2. **A smaller K.** Native `getline`, `cline`, `var`, `constant`, `match` and `move` (the profile's
    top entries) cost less than the p-code they replace; each KB of K is 0.3 KB of T.
 3. **Compile to a file, run from a runner.** `bc prog.bas` writes dense code; a runner holding

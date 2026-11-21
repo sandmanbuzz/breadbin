@@ -24,7 +24,7 @@
 .export rt_mark, rt_go, rt_ln, xtab
 .export c_ldv, c_stv, c_dup, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_mac, c_fmt
 .export c_grow, c_throw, c_err, c_curip, c_nclr, c_crunch, c_find
-.export c_sp, c_digit, c_letter, c_tok, c_ult, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
+.export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 
 NDEPTH  = 16
 ESTKSZ  = P_ESTKL - P_ESTKH + 11 ; both halves, contiguous
@@ -1192,6 +1192,14 @@ c_tok:  jsr srcp
         sta P_ESTKH,x
         rts
 
+; c_fail(e): err = e, unless one came first. 0.
+c_fail: lda g_err
+        ora g_err+1
+        bne @r
+        lda P_ESTKL,x
+        sta g_err
+@r:     jmp ret0
+
 ; c_ult(a, b): a < b, unsigned (1 or 0).
 c_ult:  ldy #0
         lda P_ESTKL+1,x
@@ -1362,4 +1370,4 @@ xtab:   .word x_ldv, x_stv, x_ldk, x_ln                 ; C8 CA CC CE
         .word n_sgn, n_fromi, n_toi, n_tst               ; E0 E2 E4 E6
         .word c_sp, c_tok, c_emit, c_op1                 ; E8 EA EC EE: the compiler's hot externs,
         .word c_ldv, c_digit, c_ncall, c_stv             ; F0 F2 F4 F6  called as one byte (bas.c's
-        .word c_room, c_opw, c_letter, c_ult             ; F8 FA FC FE  /* xop N */ declarations)
+        .word c_room, c_opw, c_fail, c_xop               ; F8 FA FC FE  /* xop N */ declarations)

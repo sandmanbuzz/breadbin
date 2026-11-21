@@ -311,8 +311,9 @@ class PGen(cc.Gen):
                 self.frame += 1             # ENTER stores two bytes per parameter: a char reads the low one
         for s in body:
             self.stmt(s)
-        self.const(0)
-        self.op("P_B", "PO_LEAVE", f"FS_{name}")
+        if not self.out[-1].strip().startswith("P_B PO_LEAVE"):     # after a return no label reaches this
+            self.const(0)
+            self.op("P_B", "PO_LEAVE", f"FS_{name}")
         if self.frame > FRAME_MAX:
             raise CompileError(f"line {line}: {name}'s frame (parameters, locals and temporaries) takes "
                                f"{self.frame} bytes; the limit is {FRAME_MAX}")
