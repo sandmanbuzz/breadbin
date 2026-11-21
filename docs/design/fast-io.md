@@ -462,3 +462,7 @@ Reading it: the gain is 24% at stride 1 and 10% at stride 2 against the old modu
 Open: staleness of the held block (any write, disk swap or fallback must drop it), the debug counters `d_nh`/`d_nm`, reserving buffers 3/4 and the BAM page, the write path (does not fit this budget), the head-to-head against JiffyDOS on 1541, and the owner's decision rule.
 
 Run: `wc /bin/passwd`, `wc /bin/as`, stride bench N=20 at strides 1, 2, 3, 4, 5, 6, 8, host VICE real speed, stock ROMs. Not run: JiffyDOS drive ROM, 1541-II, hardware, writes, `make test-host`, smoke, suite, the hater gate.
+
+### 18.12 Seek-then-raw after a track change: slower, reverted
+
+The vprof table (87bd4ed) puts DOS-job reads (mode 0, after every track change) at about 600 ms each. Try: the host marks the first request on a new track `$81`; the drive runs a job `$B0` (seek) on the DOS, then captures the sector raw. Result, `wc /bin/as` cold, 49 blocks, host VICE at real speed, stock ROMs: 440.7 ms per block baseline vs 456.4 with the seek, 21.6 s vs 22.4 s. No gain: the 1541's `$B0` job seeks and then reads a header to check the track (it is not a bare step), so the DOS path's cost is mostly the seek-and-verify and the spin-up, not the sector read. Reverted. A real saving needs the drive code to step the head itself (the stepper at `$1C00`, bits 0-1, with the DOS's own settle time), which is a bigger unit. Run: baseline and variant under tools/vprof.py. Not run: JiffyDOS drive, 1541-II, hardware, other files.
