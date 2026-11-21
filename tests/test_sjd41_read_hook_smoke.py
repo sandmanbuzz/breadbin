@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import unittest
 
+BREADBIN_TEST_KIND = "host"  # pure tooling tests; no VICE session
+
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "sjd41" / "read_hook_smoke.py"
 SPEC = importlib.util.spec_from_file_location("sjd41_read_hook_smoke", SCRIPT)
 module = importlib.util.module_from_spec(SPEC)
