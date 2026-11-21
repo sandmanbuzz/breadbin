@@ -6,6 +6,7 @@ system: ps kill jobs free df uptime
         theme turbo
 users:  login whoami passwd
 code:   basic as
+math:   calc
 disks:  mount umount format
 shell:  a | b  > f  >> f  < f  cmd &
         a ; b  *.bas  cd  exit

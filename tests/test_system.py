@@ -372,6 +372,22 @@ class Boot(unittest.TestCase):
             self.v.wait_for("GAME OVER", timeout=30)
         self.v.wait_shell()
 
+    def test_32_calc(self):
+        """calc: arguments (joined) and stdin, precedence and parentheses, / truncates and % takes the
+        dividend's sign, and the errors go to the screen."""
+        self.assertEqual(self.run_("calc 2+3*4"), "14")
+        self.assertEqual(self.run_("calc 2*(3+4)"), "14")
+        self.assertEqual(self.run_("calc 2 + 3"), "5")
+        self.assertEqual(self.run_("calc -7/2"), "-3")
+        self.assertEqual(self.run_("calc -7%3"), "-1")
+        self.assertEqual(self.run_("calc 7%-3"), "1")
+        self.assertEqual(self.run_("echo 6*7 | calc"), "42")
+        self.assertIn("divide by zero", self.run_("calc 1/0"))
+        self.assertIn("overflow", self.run_("calc 32767+1"))
+        self.assertIn("syntax error", self.run_("calc 2+"))
+        self.assertEqual(self.run_("calc " + "(" * 6 + "5" + ")" * 6), "5")
+        self.assertIn("nested too deeply", self.run_("calc " + "(" * 7 + "5" + ")" * 7))
+
 
 class Persistence(unittest.TestCase):
     """Files written by Breadbin survive a reboot and are readable on the host."""
