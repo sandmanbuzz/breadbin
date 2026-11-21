@@ -436,3 +436,29 @@ So a read that starts only after the current block has been sent cannot hide the
 Room is the constraint: two raw sectors are 650 bytes of buffer, leaving about 630 bytes of the 1280 for code, with a write path out of the question in that budget. The drive code can shrink: the host can send the header codes (no `d_enc` and table on the drive), and only the first block of a track needs the DOS job.
 
 Run: `wc /bin/passwd`, `wc /bin/as` with the experimental module, host VICE real speed. Not run: a two-sector pass, writes, JiffyDOS drive ROM, 1541-II, hardware, `make test-host`, smoke, suite.
+
+### 18.11 The two-sector pass works; strides 1 to 8 (measured 2026-11-20)
+
+`src/mod/fast.s` (red: no write path, drive code in two parts at `$0300` and `$078A`, raw buffers at `$0500` and `$0645`): for a request the host passes the wanted sector, the GCR codes of a guessed second sector (same track, the previous stride) and a mode (0 DOS job, 1 raw for the wanted sector, 2 raw for both). The drive captures the wanted sector, then the guess in the same pass, sends the first, and holds the second for one request. A later request that matches the held block is served with no head work. The host decodes the 325 raw bytes (checksum, marker, no bad codes) and falls back to the standard path on any failure.
+
+Bug worth keeping: the host decode indexes with X, and the nibble helper `tax`es; the first version hung `mod ls` after `mod load`. Save and restore X around the helper.
+
+Results, host VICE at real speed, stock 1541 ROM, ms per block ((N=20 file minus one block file) / 19):
+
+| stride | standard | old fast.km (df634aa) | two-sector pass |
+|---|---|---|---|
+| 1 | 924 | 459 | 350 |
+| 2 | 862 | 458 | 411 |
+| 3 | 816 | - | 354 |
+| 4 | 868 | 306 | 405 |
+| 5 | 919 | - | 405 |
+| 6 | 921 | - | 403 |
+| 8 | 917 | - | 455 |
+
+`wc /bin/passwd` 19.5 s, `wc /bin/as` 25.3 s, 0 fallbacks, 23 of 49 blocks served from the held sector.
+
+Reading it: the gain is 24% at stride 1 and 10% at stride 2 against the old module, but stride 4 is 32% worse, because the old module's cycle happened to land on the revolution there (306 ms). Results depend on how the pair cycle lines up with the 200 ms revolution, not on a smooth cost per stride: 3 is as good as 1, 2/4/5/6 sit at about 405, 8 is worst. Two cheap levers follow: the allocator's stride/interleave, and a hint policy that picks the sector the head reaches first. The host chain outside the drive (about 100 to 120 ms) and the host decode (about 26 ms) are still unprofiled in detail, and 325 raw bytes cost about 15 ms more than 256.
+
+Open: staleness of the held block (any write, disk swap or fallback must drop it), the debug counters `d_nh`/`d_nm`, reserving buffers 3/4 and the BAM page, the write path (does not fit this budget), the head-to-head against JiffyDOS on 1541, and the owner's decision rule.
+
+Run: `wc /bin/passwd`, `wc /bin/as`, stride bench N=20 at strides 1, 2, 3, 4, 5, 6, 8, host VICE real speed, stock ROMs. Not run: JiffyDOS drive ROM, 1541-II, hardware, writes, `make test-host`, smoke, suite, the hater gate.
