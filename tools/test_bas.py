@@ -18,7 +18,7 @@ SRC = os.path.join(ROOT, "src", "pc", "bas.c")
 RT = os.path.join(ROOT, "src", "pc", "bas-rt.s")
 _built = {}
 FREE = "16384 BYTES FREE\n"
-LINE = ":".join(['?"A";'] * 26)       # 155 bytes stored (? is one token), 185 of code with the line's rt_ln
+LINE = ":".join(['?"A";'] * 20)       # 119 bytes stored (? is one token), 143 of code with the line's rt_ln
 LISTED = LINE.replace("?", "PRINT")
 
 
@@ -88,11 +88,11 @@ class Bas(unittest.TestCase):
         self.assertEqual(self.out('?"A";\nFOO\n'), "A\n?SYNTAX ERROR\n")
 
     def test_immediate_mode_after_a_large_run(self):
-        # 46 lines (161 bytes of text each, with the header, and their code) leave less than
-        # another line's worth free (47 do not run at all): a typed line that does not fit after
+        # 61 lines (125 bytes of text each, with the header, and their code) leave less than
+        # another line's worth free (62 do not run at all): a typed line that does not fit after
         # the code is compiled in its place, and RUN still works
-        out = self.out(BIG(46) + 'RUN\n?"' + "X" * 150 + '"\nRUN\n', limit=400_000_000)
-        self.assertEqual(out, "A" * 26 * 46 + "X" * 150 + "\n" + "A" * 26 * 46)
+        out = self.out(BIG(61) + 'RUN\n?"' + "X" * 110 + '"\nRUN\n', limit=400_000_000)
+        self.assertEqual(out, "A" * 20 * 61 + "X" * 110 + "\n" + "A" * 20 * 61)
 
     def test_line_store_sorts_replaces_and_deletes(self):
         out = self.out('30 ?"C"\n10 ?"A"\n20 ?"B"\n20 ?"BB"\n40 ?"D"\n30\n35\nLIST\nRUN\n')
@@ -163,44 +163,44 @@ class Bas(unittest.TestCase):
         self.assertEqual(self.out(""), "")
 
     def test_a_line_too_long(self):
-        self.assertEqual(self.out('?"' + "X" * 157 + '"\n'), "X" * 157 + "\n")    # 160 is the most
-        self.assertEqual(self.out('?"' + "X" * 158 + '"\n?"OK"\n'), "?LINE TOO LONG ERROR\nOK\n")
+        self.assertEqual(self.out('?"' + "X" * 121 + '"\n'), "X" * 121 + "\n")    # 124 is the most
+        self.assertEqual(self.out('?"' + "X" * 122 + '"\n?"OK"\n'), "?LINE TOO LONG ERROR\nOK\n")
 
     def test_long_strings_and_many_statements(self):
         # CS and CALL each reset the VM's Y, so PRINT's code never runs straight past 240 bytes
         # and room() cannot fire yet: its test comes with L3c's expressions (mutating it now
         # passes this test)
-        s = "".join(chr(33 + i % 90).replace('"', "'") for i in range(150))
+        s = "".join(chr(33 + i % 90).replace('"', "'") for i in range(110))
         prog = "".join('%d ?"%s%d";\n' % (n, s, n) for n in range(1, 11)) + "100 ?\n"
-        prog += "200 " + ":".join('?"%s";' % chr(65 + i % 26) for i in range(26)) + "\n210 ?\n"
-        want = "".join(s + str(n) for n in range(1, 11)) + "\n" + "".join(chr(65 + i) for i in range(26)) + "\n"
+        prog += "200 " + ":".join('?"%s";' % chr(65 + i % 26) for i in range(20)) + "\n210 ?\n"
+        want = "".join(s + str(n) for n in range(1, 11)) + "\n" + "".join(chr(65 + i) for i in range(20)) + "\n"
         self.assertEqual(self.out(prog + "RUN\n"), want)
 
     def test_a_long_line_of_xops_with_operands_runs_straight_on(self):
         # XLDK, XLDV and XSTV carry operand bytes: a line of 8 such statements is over 100 bytes
-        # of code (a 160-character line is the most); each op must leave IP renormalised
+        # of code (a 124-character line is the most); each op must leave IP renormalised
         parts = ["A=A+%d.5:B=A*2" % i for i in range(8)]
         out = self.out("10 " + ":".join(parts) + "\n20 ?A;B\nRUN\n")
         a = sum(i + 0.5 for i in range(8))
         self.assertEqual(out, " %g  %g \n" % (a, a * 2))
 
     def test_out_of_memory(self):
-        # text, code and variables share the 16384-byte arena. The text: a line of 150 Ys is 159
-        # bytes (2 + 1 + 2 of header, 153 of text, a 0), so 103 fit; the rest are refused and the store is unhurt
-        prog = "".join('%d ?"%s"\n' % (n, "Y" * 150) for n in range(1, 110))
-        out = self.out(prog + "LIST 1\nLIST 103\nLIST 104\n", limit=400_000_000)
-        self.assertEqual(out, "?OUT OF MEMORY ERROR\n" * 6 + '1 PRINT"' + "Y" * 150 + '"\n103 PRINT"' + "Y" * 150 + '"\n')
+        # text, code and variables share the 16384-byte arena. The text: a line of 110 Ys is 119
+        # bytes (2 + 1 + 2 of header, 113 of text, a 0), so 137 fit; the rest are refused and the store is unhurt
+        prog = "".join('%d ?"%s"\n' % (n, "Y" * 110) for n in range(1, 150))
+        out = self.out(prog + "LIST 1\nLIST 137\nLIST 138\n", limit=400_000_000)
+        self.assertEqual(out, "?OUT OF MEMORY ERROR\n" * 12 + '1 PRINT"' + "Y" * 110 + '"\n137 PRINT"' + "Y" * 110 + '"\n')
 
     def test_out_of_memory_compiling(self):
-        # the code: 60 lines leave room for 36 lines' code; the error names the line being
+        # the code: 80 lines leave room for 45 lines' code; the error names the line being
         # compiled, and a typed line still runs
-        out = self.out(BIG(60) + 'RUN\n?"STILL"\nLIST 60\n', limit=400_000_000)
-        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 37\nSTILL\n60 " + LISTED + "\n")
-        # the variables: 47 lines leave too little (46 leave enough) for 26 new variables (6 bytes each) and their
+        out = self.out(BIG(80) + 'RUN\n?"STILL"\nLIST 80\n', limit=400_000_000)
+        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 46\nSTILL\n80 " + LISTED + "\n")
+        # the variables: 61 lines leave too little (60 leave enough) for 20 new variables (6 bytes each) and their
         # assignments (5 bytes of code each: a constant, then XSTV)
-        out = self.out(BIG(47) + "48 " + ":".join("A%s=0" % chr(65 + i) for i in range(26)) + "\nRUN\n",
+        out = self.out(BIG(61) + "62 " + ":".join("A%s=0" % chr(65 + i) for i in range(20)) + "\nRUN\n",
                        limit=400_000_000)
-        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 48\n")
+        self.assertEqual(out, "?OUT OF MEMORY ERROR IN 62\n")
 
     def test_opcode_numbers_agree_with_the_vm(self):
         inc = open(os.path.join(ROOT, "src", "pvm", "pvm.inc")).read()
@@ -293,7 +293,7 @@ class Language(unittest.TestCase):
         lines = []
         while len(lines) < 60:
             l = gen.line()
-            if l and len(l[0]) < 150:
+            if l and len(l[0]) < 110:
                 lines.append(l)
         out = self.out("".join("PRINT " + t + "\n" for t, _ in lines))
         self.assertEqual(out.split("\n"), "".join(w for _, w in lines).split("\n"))
@@ -376,32 +376,33 @@ class Language(unittest.TestCase):
                          " 1         2        ABCDEFGHIJK          4 \n          X\n")
 
     def test_formula_too_complex(self):
-        self.assertEqual(self.out("PRINT " + "(" * 14 + "1" + ")" * 14 + "\nPRINT " + "(" * 15 + "1" + ")" * 15 + "\n"),
+        self.assertEqual(self.out("PRINT " + "(" * 11 + "1" + ")" * 11 + "\nPRINT " + "(" * 12 + "1" + ")" * 12 + "\n"),
                          " 1 \n?FORMULA TOO COMPLEX ERROR\n")
-        deep = "1+(" * 13 + "1" + ")" * 13
-        self.assertEqual(self.out("PRINT " + deep + "\n"), " 14 \n")
+        deep = "1+(" * 5 + "1" + ")" * 5
+        self.assertEqual(self.out("PRINT " + deep + "\n"), " 6 \n")
 
     def test_functions_count_toward_nesting(self):
-        # each ABS( costs two levels; past 15 is FORMULA TOO COMPLEX, never a frame overflow
+        # each ABS( costs two levels; past 11 is FORMULA TOO COMPLEX, never a frame overflow
         def nest(n):
             return "PRINT " + "ABS(" * n + "1" + ")" * n + "\n"
-        self.assertEqual(self.out(nest(7) + nest(8) + "PRINT -INT(-ABS(-SGN(2.5)))\n"),
+        self.assertEqual(self.out(nest(5) + nest(6) + "PRINT -INT(-ABS(-SGN(2.5)))\n"),
                          " 1 \n?FORMULA TOO COMPLEX ERROR\n 1 \n")
 
     def test_the_deepest_nesting_fits_the_frame_stack(self):
-        # the frame stack (fstack in bas.c) holds: each nested IF counts against the same nesting
-        # budget as the formula after it, so eight IF THENs and any depth of parentheses or ABS(
-        # end in a value or ?FORMULA TOO COMPLEX, never a frame overflow (the process exiting)
-        for ni in range(9):
+        # the frame stack (fstack in bas.c, a measured size) holds: climb counts its frames (a
+        # chain of up to 6 per level, one per precedence) and each nested IF counts against the same
+        # budget, so any mix of IF THENs, parentheses, ABS(, NOT and unary minus ends in a value or
+        # ?FORMULA TOO COMPLEX, never a frame overflow (the process exiting, the stored program lost).
+        # The levels cost most when every precedence precedes the ( : the last body here
+        for ni in (0, 2, 4, 8):
             if_ = "10 " + "IF 1 THEN " * ni
-            for n in range(17):
-                for body, want in (("A=" + "1+(" * n + "1" + ")" * n + ":PRINT A", n + 1),
-                                   ("PRINT " + "ABS(" * n + "1" + ")" * n, 1)):
-                    o = self.out(if_ + body + "\nRUN\n")
-                    self.assertTrue(o.strip() == str(want) or "FORMULA TOO COMPLEX" in o or "TOO" in o,
-                                    (ni, n, body[:6], o))
-        if_ = "10 " + "IF 1 THEN " * 4
-        self.assertEqual(self.out(if_ + "A=" + "1+(" * 8 + "1" + ")" * 8 + ":PRINT A\nRUN\n"), " 9 \n")
+            for n in range(15):
+                for body in ("(", "ABS(", "1+(", "-(", "NOT(", "1OR1AND1<1+1*1^("):
+                    o = self.out(if_ + "A=" + body * n + "1" + ")" * n + "\nRUN\n")
+                    self.assertTrue(o == "" or "TOO" in o, (ni, n, body, o))   # or LINE TOO LONG
+        # a mix found by a fuzz, 68 characters: it overflowed a frame stack sized by parentheses alone
+        self.out("10 A=1OR1AND1<1+(1+1*1^(1+1*1^(1+1*1^(NOT(1^(1OR(NOT ABS(1))))))))\nRUN\n")
+        self.assertEqual(self.out("10 " + "IF 1 THEN " * 4 + "A=" + "1+(" * 2 + "1" + ")" * 2 + ":PRINT A\nRUN\n"), " 3 \n")
 
     def test_bytes_free(self):
         self.assertEqual(self.out("", tty=True), FREE + "READY.\n")

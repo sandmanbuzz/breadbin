@@ -4,6 +4,7 @@ model: random and edge operands through the c_ routines, called from a mini C ha
 import os
 import random
 import tempfile
+import re
 import unittest
 
 import asim
@@ -80,7 +81,7 @@ extern int c_toi();
 extern int c_cmp();
 extern int c_fmt(char *buf);
 extern int c_err();
-extern int c_mac(int d);
+extern int c_const(char *buf);
 char v[4];
 char nl[1];
 char *src;              /* bas.c's globals that bas-rt.s's scanner and emitter use */
@@ -238,13 +239,36 @@ int ok() { return 5; }"""
                                   "  num(1 + (2 + (3 + (4 + (5 + (6 + (7 + tk(&ok)))))))); end();", self.TK)
         self.assertEqual(out, "%d\n%d\n" % (28 + 105, 28 + 5))
 
-    def test_mac_reads_constants_and_flags_overflow(self):
-        # c_mac(d): top = top * 10 + d in raw units
-        defs = """int mac(char *s) { int n; int o; n = 0; o = 0; ld(0, 0);
-  while (s[n]) { o = o | c_mac(s[n] - '0'); n = n + 1; } num(o); write(1, " ", 1); show(); return end(); }"""
-        out = self.run_main(defs, '  mac("12345"); mac("2147483647"); mac("2147483648"); mac("0000150000");')
-        lines = out.split("\n")
-        self.assertEqual([lines[0], lines[1], lines[2][:2], lines[3], lines[4]], ["0  1.2345", "0  214748.3647", "1 ", "0  15", ""])
+    def test_const_reads_numbers_as_the_compiler_does(self):
+        # c_const(buf): the 4 bytes in buf, the whole number under 32768 or -2, FAIL 1 / 4, si past it
+        cases = ["12345", "0", "1.5", ".5", "5.", ".", "", "0.00005", "0.00004999", "0.99995", "123.456789",
+                 "32767", "32768", "1 2 . 5 0", "2147483647", "214748.3647", "214748.36475", "214748.3648",
+                 "99999999999", "12abc", "1.2.3", "0000150000", "7 .   0001", "3.14159265"]
+        defs = """int cs(char *s) { src = s; si = 0; err = 0; num(c_const(v)); write(1, " ", 1); c_ldv(v); show();
+  write(1, " ", 1); num(err); write(1, " ", 1); num(si); return end(); }"""
+        out = self.run_main(defs, "".join('  cs("%s");' % c for c in cases)).split("\n")
+        for c, line in zip(cases, out):
+            t = c.replace(" ", "")
+            m = re.match(r"(\d*)(?:\.(\d*))?", t)
+            w, f = m.group(1), (m.group(2) or "") + "00000"
+            any_ = bool(w or m.group(2) is not None)   # a bare . is a number, 0, as MS
+            val = int(w or "0") * 10000 + int(f[:4]) + (f[4] >= "5")
+            nz = int(f[:4]) != 0 or f[4] >= "5"
+            bad = val > MAX
+            if not any_:
+                val, err = 0, 1
+            else:
+                err = 4 if bad else 0
+            ret = int(w or "0") if any_ and not bad and not nz and int(w or "0") < 32768 else -2
+            used = len(c) if c[-1:] != "c" and c != "1.2.3" else (2 if c == "12abc" else 3)
+            if not c:
+                used = 0
+            want = "%d %s %d %d" % (ret, "?" if bad else fmt(val), err, used)
+            if bad:
+                self.assertEqual(line.split(" ")[0], str(ret), c)
+                self.assertEqual(line.split(" ")[-2:], [str(err), str(used)], c)
+            else:
+                self.assertEqual(line, want, c)
 
     def test_the_number_stack_is_bounded(self):
         defs = """int t() { int i; i = 0; if (rt_mark()) { num(i); write(1, " ", 1); return num(c_err()); }

@@ -244,6 +244,16 @@ today) and the compiler K. **The peak is T + C + K, and only the peak limits a p
    every IF depth against the formula limit, never a frame overflow), `outn` shared by `report` and `LIST`,
    and small dedups. The p-code VM itself (11 library pages) is the next big block: the squish.
 
+   *Landed (image pass 2, 2026-11-20):* 42 pages to 41 (code 9,161 bytes, BSS 1,006): 17,920 bytes
+   free at the shell (VICE). Paid: `c_const`, the number reader, in assembly (about 35 bytes); the
+   frame stack 640 to 416 with the nesting limit now counted in `climb` itself (2 units a call, `fn`
+   2 more; budget 24); the line buffer 162 to 126 (lines to 124 characters; stock BASIC has 80). The
+   trade: 11 nested parentheses and 5 levels of `ABS(` or `1+(` (was 14 and 13), and a bare `.` is
+   the number 0, as MS. The frame stack is sized by measurement: a sweep of IF depth by body shape
+   (including every precedence before a `(`) and a fuzz pass at 416 and 384 bytes, overflowing at 320;
+   the first cut, sized by parentheses alone, overflowed on a mixed-precedence formula, and that
+   formula is a test.
+
 2. **A smaller K.** Native `getline`, `cline`, `var`, `constant`, `match` and `move` (the profile's
    top entries) cost less than the p-code they replace; each KB of K is 0.3 KB of T.
 3. **Compile to a file, run from a runner.** `bc prog.bas` writes dense code; a runner holding
