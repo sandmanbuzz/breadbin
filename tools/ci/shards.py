@@ -4,6 +4,9 @@
   shards.py list            print "name<TAB>specs" per shard
   shards.py check [N]       every VICE test is in exactly one shard, at most N shards (default 8);
                             prints "count <n>" and exits 0, or names the problems and exits 1
+
+Test modules are VICE by default. A host-only tooling module sets
+BREADBIN_TEST_KIND = "host" so it is tested by test-host, not assigned to a VICE shard.
 """
 import importlib.util
 import os
@@ -42,6 +45,11 @@ def discovered():
             mod = importlib.util.module_from_spec(spec)
             sys.modules[name] = mod
             spec.loader.exec_module(mod)
+            kind = getattr(mod, "BREADBIN_TEST_KIND", "vice")
+            if kind not in ("vice", "host"):
+                raise ValueError(f"{fn}: BREADBIN_TEST_KIND must be 'vice' or 'host'")
+            if kind == "host":
+                continue
             suite = unittest.defaultTestLoader.loadTestsFromModule(mod)
             stack = [suite]
             while stack:
