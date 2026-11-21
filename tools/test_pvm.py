@@ -74,15 +74,17 @@ f_pdec: P_FUNC
         P_OP PO_MOD
         P_B PO_ADDI, '0'
         P_B PO_LLW, 2
-        P_OP PO_DECR
-        P_B PO_DLW, 2
+        P_B PO_SUBI, 1
+        P_B PO_SLW, 2
+        P_B PO_LLW, 2
         P_W PO_LA, buf
         P_OP PO_ADD
         P_OP PO_SB
         P_B PO_LLW, 0
         P_CN 10
         P_OP PO_DIV
-        P_B PO_DLW, 0
+        P_B PO_SLW, 0
+        P_B PO_LLW, 0
         P_BR PO_BRTRU, @lp
         P_CN 9
         P_B PO_LLW, 2
@@ -145,14 +147,18 @@ f_main: P_FUNC
         P_ENTER 4, 0
         P_CN 0
         P_B PO_SLW, 0
-        P_B PO_CB, 100
         P_CN 1
-@top:   P_B PO_DLW, 2
-        P_B PO_LLW, 0
+        P_B PO_SLW, 2
+@top:   P_B PO_LLW, 0
         P_B PO_ADDLW, 2
         P_B PO_SLW, 0
-        P_BR PO_INCBRLE, @top
-        P_OP PO_DROP2
+        P_B PO_LLW, 2
+        P_B PO_ADDI, 1
+        P_B PO_SLW, 2
+        P_B PO_LLW, 2
+        P_B PO_CB, 100
+        P_OP PO_ISLE
+        P_BR PO_BRTRU, @top
         P_B PO_LLW, 0
         P_W PO_SAW, buf
         P_CN 2
@@ -173,7 +179,7 @@ f_rec:  P_FUNC
         P_CN 0
         P_B PO_LEAVE, 2
 @r:     P_B PO_LLW, 0
-        P_OP PO_DECR
+        P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
         P_B PO_ADDLW, 0
         P_B PO_LEAVE, 2
@@ -221,7 +227,7 @@ f_main: P_FUNC
 f_main: P_FUNC
         P_W PO_CW, 1234
         P_CS "hi"
-        P_OP PO_DUP
+        P_CS "hi"
         P_OP PO_LB
         P_W PO_SAW, r1
         P_B PO_ADDI, 1
@@ -243,29 +249,14 @@ f_main: P_FUNC
         self.assertEqual(r.out[:2], b"hi")
         self.assertEqual(words(r.out[2:]), [-1, 9, 1234])
 
-    def test_native_call_and_select(self):
-        # CALL to a native routine (doubles TOS); SEL picks a case
+    def test_native_call(self):
+        # CALL to a native routine (doubles TOS)
         r = self.go("""
 f_main: P_FUNC
         P_CN 3
         P_W PO_CALL, n_double
         P_W PO_SAW, buf
         P_CN 2
-        P_BR PO_SEL, @tbl
-@c1:    P_CN 11
-        P_BR PO_BRNCH, @end
-@c2:    P_CN 12
-        P_BR PO_BRNCH, @end
-@c3:    P_CN 13
-        P_BR PO_BRNCH, @end
-@tbl:   .byte 2
-        .word 1
-        .word .loword(@c1 - *)
-        .word 2
-        .word .loword(@c2 - *)
-@dflt:  P_BR PO_BRNCH, @c3
-@end:   P_W PO_SAW, buf+2
-        P_CN 4
         WRITE_BUF
         P_CN 0
         P_OP PO_RET
@@ -274,10 +265,10 @@ n_double:
         rol $0a,x           ; ESTKH
         rts
 """)
-        self.assertEqual(words(r.out), [6, 12])
+        self.assertEqual(words(r.out), [6])
 
     def test_recursion_with_pending_values(self):
-        # return n + f(n - 1) as PLASMA's compiler emits it (LLW; DUP; DECR; CALL; ADD): n waits on
+        # return n + f(n - 1) as PLASMA's compiler emits it (LLW; LLW; SUBI 1; CALL; ADD): n waits on
         # the eval stack across every level, so 120 levels need ENTER's spill to the frame stack (about 7 bytes a level)
         r = self.go("""
 f_rec:  P_FUNC
@@ -287,8 +278,8 @@ f_rec:  P_FUNC
         P_CN 0
         P_B PO_LEAVE, 2
 @r:     P_B PO_LLW, 0
-        P_OP PO_DUP
-        P_OP PO_DECR
+        P_B PO_LLW, 0
+        P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
         P_OP PO_ADD
         P_B PO_LEAVE, 2
@@ -319,7 +310,7 @@ f_two:  P_FUNC
         P_ENTER 2, 1
         P_B PO_LLW, 0
         P_B PO_LLW, 0
-        P_OP PO_INCR
+        P_B PO_ADDI, 1
         P_B PO_LEAVE, 2
 f_main: P_FUNC
         P_CN 1
@@ -376,7 +367,7 @@ f_rec:  P_FUNC
         P_CN 0
         P_B PO_LEAVE, 2
 @r:     P_B PO_LLW, 0
-""" + ("        P_OP PO_DUP\n" if pending else "") + """        P_OP PO_DECR
+""" + ("        P_B PO_LLW, 0\n" if pending else "") + """        P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
 """ + ("        P_OP PO_ADD\n" if pending else "        P_B PO_ADDLW, 0\n") + """        P_B PO_LEAVE, 2
 f_main: P_FUNC
@@ -414,7 +405,7 @@ f_main: P_FUNC
                 if status == 0:
                     self.assertEqual(words(r.out), [66])
         # the 12th push through every guarded op, in a framed function so the local loads work.
-        twelfth = ["P_OP PO_DUP", "P_OP PO_MINUS1", "P_CN 3", "P_B PO_CB, 3", "P_B PO_CFFB, 3", "P_W PO_CW, 3",
+        twelfth = ["P_OP PO_MINUS1", "P_CN 3", "P_B PO_CB, 3", "P_W PO_CW, 3",
                    'P_CS "x"', "P_W PO_LA, buf", "P_B PO_LLA, 0", "P_B PO_LLB, 0", "P_B PO_LLW, 0",
                    "P_W PO_LAB, buf", "P_W PO_LAW, buf"]
         for op in twelfth:
@@ -456,7 +447,7 @@ f_rec:  P_FUNC
         P_CN 0
         P_B PO_LEAVE, 2
 @r:     P_B PO_LLW, 0
-        P_OP PO_DECR
+        P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
         P_B PO_ADDLW, 0
         P_B PO_LEAVE, 2
@@ -494,32 +485,9 @@ f_main: P_FUNC
 """)
         self.assertEqual(r.out, b"0\n469\n32767\n")
 
-    def test_natv_returns_from_the_function(self):
-        # NATV in a function reached by CALL: the native tail's RTS returns to the caller, as
-        # upstream (where the call itself was a JSR)
-        r = self.go("""
-f_nat:  P_FUNC
-        P_OP PO_NATV
-        dex
-        lda #42
-        sta $15,x
-        lda #0
-        sta $0a,x
-        rts
-f_main: P_FUNC
-        P_W PO_CALL, f_nat
-        P_B PO_ADDI, 1
-        P_W PO_SAW, buf
-        P_CN 2
-        WRITE_BUF
-        P_CN 0
-        P_OP PO_RET
-""")
-        self.assertEqual(words(r.out), [43])
-
     def test_plasma_compiler_output(self):
-        # the docs/design/pvm.md benchmark as upstream's compiler emits it (src/pvm/test/bench.s):
-        # the port runs real PLASMA bytecode, not just what these tests hand-write
+        # the docs/design/pvm.md benchmark (src/pvm/test/bench.s, PLASMA's bytecode with its for loops expanded):
+        # a program the VM's authors did not hand-write for the tests
         with open(os.path.join(ROOT, "src", "pvm", "test", "bench.s")) as f:
             bench = f.read()
         r = self.go(bench + """

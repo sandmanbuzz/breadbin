@@ -58,6 +58,7 @@ class Result:
 
 
 PVM_FETCHOP = 0x25                 # the VM's zero-page fetch: LDA IP,Y (src/pvm/pvm.s FETCHOP; IP follows it)
+OPCOV = None                     # a set: collects the p-code opcodes run
 LIB_PAGE = 0xB0                   # where a format 2 program's library is loaded (below argv)
 
 
@@ -331,6 +332,8 @@ def run(prog, args, files=None, limit=40_000_000, path=None, stdin=None, fail_wr
             continue
         if mem[cpu.pc] == 0:
             raise RuntimeError("BRK at $%04X after %d steps" % (cpu.pc, n))
+        if OPCOV is not None and cpu.pc == PVM_FETCHOP:
+            OPCOV.add(mem[(mem[PVM_FETCHOP + 1] + (mem[PVM_FETCHOP + 2] << 8) + cpu.y) & 0xFFFF])
         if profile is None:
             cpu.step()
         else:                            # cycles by image offset: native code by its PC, the VM by the IP

@@ -1,199 +1,150 @@
-; bench.pla compiled by PLASMA's xplasm -AO (upstream f209e30, MIT) and converted from ACME to
-; ca65 syntax mechanically (directives only; the bytes are the compiler's). The module init
-; (_INIT) is left out: tools/test_pvm.py calls main (_C003) itself.
+; bench.pla's bytecode (the docs/design/pvm.md benchmark). It began as PLASMA's xplasm -AO output
+; (upstream f209e30, MIT) and is now written with the P_ macros of pvm.inc: this VM dropped the
+; opcodes the compilers here never emit, so each PLASMA for loop (DLW, INCBRLE) keeps its counter
+; in the local instead of on the eval stack (SLW, then LLW; ADDI 1; SLW; LLW; CB limit; ISLE;
+; BRTRU), INCR is ADDI 1 and DUP a second LLW. The module init (_INIT) is left out:
+; tools/test_pvm.py calls main (_C003) itself.
 _D000:	.res 200
 
 _D001:	.res 20
 
-_C000:
-	jsr pvm_interp
+; sieve: n = 0; for i = 2 to 199: flags[i] = 1; for i = 2 to 199: if flags[i]: n++; j = i + i; ...
+_C000:	P_FUNC
+	P_ENTER 6, 0
+	P_CN 0
+	P_B PO_SLW, 4
+	P_CN 2
+	P_B PO_SLW, 0
+_B002:	P_CN 1
+	P_W PO_LA, _D000
+	P_B PO_ADDLW, 0
+	P_OP PO_SB
+	P_B PO_LLW, 0
+	P_B PO_ADDI, 1
+	P_B PO_SLW, 0
+	P_B PO_LLW, 0
+	P_B PO_CB, 199
+	P_OP PO_ISLE
+	P_BR PO_BRTRU, _B002
+	P_CN 2
+	P_B PO_SLW, 0
+_B005:	P_W PO_LA, _D000
+	P_B PO_ADDLW, 0
+	P_OP PO_LB
+	P_BR PO_BRFLS, _B007
+	P_B PO_LLW, 4
+	P_B PO_ADDI, 1
+	P_B PO_SLW, 4
+	P_B PO_LLW, 0
+	P_B PO_ADDLW, 0
+	P_B PO_SLW, 2
+	P_BR PO_BRNCH, _B011
+_B009:	P_CN 0
+	P_W PO_LA, _D000
+	P_B PO_ADDLW, 2
+	P_OP PO_SB
+	P_B PO_LLW, 2
+	P_B PO_ADDLW, 0
+	P_B PO_SLW, 2
+_B011:	P_B PO_LLW, 2
+	P_B PO_CB, 200
+	P_OP PO_ISLT
+	P_BR PO_BRTRU, _B009
+_B007:	P_B PO_LLW, 0
+	P_B PO_ADDI, 1
+	P_B PO_SLW, 0
+	P_B PO_LLW, 0
+	P_B PO_CB, 199
+	P_OP PO_ISLE
+	P_BR PO_BRTRU, _B005
+	P_B PO_LLW, 4
+	P_B PO_LEAVE, 6
 
-	.byte	$58,$06,$00
-
-	.byte	$00
-	.byte	$76,$04
-	.byte	$2A,$C7
-	.byte	$04
-_B002:
-	.byte	$6E,$00
-
-	.byte	$02
-	.byte	$26
-_F000:	.word .loword(_D000+0)
-	.byte	$B2,$00
-	.byte	$70
-_B003:
-	.byte	$A4
-	.word .loword(_B002-*)
-_B001:
-	.byte	$76,$00
-	.byte	$30
-
-	.byte	$2A,$C7
-	.byte	$04
-_B005:
-	.byte	$6E,$00
-
-	.byte	$26
-_F001:	.word .loword(_D000+0)
-	.byte	$B2,$00
-	.byte	$60
-	.byte	$4C
-	.word .loword(_B007-*)
-	.byte	$66,$04
-	.byte	$8C
-	.byte	$76,$04
-	.byte	$66,$00
-	.byte	$B2,$00
-	.byte	$76,$02
-	.byte	$50
-	.word .loword(_B011-*)
-_B009:
-
-	.byte	$00
-	.byte	$26
-_F002:	.word .loword(_D000+0)
-	.byte	$B2,$02
-	.byte	$70
-	.byte	$66,$02
-	.byte	$B2,$00
-	.byte	$76,$02
-_B011:
-	.byte	$66,$02
-	.byte	$2A,$C8
-	.byte	$46
-	.byte	$4E
-	.word .loword(_B009-*)
-_B010:
-
-_B007:
-_B008:
-
-_B006:
-	.byte	$A4
-	.word .loword(_B005-*)
-_B004:
-	.byte	$76,$00
-	.byte	$30
-
-	.byte	$66,$04
-	.byte	$5A,$06
-
-_C001:
-	jsr pvm_interp
-
-	.byte	$58,$04,$02
-	.byte	$50
-	.word .loword(_B014-*)
-_B012:
-
-	.byte	$66,$00
-	.byte	$66,$02
-	.byte	$44
-	.byte	$4C
-	.word .loword(_B015-*)
-	.byte	$66,$00
-	.byte	$66,$02
-	.byte	$84
-	.byte	$76,$00
-	.byte	$50
-	.word .loword(_B016-*)
-_B015:
-
-	.byte	$66,$02
-	.byte	$66,$00
-	.byte	$84
-	.byte	$76,$02
+; gcd(x, y): while x <> y: if x > y: x = x - y else y = y - x
+_C001:	P_FUNC
+	P_ENTER 4, 2
+	P_BR PO_BRNCH, _B014
+_B012:	P_B PO_LLW, 0
+	P_B PO_LLW, 2
+	P_OP PO_ISGT
+	P_BR PO_BRFLS, _B015
+	P_B PO_LLW, 0
+	P_B PO_LLW, 2
+	P_OP PO_SUB
+	P_B PO_SLW, 0
+	P_BR PO_BRNCH, _B016
+_B015:	P_B PO_LLW, 2
+	P_B PO_LLW, 0
+	P_OP PO_SUB
+	P_B PO_SLW, 2
 _B016:
+_B014:	P_B PO_LLW, 0
+	P_B PO_LLW, 2
+	P_BR PO_BRNE, _B012
+	P_B PO_LLW, 0
+	P_B PO_LEAVE, 4
 
-_B014:
-	.byte	$66,$00
-	.byte	$66,$02
-	.byte	$24
-	.word .loword(_B012-*)
-_B013:
+; sum: for i = 0 to 9: a[i] = i * 3; s = 0; for i = 0 to 9: s = s + a[i]; return s
+_C002:	P_FUNC
+	P_ENTER 4, 0
+	P_CN 0
+	P_B PO_SLW, 0
+_B018:	P_B PO_LLW, 0
+	P_B PO_LLW, 0
+	P_OP PO_IDXW
+	P_W PO_LA, _D001
+	P_B PO_IDXLW, 0
+	P_OP PO_SW
+	P_B PO_LLW, 0
+	P_B PO_ADDI, 1
+	P_B PO_SLW, 0
+	P_B PO_LLW, 0
+	P_B PO_CB, 9
+	P_OP PO_ISLE
+	P_BR PO_BRTRU, _B018
+	P_CN 0
+	P_B PO_SLW, 2
+	P_CN 0
+	P_B PO_SLW, 0
+_B021:	P_B PO_LLW, 2
+	P_W PO_LA, _D001
+	P_B PO_IDXLW, 0
+	P_OP PO_LW
+	P_OP PO_ADD
+	P_B PO_SLW, 2
+	P_B PO_LLW, 0
+	P_B PO_ADDI, 1
+	P_B PO_SLW, 0
+	P_B PO_LLW, 0
+	P_B PO_CB, 9
+	P_OP PO_ISLE
+	P_BR PO_BRTRU, _B021
+	P_B PO_LLW, 2
+	P_B PO_LEAVE, 4
 
-	.byte	$66,$00
-	.byte	$5A,$04
-
-_C002:
-	jsr pvm_interp
-
-	.byte	$58,$04,$00
-	.byte	$12
-	.byte	$00
-_B018:
-	.byte	$6E,$00
-
-	.byte	$66,$00
-	.byte	$34
-	.byte	$9E
-	.byte	$26
-_F003:	.word .loword(_D001+0)
-	.byte	$BA,$00
-	.byte	$72
-_B019:
-	.byte	$A4
-	.word .loword(_B018-*)
-_B017:
-	.byte	$76,$00
-	.byte	$30
-
-	.byte	$00
-	.byte	$76,$02
-	.byte	$12
-	.byte	$00
-_B021:
-	.byte	$6E,$00
-
-	.byte	$66,$02
-	.byte	$26
-_F004:	.word .loword(_D001+0)
-	.byte	$BA,$00
-	.byte	$62
-	.byte	$82
-	.byte	$76,$02
-_B022:
-	.byte	$A4
-	.word .loword(_B021-*)
-_B020:
-	.byte	$76,$00
-	.byte	$30
-
-	.byte	$66,$02
-	.byte	$5A,$04
-
-_C003:
-	jsr pvm_interp
-
-	.byte	$58,$04,$00
-
-	.byte	$54
-_F005:	.word .loword(_C000)
-	.byte	$76,$00
-	.byte	$2A,$14
-	.byte	$02
-_B024:
-	.byte	$6E,$02
-
-	.byte	$66,$00
-	.byte	$66,$02
-	.byte	$0C
-	.byte	$86
-	.byte	$2A,$54
-	.byte	$54
-_F006:	.word .loword(_C001)
-	.byte	$82
-	.byte	$76,$00
-_B025:
-	.byte	$A4
-	.word .loword(_B024-*)
-_B023:
-	.byte	$76,$02
-	.byte	$30
-
-	.byte	$66,$00
-	.byte	$54
-_F007:	.word .loword(_C002)
-	.byte	$82
-	.byte	$5A,$04
+; main: t = sieve(); for k = 1 to 20: t = t + gcd(k * 6, 84); return t + sum()
+_C003:	P_FUNC
+	P_ENTER 4, 0
+	P_W PO_CALL, _C000
+	P_B PO_SLW, 0
+	P_CN 1
+	P_B PO_SLW, 2
+_B024:	P_B PO_LLW, 0
+	P_B PO_LLW, 2
+	P_CN 6
+	P_OP PO_MUL
+	P_B PO_CB, 84
+	P_W PO_CALL, _C001
+	P_OP PO_ADD
+	P_B PO_SLW, 0
+	P_B PO_LLW, 2
+	P_B PO_ADDI, 1
+	P_B PO_SLW, 2
+	P_B PO_LLW, 2
+	P_B PO_CB, 20
+	P_OP PO_ISLE
+	P_BR PO_BRTRU, _B024
+	P_B PO_LLW, 0
+	P_W PO_CALL, _C002
+	P_OP PO_ADD
+	P_B PO_LEAVE, 4
