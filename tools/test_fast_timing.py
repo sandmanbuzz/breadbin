@@ -20,6 +20,7 @@ MOD = os.path.join(ROOT, "build", "mod")
 SRC = os.path.join(ROOT, "src", "mod", "fast.s")
 PB = 0x1800             # the drive's serial port (VIA 1 port B)
 DRV = 0x0300            # where the drive code runs
+OV = 0x0650             # the write overlay (fast.s: OV)
 
 # Write (send) and read (receive) cycles; they mirror SK1..SK5 and RK1..RK5 in src/mod/fast.s
 # (RK5 is the one port write of d_recv). test_constants_mirror_source keeps them in step.
@@ -91,13 +92,15 @@ class Timing(unittest.TestCase):
 
     def mem(self, a):
         """The drive byte at drive address a: the module image holds the code from label blob."""
-        i = self.lbl["blob"] + a - DRV
+        if OV <= a < self.lbl["d_end3"]:   # the write overlay (blob3)
+            i = self.lbl["blob3"] + a - OV
+        else:
+            i = self.lbl["blob"] + a - DRV
         assert 0 <= i < len(self.img), f"drive ${a:04X} is outside the module image"
         return self.img[i]
 
     def need_write_path(self):
-        if "d_rw" not in self.lbl:      # WR=0 in fast.s: the write path is out of the drive blob for now
-            self.skipTest("the write path (d_rw, d_rtab) is not built (WR=0)")
+        pass                            # (the write path is in the overlay, always built)
 
     def table(self, name):
         return [self.mem(self.lbl[name] + n) for n in range(16)]
@@ -177,6 +180,9 @@ class Timing(unittest.TestCase):
             self.assertEqual(l[t] >> 8, (l[t] + 15) >> 8, f"{t} crosses a page")
         self.assertEqual((l["d_end"] - DRV) % 32, 0)
         self.assertLessEqual(l["d_end"] - DRV, 0x200)
+        self.assertEqual((l["d_end3"] - OV) % 32, 0)
+        self.assertGreaterEqual(OV, 0x0645, "the overlay starts inside the first raw sector")
+        self.assertLessEqual(l["d_end3"], 0x078A)
 
 
 if __name__ == "__main__":

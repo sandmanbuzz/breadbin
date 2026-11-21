@@ -36,6 +36,8 @@
 ;   write: drive DATA low and CLK released; host CLK low; host sends 256 bytes and the
 ;          checksum; drive runs the job (the write and a verify), CLK low and DATA
 ;          released ("done"); host DATA low; drive sends status
+; The write code is an overlay at $0650 (second raw sector's room), uploaded by the host on
+; the first write to a drive and dropped when a mode 2 read wants the room (docs/design/fast-io.md 18.15).
 ; ATN at any point makes the drive code leave (that is how the fallback gets through).
 ;
 ; Limits, on purpose: a drive that is switched off and on while mounted has lost the
@@ -53,6 +55,7 @@ A_DAT   = $20
 DRV     = $0300         ; where the drive code runs (buffers 0 and 1)
 DBUF    = $0500         ; buffer 2, the kernel's own "#" buffer: the sector
 D2      = $078a         ; the rest of the drive code
+OV      = $0650         ; the write path, an overlay in the second raw sector's room
 RB2     = DBUF + 325    ; the second raw sector of a pass (to $078A: the rest of buffer 3 and 4, and the BAM's)
 PB      = $1800         ; the drive's serial port (VIA 1 port B)
 OP_RD   = $80           ; the job codes
@@ -79,7 +82,7 @@ wn:     .res 1
 mrb:    .res 2          ; M-R answer
 up:     .res 2          ; upload: drive address
 up2:    .res 1
-rawbuf: .res 325        ; EXPERIMENT: a block as the drive read it off the disk
+rawbuf: .res 325        ; a block as the drive read it off the disk
 g_t:    .res 5
 g_o:    .res 4
 g_c:    .res 1
@@ -92,6 +95,9 @@ ft_ps:  .res 1
 ft_s1:  .res 1          ; the stride of the last request on this track
 ft_nf:  .res 1          ; blocks that fell back to the standard path (tests/test_fast.py reads both)
 ft_ng:  .res 2          ; blocks carried
+ovl:    .res 4          ; per drive: the write overlay is in the drive (a mode 2 pass wipes it)
+ft_wq:  .res 1          ; reads left (after a write) that take no second sector: the overlay lives
+ft_inval: .res 1        ; a write went the standard way: the drive may hold a stale sector
 
 .segment "CODE"
 ; init is refused unless the kernel is loading the module (as cbm.km), and when the call
@@ -172,6 +178,7 @@ ft_close:
         tay
         lda #0
         sta state,y
+        sta ovl,y
         pla
         jmp iec_ch_close
 
@@ -293,6 +300,10 @@ ft_start:
 ; host is busy and the next request is served from it if it was right.
 hint:   lda #0
         sta cmdbuf+14           ; 0: the DOS reads it (the head may be elsewhere)
+        lda ft_wq
+        beq :+
+        dec ft_wq               ; (a guessed sector would wipe the write overlay)
+:
         lda ft_pt
         cmp trk
         bne @new
@@ -314,6 +325,8 @@ hint:   lda #0
         sbc g_h
 @ok:    cmp sct
         beq @upd
+        ldx ft_wq
+        bne @upd                ; writes are about: stay at mode 1
         pha
         jsr senc
         stx cmdbuf+12
@@ -321,6 +334,9 @@ hint:   lda #0
         sta cmdbuf+13
         pla
         inc cmdbuf+14           ; 2: and the guessed one in the same pass
+        ldx ft_i
+        lda #0
+        sta ovl,x               ; (the second sector goes where the write code is)
 @upd:   lda g_x
         sta ft_s1
         jmp @st
@@ -452,7 +468,12 @@ cksum:  pha
         rts
 
 ; ft_read: in place of iec_read (cur_drv, rq_dev, rq_lo/hi, bp as there)
-ft_read: jsr ft_ready
+ft_read: lda ft_inval           ; a write went the standard way: a sector the drive holds may be
+        beq ft_read1            ; stale. Any request drops it: take one and throw the answer away.
+        lda #0
+        sta ft_inval
+        jsr ft_read1
+ft_read1: jsr ft_ready
         bcs @std
         lda #OP_RD
         jsr ft_start
@@ -597,13 +618,17 @@ hdec:   lda #0
         tax
         tya
         bne @g2                 ; 12 more: Y wraps to 0
-        getg rawbuf+256
-        stx g_x                 ; (g_nib uses X)
+        lda g_e
+        bne @bad                ; (the last group's two spare bytes may be torn by the write that
+        getg rawbuf+256         ; made the sector: the data and the checksum have to be whole,
+        stx g_x                 ; and the checksum says so)
         jsr g_g
         ldx g_x
         putg rawbuf+256
-        lda g_e
-        bne @bad
+        lda g_cs                ; (the two spare bytes are not part of the sum)
+        eor rawbuf+258
+        eor rawbuf+259
+        sta g_cs
         lda rawbuf
         cmp #7
         bne @bad
@@ -697,7 +722,14 @@ g_dt:   .byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$08,$00,$01,$ff,$0c,$04,$05,$f
 ft_write:
         jsr ft_ready
         bcs @std
-        lda #OP_WR
+        lda #8
+        sta ft_wq
+        ldx ft_i
+        lda ovl,x
+        bne @have
+        jsr upov
+        bcs @std
+@have:  lda #OP_WR
         jsr ft_start
         bcs @std
         jsr w_clk               ; the drive holds DATA and has let go of CLK: it listens
@@ -726,9 +758,14 @@ ft_write:
         lda ST
         and #$02
         bne @bad
+        lda #0
+        sta ft_pt               ; the head is elsewhere now
+        sta ft_s1
         jmp ft_good
 @bad:   jsr ft_fail
-@std:   jmp iec_write
+@std:   lda #1
+        sta ft_inval
+        jmp iec_write
 
 ; txb: send A to the drive code. Y is preserved; carry set if it was not taken.
 txb:    sty sv_y
@@ -762,6 +799,8 @@ install:
         ldx ft_i
         lda #1
         sta state,x
+        lda #0
+        sta ovl,x
 @out:   lda sv_p4
         sta p4
         lda sv_p4+1
@@ -810,12 +849,12 @@ upload: lda #'0'
         ldx #4
         jsr reserve
         bcc :+
-        jmp @cl
+        jmp up_cl
 :       lda #'1'
         ldx #5
         jsr reserve
         bcc :+
-        jmp @cl
+        jmp up_cl
 :       lda #<blob
         sta p4
         lda #>blob
@@ -828,7 +867,7 @@ upload: lda #'0'
         sta ft_n
         lda #0
         sta up2
-@ch:    lda #'W'
+up_ch:    lda #'W'
         jsr mhead
         lda up
         sta cmdbuf+3
@@ -844,7 +883,7 @@ upload: lda #'0'
         lda #CHUNK+6
         sta cmdlen
         jsr cmd_send
-        bcs @cl
+        bcs up_cl
         clc
         lda p4
         adc #CHUNK
@@ -858,9 +897,9 @@ upload: lda #'0'
         bcc @u
         inc up+1
 @u:     dec ft_n
-        bne @ch
+        bne up_ch
         lda up2
-        bne @done
+        bne up_done
         inc up2
         lda #<blob2
         sta p4
@@ -872,13 +911,48 @@ upload: lda #'0'
         sta up+1
         lda #BLOB2LEN / CHUNK
         sta ft_n
-        jmp @ch
-@done:  jsr cmd_status          ; the drive took every command
-        bcs @cl
+        jmp up_ch
+up_done:  jsr cmd_status          ; the drive took every command
+        bcs up_cl
         rts
-@cl:    lda cur_drv
+up_cl:    lda cur_drv
         jsr unreserve
         sec
+        rts
+
+; upov: put the write path up (the buffers are ours already). Carry set if the bus failed: the
+; drive is left alone from then on.
+upov:   lda p4
+        sta sv_p4
+        lda p4+1
+        sta sv_p4+1
+        lda #<blob3
+        sta p4
+        lda #>blob3
+        sta p4+1
+        lda #<OV
+        sta up
+        lda #>OV
+        sta up+1
+        lda #BLOB3LEN / CHUNK
+        sta ft_n
+        lda #1                  ; (nothing after this part)
+        sta up2
+        jsr up_ch
+        php
+        lda sv_p4
+        sta p4
+        lda sv_p4+1
+        sta p4+1
+        plp
+        bcc @ok
+        jsr ft_dead
+        sec
+        rts
+@ok:    ldx ft_i
+        lda #1
+        sta ovl,x
+        clc
         rts
 
 ; reserve: A = buffer digit, X = secondary. Open "#n" there and see that the drive agreed.
@@ -966,9 +1040,6 @@ RK5 = 62
 .ifndef VERIFY
 VERIFY = 1              ; a verify job of our own after the write job
 .endif
-.ifndef WR
-WR = 0                  ; EXPERIMENT: the write path is out while the raw reader is tried
-.endif
 
 .macro wait n           ; spend n cycles (0, or 2 and up); A, X, Y and the stack are kept
         .assert (n) = 0 .or (n) >= 2, error, "fast.s: a wait of one cycle"
@@ -1040,38 +1111,6 @@ d_send_end:
         bmi d_quit2
         rts
 
-.if WR
-; d_recv: returns the byte in A. Uses A, X. A line is low for a 1.
-; The host has CLK low and we have DATA low; we release DATA when ready, the host
-; releases CLK ("go") and writes the pairs at its cycles 11, 24, 35, 48 and "more" at 61.
-d_recv: lda #0
-        sta PB                  ; ready
-        lda d_expr
-        nop                     ; (time for DATA to rise)
-        nop
-d_rw:   cmp PB                  ; go?                               cycle 0
-        tbr beq, d_rw
-        wait RK1 - 6
-        lda PB                  ; bits 4, 5 on CLK, DATA            RK1
-        asl a
-        wait RK2 - RK1 - 6
-        ora PB                  ; bits 6, 7                         RK2
-        and #$0f
-        tax
-        wait RK3 - RK2 - 8
-        lda PB                  ; bits 3, 1                         RK3
-        asl a
-        wait RK4 - RK3 - 6
-        ora PB                  ; bits 2, 0                         RK4
-        and #$0f
-        ora d_rtab,x
-        ldx #$02
-        stx PB                  ; taken: DATA low                   RK5
-d_recv_end:
-        bit PB
-        bmi d_quit2
-        rts
-.endif
 d_quit2:
         jmp d_quit
 
@@ -1081,19 +1120,7 @@ d_stab:
 .repeat 16, n
         .byte ((~n & 1) << 3) | ((~n & 4) << 0) | ((~n & 2) << 0) | ((~n & 8) >> 3)
 .endrepeat
-.if WR
-; d_rtab: the high nibble from the first two reads (bit 3: 4, bit 2: 6, bit 1: 5, bit 0: 7)
-d_rtab:
-.repeat 16, n
-        .byte ((n & 8) << 1) | ((n & 4) << 4) | ((n & 2) << 4) | ((n & 1) << 7)
-.endrepeat
-.assert >d_stab = >(d_stab + 15), error, "fast.s: d_stab crosses a page"
-.assert >d_rtab = >(d_rtab + 15), error, "fast.s: d_rtab crosses a page"
-.endif
 .assert >d_sw = >d_send_end, error, "fast.s: the timed part of d_send crosses a page"
-.if WR
-.assert >d_rw = >d_recv_end, error, "fast.s: the timed part of d_recv crosses a page"
-.endif
 
 
 ; d_go: the entry (M-E). The command: op, track, sector, T3 T4 (the track as the header spells
@@ -1121,7 +1148,11 @@ d_go:   sei
         sty d_ck
         lda $0205
         cmp #OP_RD
+        beq @rd
+        cmp #OP_WR
         bne d_quit2
+        jmp d_wr
+@rd:
         lda d_kt                ; the sector kept from the last pass, if it is the one asked for
         sty d_kt                ; (it is good for one request)
         cmp $0a
@@ -1209,6 +1240,7 @@ d_quit: ldx d_sp
         cli
         rts                     ; back into the DOS
 
+
 ; d_job: A = job code for buffer 2. Returns its result (1 = good). The disk controller
 ; runs in the drive's interrupt.
 d_job:  sta $02
@@ -1218,7 +1250,7 @@ d_job:  sta $02
         lda $02
         bmi @w
         sei
-        rts
+d_rts:  rts
 
 ; d_cap: take the block whose header holds d_e2/d_e3 and the track's T3/T4, raw (325 bytes), to
 ; where d_setp said. Carry set if it did not come by in two revolutions.
@@ -1355,3 +1387,101 @@ d_end2:
 .reloc
 BLOB2LEN = d_end2 - D2
 .assert BLOB2LEN <= 96, error, "fast.s: the second drive blob outgrew its room"
+
+; ---------------------------------------------------------------------------------------
+; The write path, put in the drive when the first block is written (an overlay: it lives in the
+; second raw sector's room, so a pass that takes a guessed sector (mode 2) wipes it, and the host,
+; which knows when it sent one, puts it up again). A write needs only DBUF.
+.segment "RODATA"
+blob3:
+.org OV
+; d_recv: returns the byte in A. Uses A, X. A line is low for a 1.
+; The host has CLK low and we have DATA low; we release DATA when ready, the host
+; releases CLK ("go") and writes the pairs at its cycles 11, 24, 35, 48 and "more" at 61.
+d_recv: lda #0
+        sta PB                  ; ready
+        lda d_expr
+        nop                     ; (time for DATA to rise)
+        nop
+d_rw:   cmp PB                  ; go?                               cycle 0
+        tbr beq, d_rw
+        wait RK1 - 6
+        lda PB                  ; bits 4, 5 on CLK, DATA            RK1
+        asl a
+        wait RK2 - RK1 - 6
+        ora PB                  ; bits 6, 7                         RK2
+        and #$0f
+        tax
+        wait RK3 - RK2 - 8
+        lda PB                  ; bits 3, 1                         RK3
+        asl a
+        wait RK4 - RK3 - 6
+        ora PB                  ; bits 2, 0                         RK4
+        and #$0f
+        ora d_rtab,x
+        ldx #$02
+        stx PB                  ; taken: DATA low                   RK5
+d_recv_end:
+        bit PB
+        bmi d_oq
+        rts
+
+; d_rtab: the high nibble from the first two reads (bit 3: 4, bit 2: 6, bit 1: 5, bit 0: 7)
+d_rtab:
+.repeat 16, n
+        .byte ((n & 8) << 1) | ((n & 4) << 4) | ((n & 2) << 4) | ((n & 1) << 7)
+.endrepeat
+.assert >d_rtab = >(d_rtab + 15), error, "fast.s: d_rtab crosses a page"
+
+.assert >d_rw = >d_recv_end, error, "fast.s: the timed part of d_recv crosses a page"
+
+; ---- write: the block comes into DBUF (the held sector in RB2 is dropped: the disk changes)
+d_wr:   sty d_kt
+        lda d_exps
+        eor #$05
+        sta d_expr              ; as recv waits: host CLK low, nothing else
+        lda #$02
+        sta PB                  ; listening: DATA low, CLK released
+@c:     lda PB                  ; the host pulls CLK
+        bmi d_oq
+        and #$04
+        beq @c
+@l:     jsr d_recv
+        sta DBUF,y
+        jsr d_cksum
+        iny
+        bne @l
+        jsr d_recv
+        cmp d_ck
+        bne @bad
+        lda #OP_WR
+        jsr d_job
+.if VERIFY
+        cmp #2
+        bcs @st
+        lda #OP_VFY
+        jsr d_job
+.endif
+        .byte $2c               ; bit abs: skip the lda
+@bad:   lda #$ff                ; the data did not arrive whole: nothing was written
+@st:    pha
+        lda #$08
+        sta PB                  ; done: CLK low, DATA released
+        jsr d_rts               ; (time for DATA to rise before we look at it)
+@d:     lda PB                  ; the host pulls DATA
+        bmi d_oq
+        lsr a
+        bcc @d
+        pla
+        jsr d_send
+        jmp d_quit
+
+d_expr: .res 1
+d_oq:   jmp d_quit
+
+        .res (CHUNK - ((* - OV) .mod CHUNK)) .mod CHUNK, 0
+d_end3:
+.reloc
+BLOB3LEN = d_end3 - OV
+.assert OV + BLOB3LEN <= D2, error, "fast.s: the write overlay outgrew its room"
+.assert OV >= RB2, error, "fast.s: the write overlay overlaps the first raw sector"
