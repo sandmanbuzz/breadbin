@@ -477,6 +477,7 @@ class L3aRefused(unittest.TestCase):
 
 
 
+@unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
 class L3b(unittest.TestCase):
     """What the BASIC compiler's code generator needs: bit operations to split an address into
     bytes, pointer difference to make an int of one, and &f with icall to run the code it built."""
