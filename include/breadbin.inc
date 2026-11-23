@@ -49,7 +49,7 @@ r2 = $06
 ; program entry state
 argv = $20          ; pointer to NULL-terminated array of string pointers
 argc = $22
-; $23-$2F free for programs, $30-$3F used by lib.s
+; $23-$2F free for programs, $30-$3F used by the library (src/lib)
 
 ; open flags
 O_RDONLY = $00
