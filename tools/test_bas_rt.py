@@ -71,12 +71,12 @@ HARNESS = r"""
 extern int rt_mark();
 extern int c_ldv(char *p); /* void */
 extern int c_stv(char *p); /* void */
-extern int c_add();
-extern int c_sub();
-extern int c_mul();
-extern int c_div();
-extern int c_int();
-extern int c_fromi(int i);
+extern int c_add(); /* void */
+extern int c_sub(); /* void */
+extern int c_mul(); /* void */
+extern int c_div(); /* void */
+extern int c_int(); /* void */
+extern int c_fromi(int i); /* void */
 extern int c_toi();
 extern int c_cmp();
 extern int c_fmt(char *buf);

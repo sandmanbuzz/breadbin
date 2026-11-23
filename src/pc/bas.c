@@ -24,12 +24,12 @@ extern int rt_go();     /* eval stack and the number stack as the comments there
 extern int rt_ln();     /* compiler only takes their addresses */
 extern int c_ldv(char *p); /* xop 240 void */      /* bas-rt.s, for the mini C: one result each */
 extern int c_stv(char *p); /* xop 246 void */
-extern int c_add();
-extern int c_mul();
-extern int c_div();
-extern int c_int();
+extern int c_add(); /* void */
+extern int c_mul(); /* void */
+extern int c_div(); /* void */
+extern int c_int(); /* void */
 extern int c_toi();
-extern int c_fromi(int i);
+extern int c_fromi(int i); /* void */
 extern int c_cmp();
 extern int c_const(char *buf);
 extern int c_fmt(char *buf);
