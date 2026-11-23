@@ -32,8 +32,9 @@
 ; - no module loader, no cmd, no IINTERP. The VM is a shared library (CX format 3, /lib/pvm): pure
 ;   code, every byte of state in the process's zero page or frame stack; the image starts with the
 ;   library id, which tools/cx.py writes and every importing program carries.
-; The opcode numbers and their semantics are upstream's, so PLASMA's compiler output runs (within
-; the limits in docs/design/pvm.md section 5).
+; The opcode numbers and their semantics are upstream's, but the ops no Breadbin compiler emits
+; were dropped (docs/design/pvm.md, the squish): PLASMA's own output that uses them traps to
+; pvm_overflow (exit 12), as do the other limits in section 5 there.
 
 .include "../../include/breadbin.inc"
 .export pvm_init, pvm_interp
