@@ -162,6 +162,17 @@ class Con80(unittest.TestCase):
             self.feed("\f\x1b=#%dabc\x1bR rev\x1b=  \x1bK\x1bCabc" * 3 + "\x1br\x1bQz\x1b", chunk=chunk)
             self.same()
 
+    def test_stray_cur_vis_toggles_once(self):
+        # c40_show and c40_hide test cur_vis for nonzero (drawn); a stray nonzero value must not make
+        # show toggle a cursor that is already drawn, and hide must leave it canonical 0
+        s, cv = self.sim, self.lab["lastpos"] + 114   # standalone cur_vis: an equate after lastpos (con80.inc BSS tail)
+        self.feed("\f" + "ab")
+        s.call("c80_curshow"); self.model.cursor(); self.same()
+        s.mem.b[cv] = 0x02
+        s.call("c80_curshow"); self.same()                     # already drawn: no toggle
+        s.call("c80_curhide"); self.model.cursor(); self.same()
+        self.assertEqual(s.mem.b[cv], 0)
+
     def test_cursor_is_xor_of_the_half_cell(self):
         s = self.sim
         for text in ("", "ab", "abc", "\n\n\x1b=\x2f\x70xyz"):

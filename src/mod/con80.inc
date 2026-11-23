@@ -247,12 +247,16 @@ c80_curhide:
         .byte $24               ; bit zp: skip the sec
 c80_curshow:
         sec
-; c80_cur: C = wanted state; toggles only when cur_vis (0 / 1) + C = 1
+; c80_cur: C = wanted state; toggles only when drawn + C = 1. cur_vis is drawn when nonzero (c40_show
+; tests it so); a toggle writes it back as 0 or 1, so a stray value can never flip the cursor twice
 c80_cur:
+        php                     ; C is the wanted state; kept for the write at the end
         lda cur_vis
-        adc #0
+        beq @z
+        lda #1
+@z:     adc #0
         lsr a
-        bcc clrr
+        bcc cur_none
 tog:    jsr cellp
         sta nl
         ldy #7
@@ -261,10 +265,13 @@ tog:    jsr cellp
         sta (dp),y
         dey
         bpl @l
-        lda cur_vis
-        eor #1
+        plp
+        lda #0
+        adc #0                  ; the wanted state, as 0 or 1
         sta cur_vis
-@r:     rts
+        rts
+cur_none: plp
+        rts
 
 ; cellp: dp = the cell of (COLD, ROWD); carry = odd column; A = the half's pixel mask ($f0 / $0f)
 cellp:  lda ROWD
