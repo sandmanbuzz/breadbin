@@ -43,12 +43,13 @@ pvm_main:
         lda #<fstk_end
         ldy #>fstk_end
         jsr pvm_init
-        jsr f_main
+        jsr start_main
         stx $3a             ; the eval stack index after main returned
         tsx
         stx $3b             ; the 6502 stack pointer
         lda #0
         jmp SYS_EXIT
+start_main: P_START f_main
 ; write(1, buf, n): n on the eval stack
 .macro WRITE_BUF
         P_W PO_SAW, r1
@@ -63,7 +64,7 @@ pvm_main:
 
 # pdec(n): write n (0-32767) in decimal and a newline to fd 1, in bytecode; returns write's result
 PDEC = """
-f_pdec: P_FUNC
+f_pdec:
         P_ENTER 4, 1            ; 0: n, 2: i, the next digit's index in buf
         P_B PO_CB, 10
         P_W PO_LA, buf+8
@@ -144,7 +145,7 @@ class PVM(unittest.TestCase):
     def test_loop(self):
         # sum = 0; for i = 1 to 100: sum += i
         r = self.go("""
-f_main: P_FUNC
+f_main:
         P_ENTER 4, 0
         P_CN 0
         P_B PO_SLW, 0
@@ -173,7 +174,7 @@ f_main: P_FUNC
         # rec(n) = n ? rec(n - 1) + n : 0; 200 levels need 800 bytes of 6502 stack upstream. The
         # call comes first, so no caller value waits on the eval stack (11 deep) across it
         r = self.go("""
-f_rec:  P_FUNC
+f_rec:
         P_ENTER 2, 1
         P_B PO_LLW, 0
         P_BR PO_BRTRU, @r
@@ -184,7 +185,7 @@ f_rec:  P_FUNC
         P_W PO_CALL, f_rec
         P_B PO_ADDLW, 0
         P_B PO_LEAVE, 2
-f_main: P_FUNC
+f_main:
         P_B PO_CB, 200
         P_W PO_CALL, f_rec
         P_W PO_SAW, buf
@@ -205,7 +206,7 @@ f_main: P_FUNC
                ("1", "0", "PO_SHL", 1), ("1", "8", "PO_SHL", 256), ("3", "15", "PO_SHL", -32768),
                ("1", "17", "PO_SHL", 0), ("-32768", "0", "PO_SHR", -32768), ("-1", "15", "PO_SHR", -1),
                ("$4000", "14", "PO_SHR", 1), ("12345", "9", "PO_SHR", 24), ("-12345", "9", "PO_SHR", -25)]
-        body = "f_main: P_FUNC\n"
+        body = "f_main:\n"
         for i, (a, b, op, _) in enumerate(ops):
             body += f"        P_W PO_CW, {a}\n        P_W PO_CW, {b}\n        P_OP {op}\n        P_W PO_SAW, buf+{2 * i}\n"
         body += f"        P_CN {2 * len(ops)}\n" if 2 * len(ops) < 16 else f"        P_B PO_CB, {2 * len(ops)}\n"
@@ -217,7 +218,7 @@ f_main: P_FUNC
         # x / 0 and x % 0 are 0 whatever the sign of x (the divide-by-zero rule cc.py and cc_pcode.py follow)
         ops = [("5", "0", "PO_DIV", 0), ("-5", "0", "PO_DIV", 0), ("0", "0", "PO_DIV", 0),
                ("5", "0", "PO_MOD", 0), ("-5", "0", "PO_MOD", 0)]
-        body = "f_main: P_FUNC\n"
+        body = "f_main:\n"
         for i, (a, b, op, _) in enumerate(ops):
             body += f"        P_W PO_CW, {a}\n        P_W PO_CW, {b}\n        P_OP {op}\n        P_W PO_SAW, buf+{2 * i}\n"
         body += f"        P_B PO_CB, {2 * len(ops)}\n"
@@ -229,7 +230,7 @@ f_main: P_FUNC
         # a value under the call survives (asim trashes $08-$1F on every syscall); a bad fd gives
         # -1 and the errno; a string constant is written
         r = self.go("""
-f_main: P_FUNC
+f_main:
         P_W PO_CW, 1234
         P_CS "hi"
         P_CS "hi"
@@ -258,9 +259,9 @@ f_main: P_FUNC
     def test_native_call(self):
         # CALL to a native routine (doubles TOS)
         r = self.go("""
-f_main: P_FUNC
+f_main:
         P_CN 3
-        P_W PO_CALL, n_double
+        P_W PO_NCAL, n_double
         P_W PO_SAW, buf
         P_CN 2
         WRITE_BUF
@@ -277,7 +278,7 @@ n_double:
         # return n + f(n - 1) as PLASMA's compiler emits it (LLW; LLW; SUBI 1; CALL; ADD): n waits on
         # the eval stack across every level, so 120 levels need ENTER's spill to the frame stack (about 7 bytes a level)
         r = self.go("""
-f_rec:  P_FUNC
+f_rec:
         P_ENTER 2, 1
         P_B PO_LLW, 0
         P_BR PO_BRTRU, @r
@@ -289,7 +290,7 @@ f_rec:  P_FUNC
         P_W PO_CALL, f_rec
         P_OP PO_ADD
         P_B PO_LEAVE, 2
-f_main: P_FUNC
+f_main:
         P_W PO_CW, 1000
         P_B PO_CB, 120
         P_W PO_CALL, f_rec
@@ -307,18 +308,18 @@ f_main: P_FUNC
         # PLASMA's #0 and #2 functions: four pending values force a spill at ENTER; LEAVE must put
         # them back under however many results there are (go() checks the depth afterwards)
         r = self.go("""
-f_none: P_FUNC
+f_none:
         P_ENTER 2, 1
         P_B PO_LLW, 0
         P_W PO_SAW, buf+2
         P_B PO_LEAVE, 2
-f_two:  P_FUNC
+f_two:
         P_ENTER 2, 1
         P_B PO_LLW, 0
         P_B PO_LLW, 0
         P_B PO_ADDI, 1
         P_B PO_LEAVE, 2
-f_main: P_FUNC
+f_main:
         P_CN 1
         P_CN 2
         P_CN 3
@@ -353,9 +354,9 @@ f_main: P_FUNC
         # next call traps with ENOMEM instead of running on
         with tempfile.TemporaryDirectory(prefix="pvm-") as d:
             r = build_run("""
-f_main: P_FUNC
+f_main:
 @lp:    P_CN 1
-        P_W PO_CALL, @lp - 3
+        P_W PO_CALL, @lp
         P_OP PO_RET
 """, d)
         self.assertEqual(r.exit, 12)
@@ -366,7 +367,7 @@ f_main: P_FUNC
         for depth, pending in ((250, False), (200, True)):
             with self.subTest(depth=depth, pending=pending), tempfile.TemporaryDirectory(prefix="pvm-") as d:
                 r = build_run("""
-f_rec:  P_FUNC
+f_rec:
         P_ENTER 2, 1
         P_B PO_LLW, 0
         P_BR PO_BRTRU, @r
@@ -376,7 +377,7 @@ f_rec:  P_FUNC
 """ + ("        P_B PO_LLW, 0\n" if pending else "") + """        P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
 """ + ("        P_OP PO_ADD\n" if pending else "        P_B PO_ADDLW, 0\n") + """        P_B PO_LEAVE, 2
-f_main: P_FUNC
+f_main:
         P_CN 1
         P_CN 2
         P_CN 3
@@ -397,7 +398,7 @@ f_main: P_FUNC
         # one expression 11 entries deep (the whole eval stack) runs; a 12th push exits with ENOMEM
         # at the push. Unguarded, the 12th wrapped and the adds came back in range with wrong values
         for depth, status in ((11, 0), (12, 12)):
-            body = "f_main: P_FUNC\n" + "".join("        P_CN %d\n" % (i % 16) for i in range(1, depth + 1))
+            body = "f_main:\n" + "".join("        P_CN %d\n" % (i % 16) for i in range(1, depth + 1))
             body += "        P_OP PO_ADD\n" * (depth - 1) + """
         P_W PO_SAW, buf
         P_CN 2
@@ -415,7 +416,7 @@ f_main: P_FUNC
                    'P_CS "x"', "P_W PO_LA, buf", "P_B PO_LLA, 0", "P_B PO_LLW, 0",
                    "P_W PO_LAW, buf"]
         for op in twelfth:
-            body = "f_main: P_FUNC\n        P_ENTER 2, 0\n" + "        P_CN 1\n" * 11
+            body = "f_main:\n        P_ENTER 2, 0\n" + "        P_CN 1\n" * 11
             # the DROP brings a wrapped index back in range, so LEAVE's check cannot stand in
             body += "        %s\n        P_OP PO_DROP\n        P_B PO_LEAVE, 2\n" % op
             with self.subTest(op=op), tempfile.TemporaryDirectory(prefix="pvm-") as d:
@@ -423,9 +424,9 @@ f_main: P_FUNC
         # LEAVE after ENTER spilled 8 pending entries: 3 results fit above them, a 4th would be a
         # 12th entry, and the shift used to write it into page 1 ($0109/$0114) before any trap
         for nres, status in ((3, 0), (4, 12)):
-            body = "f_res: P_FUNC\n        P_ENTER 2, 0\n" + "".join(
+            body = "f_res:\n        P_ENTER 2, 0\n" + "".join(
                 "        P_W PO_CW, $%02X%02X\n" % (0x70 + i, 0x70 + i) for i in range(nres))
-            body += "        P_B PO_LEAVE, 2\nf_main: P_FUNC\n" + "        P_CN 1\n" * 8
+            body += "        P_B PO_LEAVE, 2\nf_main:\n" + "        P_CN 1\n" * 8
             body += "        P_W PO_CALL, f_res\n" + "        P_OP PO_DROP\n" * (8 + nres)
             body += "        P_CN 0\n        P_OP PO_RET\n"
             with self.subTest(results=nres), tempfile.TemporaryDirectory(prefix="pvm-") as d:
@@ -435,8 +436,8 @@ f_main: P_FUNC
         # a callee that pops past empty traps at LEAVE whether or not ENTER spilled: with k
         # entries spilled, X - k used to land back in range and the caller lost one silently
         for k in (0, 4, 8, 11):
-            body = "f_res: P_FUNC\n        P_ENTER 2, 0\n        P_OP PO_DROP\n        P_B PO_LEAVE, 2\n"
-            body += "f_main: P_FUNC\n" + "        P_CN 1\n" * k + "        P_W PO_CALL, f_res\n"
+            body = "f_res:\n        P_ENTER 2, 0\n        P_OP PO_DROP\n        P_B PO_LEAVE, 2\n"
+            body += "f_main:\n" + "        P_CN 1\n" * k + "        P_W PO_CALL, f_res\n"
             body += "        P_OP PO_DROP\n" * k + "        P_CN 0\n        P_OP PO_RET\n"
             with self.subTest(popped_under=k), tempfile.TemporaryDirectory(prefix="pvm-") as d:
                 self.assertEqual(build_run(body, d).exit, 12)
@@ -446,7 +447,7 @@ f_main: P_FUNC
         # the native-entry marker and 5 a level (return IP, spill count, 2-byte frame). 204 levels
         # (rec(203) down to rec(0)) take 1,022 of the 1,024 bytes and run; one more level traps
         body = """
-f_rec:  P_FUNC
+f_rec:
         P_ENTER 2, 1
         P_B PO_LLW, 0
         P_BR PO_BRTRU, @r
@@ -457,7 +458,7 @@ f_rec:  P_FUNC
         P_W PO_CALL, f_rec
         P_B PO_ADDLW, 0
         P_B PO_LEAVE, 2
-f_main: P_FUNC
+f_main:
         P_W PO_CW, %d
         P_W PO_CALL, f_rec
         P_W PO_SAW, buf
@@ -478,7 +479,7 @@ f_main: P_FUNC
     def test_pdec(self):
         # the decimal printer tests/test_pvm_machine.py uses on the C64
         r = self.go(PDEC + """
-f_main: P_FUNC
+f_main:
         P_CN 0
         P_W PO_CALL, f_pdec
         P_OP PO_DROP
@@ -497,7 +498,7 @@ f_main: P_FUNC
         with open(os.path.join(ROOT, "src", "pvm", "test", "bench.s")) as f:
             bench = f.read()
         r = self.go(bench + """
-f_main: P_FUNC
+f_main:
         P_W PO_CALL, _C003
         P_W PO_SAW, buf
         P_CN 2

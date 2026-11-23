@@ -209,7 +209,7 @@ OPTBL:  .word CN,CN,CN,CN,CN,CN,CN,CN                           ; 00 02 04 06 08
         .word MINUS1,BREQ,BRNE,LA,LLA,CB,CW,CS                  ; 20 22 24 26 28 2A 2C 2E
         .word DROP,BAD,BAD,BAD,ADDI,SUBI,BAD,BAD        ; 30 32 34 36 38 3A 3C 3E
         .word ISEQ,ISNE,ISGT,ISLT,BAD,BAD,BRFLS,BRTRU         ; 40 42 44 46 48 4A 4C 4E
-        .word BRNCH,BAD,CALL,ICAL,ENTER,LEAVE,RET,BAD          ; 50 52 54 56 58 5A 5C 5E
+        .word BRNCH,NCAL,CALL,ICAL,ENTER,LEAVE,RET,BAD          ; 50 52 54 56 58 5A 5C 5E
         .word LB,LW,BAD,LLW,BAD,LAW,BAD,BAD                     ; 60 62 64 66 68 6A 6C 6E
         .word SB,SW,BAD,SLW,BAD,SAW,BAD,BAD                     ; 70 72 74 76 78 7A 7C 7E
         .word BAD,ADD,SUB,MUL,DIV,MOD,BAD,BAD                     ; 80 82 84 86 88 8A 8C 8E
@@ -644,7 +644,7 @@ BRNCH:  tya                     ; flatten IP
         jmp FETCHOP
 
 ; ---- calls ----
-; pvm_interp: the header of every bytecode function is JSR pvm_interp. Reached from native code:
+; pvm_interp: the entry of bytecode from native code (JSR pvm_interp, P_FUNC; a bytecode function itself starts at its ENTER):
 ; push the native-return marker (high byte 0) and run the bytecode after the JSR.
 pvm_interp:
         lda #2
@@ -662,19 +662,24 @@ pvm_interp:
         ldy #0
         jmp FETCHOP
 
-CALL:   iny
+NCAL:   sec                     ; native code (it can be reached by nothing else: no header)
+        .byte $24               ; BIT zp: the clc is skipped
+CALL:   clc                     ; a bytecode function: it starts at its ENTER
+        iny
         lda (IP),y
         sta TMP
         iny
         lda (IP),y
         sta TMP+1
         jmp CALLTMP
-ICAL:   lda ESTKL,x
+ICAL:   lda ESTKL,x             ; bytecode
         sta TMP
         lda ESTKH,x
         sta TMP+1
         inx
-CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
+        clc
+CALLTMP: php
+        cpx #ESDEPTH + 1        ; the eval stack wrapped: trap (see RET)
         bcs pvm_overflow
         tya                     ; IP = the next op
         sec
@@ -682,12 +687,8 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
         sta IP
         bcc :+
         inc IP+1
-:       ldy #2                  ; a bytecode function starts with JSR pvm_interp
-@hd:    lda (TMP),y
-        cmp @jsr,y
-        bne @native
-        dey
-        bpl @hd
+:       plp
+        bcs @native
         lda #2                  ; push the return IP on the frame stack
         jsr fsalloc
         ldy #0
@@ -696,16 +697,12 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
         iny
         lda IP+1
         sta (IFP),y
-        lda TMP                 ; run the bytecode after the header
-        clc
-        adc #3
+        lda TMP                 ; run the function
         sta IP
         lda TMP+1
-        adc #0
         sta IP+1
         ldy #0
         jmp FETCHOP
-@jsr:   jsr pvm_interp          ; (data: what a bytecode function starts with)
 @native: lda IP+1
         pha
         lda IP

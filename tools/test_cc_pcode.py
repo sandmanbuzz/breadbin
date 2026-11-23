@@ -535,14 +535,13 @@ class L3b(unittest.TestCase):
                    b"HH", 37)
 
     def test_icall_runs_code_built_at_run_time(self):
-        # what RUN does: the JSR pvm_interp header copied from a function of the program, then
-        # bytecode: CALL h; CB 5; ADD; RET (PO_CALL $54, PO_CB $2A, PO_ADD $82, PO_RET $5C)
+        # what RUN does: bytecode built in a buffer and run by icall: CALL h; CB 5; ADD; RET
+        # (PO_CALL $54, PO_CB $2A, PO_ADD $82, PO_RET $5C)
         self.check('char buf[16];\n'
                    'int h() { puts("H"); return 7; }\n'
                    'int main() { char *z = 0; char *p = &h; int a = p - z; int i;\n'
-                   '  for (i = 0; i < 3; i = i + 1) buf[i] = p[i];\n'
-                   '  buf[3] = 84; buf[4] = a; buf[5] = a >> 8; buf[6] = 42; buf[7] = 5; buf[8] = 130;'
-                   ' buf[9] = 92;\n'
+                   '  buf[0] = 84; buf[1] = a; buf[2] = a >> 8; buf[3] = 42; buf[4] = 5; buf[5] = 130;'
+                   ' buf[6] = 92;\n'
                    '  return icall(buf); }', b"H", 12)
 
     def test_isatty_is_one_or_zero(self):

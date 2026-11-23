@@ -1396,7 +1396,7 @@ ret0:   lda #0
         sta P_ESTKH,x
         rts
 
-; c_opw(b, w): an op with a word operand. c_ncall(f): CALL f (84), after which the return has
+; c_opw(b, w): an op with a word operand. c_ncall(f): NCAL f (82), after which the return has
 ; reset Y. 0.
 c_opw:  lda #3
         jsr roomb
@@ -1407,7 +1407,7 @@ c_opw:  lda #3
         jmp ret0
 c_ncall: lda #3
         jsr roomb
-        lda #84
+        lda #82
         jsr emitb
         jsr word
         lda #0

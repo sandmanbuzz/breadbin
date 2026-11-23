@@ -289,8 +289,14 @@ int list(int a, int b) {
    cc_pcode's op()). No line reaches it today: each starts with CALL rt_ln and 160 characters
    compile to under 240 bytes between calls; it is kept so that a new statement cannot break Y. */
 
+int pcall(char *f) {    /* CALL f, a bytecode function (c_ncall is for the natives) */
+    c_opw(84 /* PO_CALL */, f - nul);
+    straight = 0;
+    return 0;
+}
+
 int ecall(char *f) {    /* CALL f, DROP its result */
-    c_ncall(f);
+    pcall(f);
     return c_op1(48 /* PO_DROP */);
 }
 
@@ -304,15 +310,6 @@ int pushint(int v) {    /* the int v (0 to 32767) on the eval stack */
     return c_opw(44 /* PO_CW */, v);
 }
 
-int begin() {           /* a bytecode function's header: JSR pvm_interp, as main's */
-    char *m = &main;
-    c_emit(m[0]);
-    c_emit(m[1]);
-    c_emit(m[2]);
-    straight = 0;
-    return 0;
-}
-
 int finish() {
     c_room(2);
     c_emit(0 /* PO_CN 0 */);
@@ -322,7 +319,6 @@ int finish() {
 
 int prologue() {        /* the entry of a run: an error comes back here (rt_mark then gives 1),
                            and the run returns */
-    begin();
     c_ncall(&rt_mark);
     c_opw(76 /* PO_BRFLS */, 4);  /* to the body, past the CN 0 and RET */
     return finish();
@@ -861,7 +857,7 @@ int nexts() {           /* NEXT [v [, w ...]] */
             if (vint) c_fail(1);
         }
         c_opw(44 /* PO_CW */, a);
-        c_ncall(&rt_next);
+        pcall(&rt_next);
         c_ncall(&rt_go);
         c_sp();
         if (!c_tok(',')) return 0;
@@ -892,7 +888,7 @@ int stmt() {
         return 0;
     }
     if (c_tok(146 /* tk RETURN */)) {
-        c_ncall(&rt_return);
+        pcall(&rt_return);
         return c_ncall(&rt_go);
     }
     if (c_tok(132 /* tk FOR */)) return fors();

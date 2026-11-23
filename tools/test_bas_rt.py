@@ -217,12 +217,12 @@ class Numbers(unittest.TestCase):
     TK = """
 .export tk
 tk:     P_FUNC
-        P_W PO_CALL, rt_mark
+        P_W PO_NCAL, rt_mark
         P_BR PO_BRTRU, @err
         P_OP PO_ICAL
         P_OP PO_RET
 @err:   P_OP PO_DROP
-        P_W PO_CALL, c_err
+        P_W PO_NCAL, c_err
         P_B PO_ADDI, 100
         P_OP PO_RET
 """

@@ -110,9 +110,12 @@ start:{xinit}  lda #<(cc_fstk{xoff})
         lda #<cc_fend
         ldy #>cc_fend
         jsr pvm_init
-        jsr fn_main
+        jsr @call
         lda P_ESTKL,x
         jmp SYS_EXIT
+@call:  jsr pvm_interp          ; the one native entry into bytecode: main starts at its ENTER
+        P_W PO_CALL, fn_main
+        P_OP PO_RET
 """
 
 # native helpers, called with CALL: X is the eval stack index (TOS at X, the one under it at X+1)
@@ -232,7 +235,7 @@ class PGen(cc.Gen):
         self.straight += size
         if macro == "P_BR":
             self.straight = 0 if args[0] == "PO_BRNCH" else min(self.straight, 130)
-        elif macro == "P_W" and args[0] == "PO_CALL":
+        elif macro == "P_W" and args[0] in ("PO_CALL", "PO_NCAL"):
             self.straight = 0
 
     def const(self, v):
@@ -248,7 +251,7 @@ class PGen(cc.Gen):
 
     def helper(self, name):
         self.use(name)
-        self.op("P_W", "PO_CALL", name)
+        self.op("P_W", "PO_NCAL", name)
 
     def use(self, name):
         self.helpers.add(name)
@@ -304,7 +307,6 @@ class PGen(cc.Gen):
         lbl = "fn_" + name
         self.claim(lbl, line)
         self.lab(lbl)
-        self.ins("P_FUNC")
         self.op("P_ENTER", f"FS_{name}", len(params))
         for base, ptr, pname, pline in params:
             v = self.declare(pname, base, ptr, None, pline)
@@ -765,7 +767,7 @@ class PGen(cc.Gen):
             self.op("P_OP", self.xcalls[name])
             self.straight = 0               # the VM renormalises IP after an XOP, as after a CALL
         else:
-            self.op("P_W", "PO_CALL", name if name in self.externs else "fn_" + name)
+            self.op("P_W", "PO_NCAL", name) if name in self.externs else self.op("P_W", "PO_CALL", "fn_" + name)
         self.pop(len(args))
         self.push()
 

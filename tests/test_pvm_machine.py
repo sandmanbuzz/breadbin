@@ -20,7 +20,7 @@ from tests import test_compiled  # noqa: E402
 
 # PLASMA's compiler output for the benchmark (docs/design/pvm.md section 3): 469
 BENCH = open(os.path.join(ROOT, "src", "pvm", "test", "bench.s")).read() + """
-f_main: P_FUNC
+f_main:
         P_W PO_CALL, _C003
         P_W PO_CALL, f_pdec
         P_OP PO_RET
@@ -28,7 +28,7 @@ f_main: P_FUNC
 
 # n + f(n - 1), 120 deep, under a pending 1000: ENTER spills at every level
 REC = """
-f_rec:  P_FUNC
+f_rec:
         P_ENTER 2, 1
         P_B PO_LLW, 0
         P_BR PO_BRTRU, @r
@@ -40,7 +40,7 @@ f_rec:  P_FUNC
         P_W PO_CALL, f_rec
         P_OP PO_ADD
         P_B PO_LEAVE, 2
-f_main: P_FUNC
+f_main:
         P_W PO_CW, 1000
         P_B PO_CB, %d
         P_W PO_CALL, f_rec
@@ -53,7 +53,7 @@ f_main: P_FUNC
 # sleeps 30,000 ticks (over 8 minutes), then prints 1: something to share the library with
 SLP = """
 SYSN_SLEEP = (SYS_SLEEP - SYS_BASE) / 3
-f_main: P_FUNC
+f_main:
         P_W PO_CW, 30000
         P_SYS SYSN_SLEEP
         P_OP PO_DROP
@@ -65,7 +65,7 @@ f_main: P_FUNC
 # exec(path) with no argv; prints 1 only if exec came back
 EXEC = """
 SYSN_SPAWN = (SYS_SPAWN - SYS_BASE) / 3
-f_main: P_FUNC
+f_main:
         P_W PO_LA, path
         P_W PO_SAW, r0
         P_CN 0

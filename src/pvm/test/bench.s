@@ -9,7 +9,7 @@ _D000:	.res 200
 _D001:	.res 20
 
 ; sieve: n = 0; for i = 2 to 199: flags[i] = 1; for i = 2 to 199: if flags[i]: n++; j = i + i; ...
-_C000:	P_FUNC
+_C000:
 	P_ENTER 6, 0
 	P_CN 0
 	P_B PO_SLW, 4
@@ -61,7 +61,7 @@ _B007:	P_B PO_LLW, 0
 	P_B PO_LEAVE, 6
 
 ; gcd(x, y): while x <> y: if x > y: x = x - y else y = y - x
-_C001:	P_FUNC
+_C001:
 	P_ENTER 4, 2
 	P_BR PO_BRNCH, _B014
 _B012:	P_B PO_LLW, 0
@@ -85,7 +85,7 @@ _B014:	P_B PO_LLW, 0
 	P_B PO_LEAVE, 4
 
 ; sum: for i = 0 to 9: a[i] = i * 3; s = 0; for i = 0 to 9: s = s + a[i]; return s
-_C002:	P_FUNC
+_C002:
 	P_ENTER 4, 0
 	P_CN 0
 	P_B PO_SLW, 0
@@ -125,7 +125,7 @@ _B021:	P_B PO_LLW, 2
 	P_B PO_LEAVE, 4
 
 ; main: t = sieve(); for k = 1 to 20: t = t + gcd(k * 6, 84); return t + sum()
-_C003:	P_FUNC
+_C003:
 	P_ENTER 4, 0
 	P_W PO_CALL, _C000
 	P_B PO_SLW, 0
