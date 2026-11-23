@@ -1,0 +1,320 @@
+# L0: the p-code VM (E1, `docs/roadmap.md`)
+
+Status: L0 landed 2026-11-18 (decision, and the port running under the host simulator); L1 in
+progress: speed measured, frame stack bounded (§3, §6). The owner's direction (roadmap E1): a compact p-code VM,
+not an LLVM-like toolchain scaled down; the BASIC and the mini C compile to it; memory is king,
+I/O second; fixed point in the MVP, floating point allowed for and not committed.
+
+## 1. Constraints the VM must live inside
+
+- **Zero page.** A program owns `$23–$2F` (13 bytes, `src/prog.cfg`); `$30–$3F` belongs to the
+  user library (`src/lib/lib.inc`) only when the program links it; `$02–$07` are `r0–r2`, the
+  syscall arguments; `$08–$1F` is kernel syscall scratch, saved per process, clobbered only by
+  this process's own syscalls (the IRQ path does not touch it). All of `$02–$3F` is saved per
+  process (`ZPSAVE`). `$40–$5F` is the kernel's; `$60–$8F` is free but **not** saved per process,
+  so a second VM process would trample it. Extending the save is not free: the slot page holds
+  `SAVESZ` = 190 bytes of zero page and stack, the cwd at 192 and the name at 240 (2 spare
+  bytes), and the owner has ruled out zero page as kernel room.
+- **Stack.** 128 bytes are saved per process (`STKSAVE`). A VM that keeps a return address per
+  bytecode call level on the 6502 stack runs out at about 30 levels, less with native calls.
+- **Programs are CX images**, linked twice (`%S` = `$0000` and `$0100`) and turned into a
+  relocatable file by `tools/cx.py`. Anything the VM's bytecode contains that is an address must
+  be emitted as a ca65 `.word` so the relocation sees it.
+- **Syscalls** are `jsr SYS_name` at `$CF00 + 3n`, arguments in A, X, Y and `r0–r2`.
+- **Space.** The pool is 155 pages and stays there; per-program VM copies are acceptable for L1,
+  a shared copy is E2's job (SL1–SL3).
+
+## 2. Candidates
+
+| | What it is | Licence | Verdict |
+|---|---|---|---|
+| SWEET16 (Wozniak, 1977) | 16 registers in zero page, ~300-byte interpreter | Apple; unclear | ideas only. Register machine: 32 ZP bytes we do not have, and expression code is longer than on a stack machine. |
+| UCSD p-System (I.5 / II / Apple Pascal) | stack machine, byte-coded, segments, reals, sets, strings | the 2006 source release is non-commercial only; the Apple interpreter is proprietary | **design reference only.** Proven and documented to the last opcode, but a usable interpreter would be a clean-room write, and the ISA brings the p-System's segment, set and string machinery with it. Worth keeping: code segments loaded on demand (an overlay model for E2), and its opcode list as a coverage check. |
+| PLASMA (David Schmenk) | stack machine, even-numbered byte opcodes, split 16-deep eval stack in ZP, frame stack, `NATV` escape to native code; compiler in C and self-hosted | MIT | **adopt the ISA and the VM, ported** (§4). |
+| Lawless Legends (extended PLASMA) | PLASMA plus game-specific extensions | Apache-2.0 | ideas only; code only if backed into a corner, the owner's call. |
+| MS BASIC-M6502 v1.1 (Microsoft, 1978) | the BASIC interpreter, with its tokenizer, number I/O and FP package | MIT | **the L3 source**: tokenizer, `PRINT`/`INPUT` number formatting, and the FP package when floating point comes. Not a VM. |
+
+UCSD was the owner's addition and gets a fair hearing: the reason to throw it back out is not
+quality but cost. Its value is the interpreter plus the p-System around it; we would get neither
+(licence), and a clean-room interpreter for its ISA would be larger than PLASMA's 2.2 KB for no
+measured gain in density. If L1 turns up a density or speed problem PLASMA cannot fix, the UCSD
+opcode set is the first place to look.
+
+## 3. Measurements (the same benchmark through each compiler, 2026-11-18)
+
+Sieve of 1,000, recursive gcd, a sum loop, and a `main` that calls them. Code bytes, excluding
+each runtime unless said:
+
+| Compiler | sieve | gcd | sum | main | total | runtime |
+|---|---|---|---|---|---|---|
+| PLASMA (`xplasm -AO`, bytecode) | 83 | 42 | 51 | 47 | **223** | VM 2,226 bytes; +3 bytes per function entry |
+| cc65 `-Oirs` (native) | 247 | 106 | 188 | 106 | 647 | cc65 runtime not counted |
+| `tools/cc.py` (native, ours) | 699 | 212 | 494 | 300 | 1,705 | 501 |
+| `tools/cc.py --pcode` (bytecode, ours, L3a) | 114 | 48 | 78 | 59 | 299 | the VM; 23 bytes of native entry, and no native helper in this program |
+
+PLASMA bytecode is 2.9 times as dense as cc65 and 7.6 times as dense as `cc.py`. `cc.py --pcode`
+is 1.3 times PLASMA's size and 5.7 times as dense as its own native output: the gap to PLASMA is
+the frame set-up every function pays and the `NEG` after a compare whose value is used (the VM's
+compares give -1 for true, and C's is 1; since L3a a compare that only decides a branch has no
+`NEG`, which took L2's 306 bytes to 299 and its 623,913 cycles to 576,337). The VM pays for itself after about 2 KB of `cc.py`
+output, which the shell's own utilities exceed; once it is shared (E2) it pays from the first
+program.
+
+**Speed** (L1), 6502 cycles for the whole benchmark, each less an empty program's under the same
+harness (`python3 tools/pvm_bench.py`, which prints these and checks every result is 469, for
+cc65 only its low byte, the exit status being 8 bits; C
+source `src/pvm/test/bench.c`):
+
+| | cycles | speed relative to the VM |
+|---|---|---|
+| PLASMA bytecode on the port (`tools/asim.py`) | 472,160 | 1 |
+| `tools/cc.py` native (py65, `tools/test_cc_run.py`'s harness) | 614,521 | 0.77 |
+| `tools/cc.py --pcode` on the port (L3a) | 576,337 | 0.82 |
+| cc65 `-Oirs` native (`sim65 -c`) | 146,347 | 3.23 |
+
+`cc.py --pcode` is 1.22 times PLASMA's time and 0.94 times its own native output's. Its `int`
+is signed, so its compares and `/` are the VM's own ops (the unsigned-compare helpers that
+used to cost about 93,000 cycles are gone); the native output's runtime grew with the signed
+compare and divide.
+
+The VM runs this benchmark faster than our own native compiler and at about a third of cc65's
+speed; its bytecode is a third of cc65's code size (above), the 2,556-byte VM not counted: it is
+a shared library (§4 item 3), loaded once for every p-code process. It executes 8,358 ops, about 57 cycles an op on
+average. The simulators count documented cycles and do not model badlines, so these are CPU
+ratios: on a C64 the badlines and the interrupt slow all three alike. cc65's start-up clears the
+program's BSS (220 bytes here, not in the empty program), so its figure carries a few thousand
+cycles the others do not, under 2 %. The VM figure was 463,755 before the frame-stack check
+(§5), 471,285 before the push guards (§4 item 2), 472,248 before `LEAVE`'s checks and 472,875
+before the VM became a library (the code moved, so the change is layout).
+
+The port (§4) is 2,556 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
+with no alignment padding left, an assert keeping it under 8) and no BSS: the library file
+`/lib/pvm` is 2,813 bytes, 12 blocks, 10 pages when loaded (measured then; the squish below brought it to 1,992 bytes, 8 pages). Before the divide-by-zero guard (§6
+L2) they were 2,544 and 2,801; the guard's 12 bytes still fit the 10 pages.
+
+The C64 VM (`src/vmsrc/c64/plvmc64.s`, upstream commit `f209e30`, 2026-11-03) has no KERNAL
+calls in its core: the loader and `cmd` around it do. Opcodes are even, `$00–$C4`; `$C6–$FE`
+(29 opcodes) are free.
+
+## 4. Decision: PLASMA's ISA and VM, ported to ca65 and to Breadbin
+
+Ported changes, each forced by §1:
+
+1. **Zero page.** The eval stack drops from 16 to 11 entries and lives in `$08–$1F`, split
+   low/high as upstream (`ESTKH` `$0A–$14`, `ESTKL` `$15–$1F`; `$08–$09` are a guard that the
+   byte loads, which write one slot below TOS, may touch). It is kernel syscall scratch, so the
+   syscall path (item 4) saves the stack around the call. The VM's own state is `$23–$36`: the
+   self-modifying fetch routine (10 bytes at `$23`, the instruction pointer is its operand),
+   `IFP`, `ESP`, a `JMP` trampoline, `TMP`, `DVSIGN`, `SRC`, then `flim` (the frame stack's
+   bottom, `$37–$38`) and `pvm_errno` (`$39`), where BSS was before the VM became a library. The
+   program keeps `$3A–$3F` (`src/pvm/prog.cfg`). A p-code program does not link `lib.s`'s zero-page users. Nothing in
+   `$60–$8F` is used.
+2. **Return IPs on the frame stack**, not the 6502 stack. Recursion depth is then bounded by the
+   frame stack (in the program's BSS), not by `STKSAVE`. A function that starts with
+   `JSR pvm_interp` is entered without that `JSR` running: `CALL` pushes the return IP and jumps
+   to the bytecode after it. Native code that calls bytecode pushes a marker the matching `RET`
+   turns back into an `RTS`; bytecode calling native code uses the 6502 stack, as upstream.
+   `NATV` pushes `RET`'s address, so a native tail's `RTS` returns from the function as it does
+   upstream (where the call was a `JSR`). Frameless functions only: `RET` does not undo
+   `ENTER`'s frame and spill.
+   **Spilling:** PLASMA's compiler leaves a caller's pending values on the eval stack across a
+   call (`n + f(n - 1)` is `LLW; DUP; DECR; CALL; ADD`), which upstream's 16 entries absorb to
+   about 15 levels. Here `ENTER` moves the caller's pending entries to the frame stack when fewer
+   than 8 would be free, and `LEAVE` puts them back under the results (none for `#0`, two for
+   `#2`), so that code recurses as deep as the frame stack allows (about 7 bytes a level for
+   that function). Frameless functions (no `ENTER`) do not spill. The eval stack index is
+   checked at every call and return, and **every push is guarded** (`dex; bmi`, the owner's
+   decision of 2026-11-18): a 12th entry exits with status 12 (`ENOMEM`) before it is written,
+   instead of wrapping and coming back into range with wrong values. Twelve push sites are
+   guarded (the pushes in `DIVMOD`, `_DIV` and `SYS` follow at least as many pops), through four
+   `jmp pvm_overflow` stubs within branch range: 36 bytes, less the 5 bytes of table padding
+   they absorbed. The §3 benchmark makes 3,336 guarded pushes, 6,672 cycles (1.4 %); the
+   measured net change was +963 cycles, as the moved code crosses pages differently, so the
+   net figure is layout luck. `LEAVE` checks both limits before it puts spilled entries back
+   under the results (9 bytes): more results than fit above them would be a 12th entry, which
+   the shift wrote into page 1, and an index past empty (the callee popped more than it pushed)
+   less the spill count could land back in range, where `RET` would not see it. Pops are not
+   guarded: a pop past empty is caught at the next call or return, but a push before then
+   writes `$20`, the low byte of argv. A native callee may return any
+   index; the next push, call or return catches it.
+   Cheaper guards are open for later.
+   Native routines linked beside a mini C program (`extern`, `tools/cc_pcode.py`; L3b) follow
+   this item: arguments on the eval stack, one result pushed, RTS, no syscalls, and no more
+   entries than the arguments took. One that must rewrite the return IP (BASIC's jumps and
+   errors, `src/pc/bas-rt.s`) finds it above its own return address, at `$0103 + S`. The
+   program's globals are exported as `g_NAME`, so a native can use them directly. A program
+   sizes its frame stack with a `/* fstack N */` comment (L3c: `bas` takes 768).
+3. **Relocation and sharing (L1s).** Our front ends emit bytecode as ca65 `.byte` and `.word`
+   lines in the program's source. The VM is a shared library, CX format 3 (`/lib/pvm`, built by
+   `tools/pvmlink.py lib`, `mk/pvm.mk`): image bytes 0–1 are its id, the low 16 bits of the
+   CRC-32 of its sorted exports and their offsets (`pvm_init`, `pvm_interp`, and `pvm_errno` in
+   zero page), so a VM whose entry points move gets a new id. A p-code program is CX format 2
+   (`tools/pvmlink.py prog`): the format 1 header, then the library relocation count, the id and
+   the library path (16 bytes), 29 bytes in all; after the image, its own relocations (plus its
+   page) and the library's (plus the library's page). It is linked three times against a stub
+   of the exports (`build/pvm/pvmstub.s`), at `$0000`, at `$0100`, and at `$0000` with the stub at
+   `$0100`; the two kinds of relocation must not overlap, which the tool checks. The kernel
+   (`src/kernel/exec.s`) finds the library by its file (device and inode) among the resident
+   ones (two at most) or loads it at the top of the pool, compares the id, and counts the
+   processes using it; the last one's `exit` or `exec` frees it. A missing library or another id
+   is `ENOEXEC`; the library itself cannot be run or loaded as a module. A library replaced on
+   disk while a copy is resident keeps the old copy until its last user exits (the new programs'
+   id does not match, `ENOEXEC`). Cost: 402 bytes of kernel above the BSS (cold, `CODEHI`, and
+   43 of BSS) and 8 below `$CF00`. The smallest p-code program went from 2,890 bytes (12 blocks)
+   to 94 (1 block); under VICE one p-code process takes 5 pages (1 KB of it the test prelude's
+   frame stack) plus the library's 10, and each further one 5. No PLASMA module loader.
+4. **Syscalls**: one opcode, `SYS n` (`$C6`, the first free one), instead of a native shim per
+   call. Bits 0–4 of `n` are the syscall number; TOS goes to `A` (low) and `X` (high), and with
+   bit 7 set the low byte of the next entry goes to `Y`. `r0–r2` are stored beforehand with
+   `SAW`. The result `A | X << 8` is pushed, or -1 with the errno in `pvm_errno` when carry is
+   set; `pvm_errno` is 0 after a successful call. The eval stack is copied to the frame stack and back around the call (an allocation like any
+   other: a full frame stack exits with `ENOMEM`) (`tools/asim.py` now trashes
+   `$08–$1F` on every syscall, so the simulator checks this).
+5. **XOP: the program's own opcodes** (owner 2026-11-20: "the time to add stuff is now"). The 28
+   opcodes `$C8`-`$FE` are a native call in one byte. A program that wants them keeps a table of
+   28 words in the 56 bytes just under its frame stack (`flim`; the vector for opcode `op` is at
+   `flim - 256 + op`), so the VM carries no per-program state and the opcode table stays one
+   page. cc_pcode does it for a source with a `/* xops */` line: it reserves the 56 bytes and
+   copies the program's exported `xtab` there at start-up. The routine is entered by `JSR`, as a
+   CALL'd native is (X is the eval stack index; A, Y and TMP are free) and `RTS`es. `P_IP` and
+   `P_IPY` (`pvm.inc`) give it the bytecode base and the offset of the op's last byte; one that
+   has operands reads them from there and advances `P_IPY` past them. The VM then adds IPY + 1 to
+   IP, as a CALL does, so straight-line counting starts over. Cost: about 100 bytes of VM (the 56 bytes
+   of opcode table and the handler) and 56 of the program's own. What an XOP cannot do is redirect control (it has no
+   return address on the stack): GOSUB/FOR/RETURN-like transfers stay CALLs. bas uses it for
+   variable loads and stores (3 bytes, was 6), constants (5, was 9), every arithmetic op and
+   line markers (1 byte, was 3).
+6. **Numbers.** Fixed point (format chosen at L3) as runtime calls first; opcodes in the free
+   range only if L3 measures a need. FP reserves opcodes, nothing more.
+7. **Licence record.** The ported file keeps the MIT notice and the upstream URL and commit in its
+   header, and the adoption is recorded here and in `docs/design/fast-io.md` §4, as the licence
+   policy asks.
+
+Not adopted: the PLASMA module loader and `cmd`, the 6502 return-address convention (item 2),
+and, for now, the PLASMA language. Its self-hosting compiler makes it a cheap third front end;
+that is the owner's call, after L2.
+
+Rules for our front ends, found while porting:
+
+- **Expression depth.** One function's own expression, with the arguments of a call inside it,
+  must fit in 8 entries (what `ENTER` guarantees); pending values across calls are the VM's
+  job (spilling, above), except across frameless calls. Front ends check depth at compile time.
+- **IP offset wrap.** The VM keeps the IP as a base plus `Y`; ops that cross page boundaries
+  renormalise. Straight-line code longer than about 250 bytes without a branch, call or
+  `LA`/`LLA` must get a renormalising op from the front end (upstream has the same limit).
+- **`SEL` tables** (historical, see the squish below): a count byte, then (value, offset) word
+  pairs sorted by value, each offset relative to its own offset word; the default case follows
+  the table.
+
+### The squish (2026-11-22, `ee06ae8`)
+
+`/lib/pvm` went from 2,660 to 1,992 bytes (11 to 8 pages when loaded, so +768 bytes of BYTES
+FREE under the BASIC runtime: 17,920 to 18,688 on the VICE banner). Thirty opcodes that no
+compiler path emits were deleted: `DROP2 DUP DIVMOD ANDI ORI SEL CFFB DLB DLW DAB DAW INCR DECR
+BRGT BRLT BRGE BRLE` (and their fused forms `DECBRGE INCBRLE SUBBRGE ADDBRLE`), `NATV JUMPZ
+ADDLB IDXLB ADDAB IDXAB IDXAW LLB LAB SLB SAB`. Their table slots point at `BAD`
+(`pvm_overflow`: a stray opcode exits with `ENOMEM`, 12, as a stack overflow does). The
+compiler no longer treats a `char` variable as a "simple" operand: a load is `LLA`/`LA` then
+`LB`, a store `LLA`/`LA` then `SB`, and an address plus a scaled local is `LAW; IDXW`. `ADD`,
+`SB` and `SUB` were moved into page 0 so that the table's padding assert (under 8 bytes) holds.
+The tests and `src/pvm/test/bench.s` use the surviving ops (`bench.s` is no longer PLASMA's
+output verbatim; its result, 469, is unchanged). Dead opcode names are gone from `pvm.inc`.
+Evidence: the host tests, `SharedVM` (8 pages) and the smoke set under VICE; the full suite
+and the hardware run are milestone work. 
+**Second pass (same day): 1,992 to 1,789 bytes, 7 pages.** Dropped as well: `LNOT ISGE ISLE BRAND
+BROR IDXLW ADDAW`. `cc_pcode.py` and `bas.c` emit the replacements: `<=`/`>=` are `ISGT`/`ISLT`
+with the answer inverted (the branch sense in a condition; `ADDI 1` for a 0/1 value; `COMP` in
+BASIC, whose compare gives -1/0), `!x` is `CN 0; ISEQ; NEG` (two eval slots, which `need()` counts),
+`&&`/`||` as a value are `cond`'s branches then `CN 1` / `BRNCH` / `CN 0`, and a scaled local or a
+global added to TOS is `LLW`/`LAW` then `IDXW`/`ADD`. `SHL` and `SHR` are count loops (no 8-bit
+fast path: slower for counts of 8 and up, 36 bytes smaller). `FIXDROP` and the `XOP` tail reuse
+`FIXNEXT`, and `CALLTMP` tests for a `JSR pvm_interp` header with a three-byte loop. The BASIC image
+grew from 10,170 to 10,202 bytes, still 40 pages. Evidence: host tests (189), `SharedVM` (7 pages),
+`Basic`, `CompiledC` and the smoke set under VICE, a hater review (one block, `!x` depth, fixed
+with a test). A page-0 padding of 7 bytes remains and `pushov0` is dead code: both are slack for
+the next pass. Not run: the full suite, JiffyDOS, hardware.
+
+## 5. Risks
+
+- **Speed.** A bytecode VM is several times slower than native code; the I/O path is unaffected
+  (syscalls are native). L1 measures it; hot routines can be `NATV` or library code.
+- **Eval stack depth 11.** PLASMA's compiler assumes 16. Spilling covers recursion; a single
+  expression deeper than the free entries (8 at a framed function's entry) exits with `ENOMEM`
+  where upstream's 16 would run (the push guards, §4 item 2). Our front ends check depth at
+  compile time; PLASMA's compiler does not.
+- **Frame stack size.** The program sizes its frame stack: `pvm_init` takes the top in `A/Y`
+  and the bottom in `r0` (at least `$0100`). Every allocation (a return IP, `ENTER`'s spill,
+  count and frame) goes through `fsalloc`, which exits with `ENOMEM` before writing below the
+  bottom; upstream does not check. Cost: 1.6 % on the §3 benchmark, 3 code bytes (the five
+  inline allocations became one routine; `pvm_init` copies `r0`) and 2 of BSS. Nothing checks
+  the caller's `r0`: a caller that forgets it gets an arbitrary bound.
+- **Zero page shared with `lib.s`.** The VM's `$34–$35` and `$39` and the program's `$3A–$3B` are also the
+  user library's `lp3`, `lt3` and `lval`; a p-code program must not link those users. Nothing
+  enforces it yet (`src/pvm/prog.cfg` says so).
+- **Syscall scratch.** Any kernel change that starts using `$08–$1F` in the IRQ path breaks
+  item 1. A note in `k.inc` keeps that visible.
+- **Upstream drift.** The port is a fork of one file; upstream fixes are merged by hand.
+
+## 6. Acceptance
+
+- **L0** (this document): the owner's review, and a host simulator run (`tools/asim.py`, py65)
+  of a loop, recursion 50 deep and a syscall (`write`) on the ported VM. Met by
+  `tools/test_pvm.py`: a loop, recursion 200 deep with the 6502 stack balanced afterwards,
+  arithmetic and compares, `write` with a value surviving under it and a bad descriptor giving
+  -1 and `EBADF`, a native call, compiler-shaped recursion 120 deep with a pending value
+  at every level (spilling), spills under `#0` and `#2` functions, the overflow trap, and the benchmark
+  as upstream's compiler emits it (`src/pvm/test/bench.s`, result 469, checked independently).
+- **L1**: the ported VM as a CX program under VICE; size and speed of the §3 benchmark against
+  `cc.py` and cc65 recorded here (done); the eval-stack overflow trap tested (done in L0), and
+  the push guards, through every guarded op, each guard's removal failing the test (done); the
+  frame stack bounded and its trap tested at the boundary (204 levels of plain recursion fit the
+  test's 1 KB, 205 trap), with nothing written below it, and under VICE (`tests/test_pvm_machine.py`) (done). The first
+  compiler came with L2; p-code programs are built by the tests, not yet by the Makefile (no
+  shipped program is written in C).
+- **L1s**: one VM for every p-code process (§4 item 3). `tests.test_pvm_machine.SharedVM`
+  under VICE: two p-code processes, in the background and in a pipeline, hold one library copy
+  (the kernel's page map and library table read through the monitor; `free` differs during the
+  pipeline and is back to its first output after); killing them frees it with the last; `exec`
+  from p-code to p-code, from p-code to a native program and from a native program to p-code
+  leaves no reference behind; a wrong id, a missing library, running the library and `mod load`
+  of it give `exec format`; a mismatched id with nobody holding the library leaves nothing
+  allocated. The smallest p-code program is 94 bytes, 1 block (done). Known limits: a library is
+  known by its device and 1-byte inode, with no generation, so a library replaced on disk under
+  a reused inode while a copy is resident binds new programs to the old copy (on UCI every file
+  is inode 2, so two libraries under `/u` would alias: libraries live on the root); the kernel
+  does not check that a format 3 image has no BSS (the tools refuse it); a library path must be
+  absolute (`tools/cx.py` refuses others). A library that is not there is `ENOEXEC`, other
+  lookup errors stand, and a third library while two are resident is `EAGAIN`.
+
+- **L2**: `cc.py --pcode` (`tools/cc_pcode.py`) emits p-code with real stack frames: every
+  function `ENTER`s a frame holding its parameters and locals (arrays included), so recursion
+  and mutual recursion work. `int` is signed on both back ends: `<` `>` `<=` `>=` are the VM's
+  signed compares (each followed by a `NEG`, as C's true is 1), and `/` is the VM's `DIV`, which
+  truncates toward zero. `DIV` by 0 gave a value that depended on the dividend's bit count; it
+  now gives 0 (a 12-byte guard in `_DIV`, 2,556 bytes of port, and `x % 0` is 0 too), and the
+  native back end does the same. Every program in `tools/test_cc_run.py` runs on both back ends with
+  the same output (`tools/test_cc_pcode.py`, py65), plus what only the p-code back end does:
+  recursion (fact, fib, even/odd), locals per call, pending values across a call, values spilled
+  to frame temporaries when an expression or a call's arguments need more than the 8 entries
+  `ENTER` guarantees (the compiler counts depth; the operand order is kept), straight-line code
+  past the IP window (the compiler inserts a renormalising `BRNCH` before 240 bytes), the fused
+  operand ops (`ADDI` … `ADDLW`), and frame-stack exhaustion exiting with `ENOMEM`. Under VICE,
+  `tests.test_pvm_machine.CompiledC` runs `tests/test_compiled.py`'s programs as p-code, fib(12)
+  and fact(7), and the exit status of runaway recursion (12). Sizes as CX files, against the
+  native image with its runtime: hello 105 (666), loop 116 (769), ops 352 (1,085), slice2 326
+  (1,477); a p-code process also holds its 1 KB frame stack (BSS) and shares the VM.
+  Where it differs from the native back end: `main`'s value is the exit status; a store through
+  a pointer computes the value before the address; a frame is at most 255 bytes and a call at
+  most 8 arguments (both refused at compile time); an uninitialised local holds whatever the
+  frame stack held (the native back end's locals are statics, so they keep the last call's value); the native back end's `as` limits on names
+  and string lengths do not apply.
+
+## 7. Sources
+
+- PLASMA: <https://github.com/dschmenk/PLASMA>, MIT, Copyright David Schmenk. VM read at
+  `f209e30` (2026-11-03).
+- BASIC-M6502: <https://github.com/microsoft/BASIC-M6502>, MIT, Copyright Microsoft Corporation.
+- UCSD p-System: the 2006 source release (non-commercial licence), and the published p-machine
+  descriptions. Read for design only.
+- SWEET16: Wozniak, "SWEET16: The 6502 Dream Machine", BYTE, November 1977. Ideas only.
+- Lawless Legends: <https://github.com/badvision/lawless-legends>, Apache-2.0. Ideas only.

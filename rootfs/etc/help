@@ -1,11 +1,12 @@
 files:  ls cat cp mv rm mkdir rmdir touch
         pwd stat hexdump edit head more
-text:   echo grep wc tee tail sort
+text:   echo grep wc tee tail sort cut uniq
 system: ps kill jobs free df uptime
         date uname version sleep clear
         theme turbo
 users:  login whoami passwd
 code:   basic as
+math:   calc
 disks:  mount umount format
 shell:  a | b  > f  >> f  < f  cmd &
         a ; b  *.bas  cd  exit

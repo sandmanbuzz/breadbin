@@ -25,7 +25,10 @@ SYS_CHDIR    = SYS_BASE + 3*16
 SYS_GETCWD   = SYS_BASE + 3*17
 SYS_STAT     = SYS_BASE + 3*18
 SYS_PROCINFO = SYS_BASE + 3*19
-SYS_MEMINFO  = SYS_BASE + 3*20
+SYS_MEMINFO  = SYS_BASE + 3*20   ; r0 = buf[5]; with r0+1 = 0 it is BRK, below
+SYS_BRK      = SYS_MEMINFO       ; r0+1 = 0, A = pages wanted -> A = first new page, X = pages granted:
+                                 ; the free ones directly after the program's own, partial grants
+                                 ; allowed (X may be 0), not zeroed, freed at exit
 SYS_FSINFO   = SYS_BASE + 3*21
 SYS_TIME     = SYS_BASE + 3*22
 SYS_ISATTY   = SYS_BASE + 3*23
@@ -46,7 +49,7 @@ r2 = $06
 ; program entry state
 argv = $20          ; pointer to NULL-terminated array of string pointers
 argc = $22
-; $23-$2F free for programs, $30-$3F used by lib.s
+; $23-$2F free for programs, $30-$3F used by the library (src/lib)
 
 ; open flags
 O_RDONLY = $00

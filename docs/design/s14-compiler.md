@@ -6,14 +6,15 @@ before S17 (self-host or stay in assembly) is decided. `tools/test_cc.py` is its
 
 ## The subset (slice 3)
 
-- `int` only: 16 bit, unsigned in comparisons (`<`, `>`, `<=`, `>=` compare unsigned).
+- `int` only: 16 bit, signed (`<`, `>`, `<=`, `>=` compare signed; `/` truncates toward zero).
 - Functions with typed parameters (`int` or `char`, passed on the software stack and stored in
   each function's static parameter slots); `main` is the entry. Calls are by name.
 - `char`: 8 bit, zero-extended when read; a store keeps the low byte.
 - Pointers to `int` or `char` (one level), arrays of `int` or `char` (local, static storage),
   unary `*` and `&`, indexing `a[i]`; pointer `+` and `-` scale by the element. Pointers are read
   through `cc_ptr` ($2b, zero page).
-- `for (init; cond; step) body`, desugared to a `while` in the parser.
+- `for (init; cond; step) body`, a `while` with the step after the body (the parser keeps the
+  step apart, for the p-code back end's `continue`).
 - Locals declared with `int name = expr;`. They have static storage (`v_<fn>_<name>`, 2 bytes),
   so there is no recursion yet.
 - Statements: declaration, assignment, expression, `if`/`else`, `while`, `return`, blocks.
@@ -26,19 +27,31 @@ Slice 3 adds:
 - Globals: `int|char [*] name [ [n] ] [= literal]` at top level, static (`g_<name>`), initialised
   as data (a number, a string for a char array or char pointer, or 0 for a pointer).
 - `*` and `/` as binary operators: runtime routines in the emitted program (`cc_mul`: the low 16
-  bits; `cc_div`: unsigned, and dividing by 0 gives 65535).
+  bits; `cc_div`: signed, truncating toward zero, and dividing by 0 gives 0, as the p-code VM's
+  `DIV` does since 2026-11-19).
 - A string literal is the address of its bytes (a char pointer); a char array takes a string,
   its size inferred when left out (a local copies it in each time the declaration runs).
 
-Not yet: pointers to pointers, `char` return types, `#include`, `&&` `||` `!`, arrays of pointers
+Not yet: pointers to pointers, `char` return types, `#include`, arrays of pointers
 and string arrays of pointers (use char arrays), `*` on pointers (`p * 2` is refused).
+
+**The native back end is frozen at this language** (L3, `docs/design/basic.md` section 4). What
+the language gained since is p-code only (`cc.py --pcode`, `tools/cc_pcode.py`), and this back
+end refuses each by name ("... is p-code only"): `%`, `&&`, `||`, `!`, `break`, `continue`, the
+syscall builtins (`read`, `write`, `open`, `close`, `exit`, `isatty`), `extern`, and since L3b
+`&`, `|`, `^`, `~`, `<<`, `>>` (arithmetic: `int` is signed; counts 0 to 15), a function's
+address (`&f`, a `char *`) and `icall(p)` (call the code at `p`, no arguments). Pointer
+difference (`p - q`, same base, in elements) is p-code only too; this back end reports it as a
+pointer on the right of `-`. Precedence is C's. Character literals
+(`'A'`, with the string escapes and `\'`) are numbers to the lexer, so both back ends take them;
+`break`, `continue` and `extern` became keywords for both.
 
 ## Emitted shape
 
 - An expression's value is left in `acc` (16 bit: `acc` low, `acc+1` high).
 - A binary operator evaluates the left side, pushes `acc` on a memory stack (`cc_stk`, 32
   levels, `cc_sp` its byte index), evaluates the right side, pops the left into `tmp`, and calls
-  a runtime routine: `cc_add`, `cc_sub` (`tmp - acc`), `cc_eq`, `cc_lt` (unsigned `tmp < acc`),
+  a runtime routine: `cc_add`, `cc_sub` (`tmp - acc`), `cc_eq`, `cc_lt` (signed `tmp < acc`),
   `cc_not`, `cc_swap`. `>` and `<=` are `cc_swap` then `cc_lt`, with `cc_not` for `<=`.
 - A condition is tested by `ora acc,acc+1`: zero is false.
 - Calling convention: `jsr fn_<name>`; the return value is in `acc`. Functions end with
@@ -66,9 +79,6 @@ Refused with a message (checked by `tools/test_cc.py`):
 
 Accepted, by decision, and documented here for the owner:
 
-- Comparisons are unsigned: `int x = 0 - 1; if (x < 0)` takes the false branch. C would take
-  the true branch. Pinned by the executed tests. Signed compare, or refusing `<` on signed
-  values, is for the owner to choose.
 - Block scope is not enforced: `{ int x = 1; } x = 2;` compiles, because all locals of a
   function share one namespace. C would refuse the second use.
 

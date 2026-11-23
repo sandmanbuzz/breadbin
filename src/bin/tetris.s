@@ -6,7 +6,7 @@
 ;
 ;  * Everything scalar lives in zero page ($20-$22 are argv/argc, which this program never reads): no
 ;    relocations, 2-byte instructions.
-;  * No user library: print/print_dec would pull lib.s and num.s (about 500 bytes). Output is one
+;  * No user library: print/print_dec would pull the library (print, putc, dec) (about 500 bytes). Output is one
 ;    SYS_WRITE per screen update from `out`; the score is printed by a 5-entry subtraction table.
 ;  * ZP `cb` is the write buffer "ESC = row col glyph": plotting a cell is `out`(cb, 5).
 ;  * The 28 x 4 offset tables are 28 bytes: one 4-cell shape per piece, rotated at run time by

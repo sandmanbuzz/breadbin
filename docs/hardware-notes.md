@@ -778,3 +778,12 @@ Image built with `/etc/con80` (`experiments/con80/hw_boot.py`, `hw_type.py`), dr
 - **Scroll (`ls /bin`, full screen):** about 2 s at 1 MHz (visibly slower than 40 columns, the cost of the 4-byte font unpack; acceptable, comparable to period soft-80 software); at 48 MHz (`U64 Specific Settings` / `CPU Speed`, Turbo Registers mode) the owner calls it excellent, milliseconds.
 - Config note: the `CPU Speed` values are space-padded (`" 1"`, `"48"`, `"64"`); an unpadded `1` is refused, so a restore trap that uses it silently leaves the speed up.
 - Not yet run on hardware: editor, Ctrl-C, unload/reload (needs a boot-time load; a running shell blocks the claim).
+
+### 2026-11-19, `/lib/km/d81` against the physical 1581 (JiffyDOS 6.0 1581, bus 10) (cloud session)
+
+Setup: `main` at 5311612; C64 Ultimate firmware 1.1.0, drive A = device 9 (emulated 1541, JiffyDOS 1541-II ROM) holding the unlinked test boot image, JiffyDOS KERNAL; the physical 1581 at 10 with the owner's sacrificial disk, powered on (the owner's note: a plugged-in 1581 must be switched on or the bus hangs; likely termination; with every physical device on, no quirk seen that was not our own harness mistake). Physical 1541 not on the bus run. Under `tools/with-lock -r ultimate`, `BREADBIN_ULTIMATE_BUS=9`, `tests/d81_hw.py` (new; `--format` for stage 2).
+
+- Stage 1 (read-only on the bus): `mod load /lib/km/d81` loads (`slot 0 (d81): page 162, pages 1`). `mount 10 /mnt` answers `no such device or no disk` both before and after the module, on that disk (no c64fs on it).
+- Stage 2 (`--format`): `format 10 c64fs vol` finished (`done`); `mount 10 /mnt` OK; `mkdir /mnt/d`, `cp /etc/help /mnt/d/help`; `wc` 13 75 414 (same as the source); `hexdump` head and tail equal to the source's; `umount`, `mount` again, and the same again: all equal. **9 of 9 checks, 1 run.** This is the first run of the d81 module against a real 1581 and its real DOS (the 2026-11 emulated-1581 run above used the Ultimate's 1581 ROM).
+- Not measured: time of the format or the copy, speed, more than one run, a second disk, the JiffyDOS fast path (whether the probe engaged on the 1581 is not recorded), the physical 1541 on the bus at the same time. `format` erased whatever was on that disk.
+- After the run drive A holds `/Temp/breadbin.d64` (it was empty before the run; the harness leaves it like this).
