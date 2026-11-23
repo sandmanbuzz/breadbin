@@ -76,7 +76,8 @@ int cur;                /* the line being compiled; -1 in immediate mode */
 int nd;                 /* the compiled code's depth on the number stack */
 int ed;                 /* and on the eval stack */
 int vint;               /* the last variable parsed is an integer (A%) */
-int ifs[8];             /* this line's IFs: where their branch offsets go */
+int ifh;                /* this line's IFs: where the newest one's JUMP address goes; each holds the
+                           place of the one before (a chain through the code), nif of them */
 int nif;
 int *inul;              /* 0, for fx */
 int *fx;                /* forward GOTOs, in ctl while compiling (a run starts with it empty): where
@@ -798,19 +799,15 @@ int ifs_() {            /* IF e THEN n | statements, IF e GOTO n: false goes to 
         npush(-1);
         epush(1);
     }
-    if (nif == 8) {
-        c_fail(11);
-        return 0;
-    }
     c_room(5);            /* false: over a JUMP to the line's end (a branch reaches 127 bytes, a line may not) */
     c_emit(78 /* PO_BRTRU */);
     c_emit(4);
     c_emit(196 /* PO_JUMP */);
     straight = 0;
-    ifs[nif] = cend;
     nif = nif + 1;
-    c_emit(0);
-    c_emit(0);
+    c_emit(ifh);
+    c_emit(ifh >> 8);
+    ifh = cend - 2;
     epush(-1);
     c_sp();
     if (c_tok(134 /* tk GOTO */)) return gotol();
@@ -923,9 +920,12 @@ int stmts() {           /* the statements of src from si, : between them */
 }
 
 int endline() {         /* the IFs' false branches come here */
-    int i;
-    for (i = 0; i < nif; i = i + 1) putw(mem + ifs[i], addr(cend));
-    nif = 0;
+    for (; nif; nif = nif - 1) {
+        char *p;
+        p = mem + ifh;
+        ifh = getw(p);
+        putw(p, addr(cend));
+    }
     return 0;
 }
 
