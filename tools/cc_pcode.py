@@ -349,7 +349,9 @@ class PGen(cc.Gen):
                 n = max(self.need(e[2]), self.need(e[3]), 2)
             elif kind == "index":
                 n = max(self.need(e[1]), self.need(e[2]), 2)
-            elif kind in ("neg", "deref", "not", "comp"):
+            elif kind == "not":
+                n = max(self.need(e[1]), 2)         # CN 0 goes above x for the ISEQ
+            elif kind in ("neg", "deref", "comp"):
                 n = self.need(e[1])
             elif kind == "addr":
                 n = 1 if e[1][0] == "var" else self.need(e[1][1] if e[1][0] == "deref" else e[1])
