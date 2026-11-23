@@ -739,7 +739,8 @@ fsalloc: eor #$FF
 ; the params are gone, the caller's pending entries move to the frame stack first and LEAVE moves
 ; them back, so compiled code like n + f(n - 1) recurses as deep as the frame stack allows, not
 ; the 11-entry eval stack. The frame stack, low to high: frame, spill count, spilled entries
-; (shallowest first), return IP.
+; (shallowest first), return IP. framesize counts the frame's first byte, which holds framesize
+; for LEAVE: locals start at 1.
 ENTER:  ldy #2
         txa
         clc
@@ -777,20 +778,23 @@ ENTER:  ldy #2
 @cnt:   ldy #0
         sta (IFP),y
         iny
-        lda (IP),y              ; framesize
+        lda (IP),y              ; framesize: the frame's own bytes, the first holding this
         jsr fsalloc
-        iny
+        lda (IP),y
+        ldy #0
+        sta (IFP),y
+        ldy #2
         lda (IP),y
         beq @done
         asl
         tay
 @lp:    lda ESTKH,x
-        dey
         sta (IFP),y
+        dey
         lda ESTKL,x
         inx
-        dey
         sta (IFP),y
+        dey
         bne @lp
 @done:  txa                     ; spilled: the eval stack is now empty
         clc
@@ -798,9 +802,9 @@ ENTER:  ldy #2
         tax
         ldy #3
         jmp FETCHOP
-; LEAVE framesize: drop the frame, put back what ENTER spilled (under the results), return
-LEAVE:  iny
-        lda (IP),y
+; LEAVE: drop the frame, put back what ENTER spilled (under the results), return
+LEAVE:  ldy #0
+        lda (IFP),y
         clc
         adc IFP
         sta IFP

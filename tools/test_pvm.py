@@ -65,40 +65,40 @@ start_main: P_START f_main
 # pdec(n): write n (0-32767) in decimal and a newline to fd 1, in bytecode; returns write's result
 PDEC = """
 f_pdec:
-        P_ENTER 4, 1            ; 0: n, 2: i, the next digit's index in buf
+        P_ENTER 5, 1            ; 0: n, 2: i, the next digit's index in buf
         P_B PO_CB, 10
         P_W PO_LA, buf+8
         P_OP PO_SB
         P_CN 8
-        P_B PO_SLW, 2
-@lp:    P_B PO_LLW, 0
+        P_B PO_SLW, 3
+@lp:    P_B PO_LLW, 1
         P_CN 10
         P_OP PO_MOD
         P_B PO_ADDI, '0'
-        P_B PO_LLW, 2
+        P_B PO_LLW, 3
         P_B PO_SUBI, 1
-        P_B PO_SLW, 2
-        P_B PO_LLW, 2
+        P_B PO_SLW, 3
+        P_B PO_LLW, 3
         P_W PO_LA, buf
         P_OP PO_ADD
         P_OP PO_SB
-        P_B PO_LLW, 0
+        P_B PO_LLW, 1
         P_CN 10
         P_OP PO_DIV
-        P_B PO_SLW, 0
-        P_B PO_LLW, 0
+        P_B PO_SLW, 1
+        P_B PO_LLW, 1
         P_BR PO_BRTRU, @lp
         P_CN 9
-        P_B PO_LLW, 2
+        P_B PO_LLW, 3
         P_OP PO_SUB
         P_W PO_SAW, r1
         P_W PO_LA, buf
-        P_B PO_LLW, 2
+        P_B PO_LLW, 3
         P_OP PO_ADD
         P_W PO_SAW, r0
         P_CN 1
         P_SYS SYSN_WRITE
-        P_B PO_LEAVE, 4
+        P_OP PO_LEAVE
 """
 
 
@@ -146,47 +146,47 @@ class PVM(unittest.TestCase):
         # sum = 0; for i = 1 to 100: sum += i
         r = self.go("""
 f_main:
-        P_ENTER 4, 0
+        P_ENTER 5, 0
         P_CN 0
-        P_B PO_SLW, 0
+        P_B PO_SLW, 1
         P_CN 1
-        P_B PO_SLW, 2
-@top:   P_B PO_LLW, 0
-        P_B PO_ADDLW, 2
-        P_B PO_SLW, 0
-        P_B PO_LLW, 2
+        P_B PO_SLW, 3
+@top:   P_B PO_LLW, 1
+        P_B PO_ADDLW, 3
+        P_B PO_SLW, 1
+        P_B PO_LLW, 3
         P_B PO_ADDI, 1
-        P_B PO_SLW, 2
-        P_B PO_LLW, 2
+        P_B PO_SLW, 3
+        P_B PO_LLW, 3
         P_B PO_CB, 100
         P_OP PO_ISGT
         P_BR PO_BRFLS, @top
-        P_B PO_LLW, 0
+        P_B PO_LLW, 1
         P_W PO_SAW, buf
         P_CN 2
         WRITE_BUF
         P_CN 0
-        P_B PO_LEAVE, 4
+        P_OP PO_LEAVE
 """)
         self.assertEqual(words(r.out), [5050])
 
-    def test_recursion_200_deep(self):
-        # rec(n) = n ? rec(n - 1) + n : 0; 200 levels need 800 bytes of 6502 stack upstream. The
+    def test_recursion_160_deep(self):
+        # rec(n) = n ? rec(n - 1) + n : 0; 160 levels need 640 bytes of 6502 stack upstream. The
         # call comes first, so no caller value waits on the eval stack (11 deep) across it
         r = self.go("""
 f_rec:
-        P_ENTER 2, 1
-        P_B PO_LLW, 0
+        P_ENTER 3, 1
+        P_B PO_LLW, 1
         P_BR PO_BRTRU, @r
         P_CN 0
-        P_B PO_LEAVE, 2
-@r:     P_B PO_LLW, 0
+        P_OP PO_LEAVE
+@r:     P_B PO_LLW, 1
         P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
-        P_B PO_ADDLW, 0
-        P_B PO_LEAVE, 2
+        P_B PO_ADDLW, 1
+        P_OP PO_LEAVE
 f_main:
-        P_B PO_CB, 200
+        P_B PO_CB, 160
         P_W PO_CALL, f_rec
         P_W PO_SAW, buf
         P_CN 2
@@ -194,7 +194,7 @@ f_main:
         P_CN 0
         P_OP PO_RET
 """)
-        self.assertEqual(words(r.out), [20100])
+        self.assertEqual(words(r.out), [12880])
         self.assertEqual(r.mem[0x3B], 0xFF, "6502 stack balanced")
 
     def test_arith(self):
@@ -279,17 +279,17 @@ n_double:
         # the eval stack across every level, so 120 levels need ENTER's spill to the frame stack (about 7 bytes a level)
         r = self.go("""
 f_rec:
-        P_ENTER 2, 1
-        P_B PO_LLW, 0
+        P_ENTER 3, 1
+        P_B PO_LLW, 1
         P_BR PO_BRTRU, @r
         P_CN 0
-        P_B PO_LEAVE, 2
-@r:     P_B PO_LLW, 0
-        P_B PO_LLW, 0
+        P_OP PO_LEAVE
+@r:     P_B PO_LLW, 1
+        P_B PO_LLW, 1
         P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
         P_OP PO_ADD
-        P_B PO_LEAVE, 2
+        P_OP PO_LEAVE
 f_main:
         P_W PO_CW, 1000
         P_B PO_CB, 120
@@ -309,16 +309,16 @@ f_main:
         # them back under however many results there are (go() checks the depth afterwards)
         r = self.go("""
 f_none:
-        P_ENTER 2, 1
-        P_B PO_LLW, 0
+        P_ENTER 3, 1
+        P_B PO_LLW, 1
         P_W PO_SAW, buf+2
-        P_B PO_LEAVE, 2
+        P_OP PO_LEAVE
 f_two:
-        P_ENTER 2, 1
-        P_B PO_LLW, 0
-        P_B PO_LLW, 0
+        P_ENTER 3, 1
+        P_B PO_LLW, 1
+        P_B PO_LLW, 1
         P_B PO_ADDI, 1
-        P_B PO_LEAVE, 2
+        P_OP PO_LEAVE
 f_main:
         P_CN 1
         P_CN 2
@@ -368,15 +368,15 @@ f_main:
             with self.subTest(depth=depth, pending=pending), tempfile.TemporaryDirectory(prefix="pvm-") as d:
                 r = build_run("""
 f_rec:
-        P_ENTER 2, 1
-        P_B PO_LLW, 0
+        P_ENTER 3, 1
+        P_B PO_LLW, 1
         P_BR PO_BRTRU, @r
         P_CN 0
-        P_B PO_LEAVE, 2
-@r:     P_B PO_LLW, 0
-""" + ("        P_B PO_LLW, 0\n" if pending else "") + """        P_B PO_SUBI, 1
+        P_OP PO_LEAVE
+@r:     P_B PO_LLW, 1
+""" + ("        P_B PO_LLW, 1\n" if pending else "") + """        P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
-""" + ("        P_OP PO_ADD\n" if pending else "        P_B PO_ADDLW, 0\n") + """        P_B PO_LEAVE, 2
+""" + ("        P_OP PO_ADD\n" if pending else "        P_B PO_ADDLW, 1\n") + """        P_OP PO_LEAVE
 f_main:
         P_CN 1
         P_CN 2
@@ -413,20 +413,20 @@ f_main:
                     self.assertEqual(words(r.out), [66])
         # the 12th push through every guarded op, in a framed function so the local loads work.
         twelfth = ["P_OP PO_MINUS1", "P_CN 3", "P_B PO_CB, 3", "P_W PO_CW, 3",
-                   'P_CS "x"', "P_W PO_LA, buf", "P_B PO_LLA, 0", "P_B PO_LLW, 0",
+                   'P_CS "x"', "P_W PO_LA, buf", "P_B PO_LLA, 1", "P_B PO_LLW, 1",
                    "P_W PO_LAW, buf"]
         for op in twelfth:
-            body = "f_main:\n        P_ENTER 2, 0\n" + "        P_CN 1\n" * 11
+            body = "f_main:\n        P_ENTER 3, 0\n" + "        P_CN 1\n" * 11
             # the DROP brings a wrapped index back in range, so LEAVE's check cannot stand in
-            body += "        %s\n        P_OP PO_DROP\n        P_B PO_LEAVE, 2\n" % op
+            body += "        %s\n        P_OP PO_DROP\n        P_OP PO_LEAVE\n" % op
             with self.subTest(op=op), tempfile.TemporaryDirectory(prefix="pvm-") as d:
                 self.assertEqual(build_run(body, d).exit, 12)
         # LEAVE after ENTER spilled 8 pending entries: 3 results fit above them, a 4th would be a
         # 12th entry, and the shift used to write it into page 1 ($0109/$0114) before any trap
         for nres, status in ((3, 0), (4, 12)):
-            body = "f_res:\n        P_ENTER 2, 0\n" + "".join(
+            body = "f_res:\n        P_ENTER 3, 0\n" + "".join(
                 "        P_W PO_CW, $%02X%02X\n" % (0x70 + i, 0x70 + i) for i in range(nres))
-            body += "        P_B PO_LEAVE, 2\nf_main:\n" + "        P_CN 1\n" * 8
+            body += "        P_OP PO_LEAVE\nf_main:\n" + "        P_CN 1\n" * 8
             body += "        P_W PO_CALL, f_res\n" + "        P_OP PO_DROP\n" * (8 + nres)
             body += "        P_CN 0\n        P_OP PO_RET\n"
             with self.subTest(results=nres), tempfile.TemporaryDirectory(prefix="pvm-") as d:
@@ -436,7 +436,7 @@ f_main:
         # a callee that pops past empty traps at LEAVE whether or not ENTER spilled: with k
         # entries spilled, X - k used to land back in range and the caller lost one silently
         for k in (0, 4, 8, 11):
-            body = "f_res:\n        P_ENTER 2, 0\n        P_OP PO_DROP\n        P_B PO_LEAVE, 2\n"
+            body = "f_res:\n        P_ENTER 3, 0\n        P_OP PO_DROP\n        P_OP PO_LEAVE\n"
             body += "f_main:\n" + "        P_CN 1\n" * k + "        P_W PO_CALL, f_res\n"
             body += "        P_OP PO_DROP\n" * k + "        P_CN 0\n        P_OP PO_RET\n"
             with self.subTest(popped_under=k), tempfile.TemporaryDirectory(prefix="pvm-") as d:
@@ -444,20 +444,20 @@ f_main:
 
     def test_frame_stack_boundary(self):
         # plain recursion, no pending values, so only the frame-stack check can trap: 2 bytes for
-        # the native-entry marker and 5 a level (return IP, spill count, 2-byte frame). 204 levels
-        # (rec(203) down to rec(0)) take 1,022 of the 1,024 bytes and run; one more level traps
+        # the native-entry marker and 5 a level (return IP, spill count, size byte, 2-byte frame). 170
+        # levels (rec(169) down to rec(0)) take 1,022 of the 1,024 bytes and run; one more level traps
         body = """
 f_rec:
-        P_ENTER 2, 1
-        P_B PO_LLW, 0
+        P_ENTER 3, 1
+        P_B PO_LLW, 1
         P_BR PO_BRTRU, @r
         P_CN 0
-        P_B PO_LEAVE, 2
-@r:     P_B PO_LLW, 0
+        P_OP PO_LEAVE
+@r:     P_B PO_LLW, 1
         P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
-        P_B PO_ADDLW, 0
-        P_B PO_LEAVE, 2
+        P_B PO_ADDLW, 1
+        P_OP PO_LEAVE
 f_main:
         P_W PO_CW, %d
         P_W PO_CALL, f_rec
@@ -467,7 +467,7 @@ f_main:
         P_CN 0
         P_OP PO_RET
 """
-        for depth, status in ((203, 0), (204, 12)):
+        for depth, status in ((169, 0), (170, 12)):
             with self.subTest(depth=depth), tempfile.TemporaryDirectory(prefix="pvm-") as d:
                 r = build_run(body % depth, d)
                 self.assertEqual(r.exit, status)

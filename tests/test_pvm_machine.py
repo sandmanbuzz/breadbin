@@ -29,17 +29,17 @@ f_main:
 # n + f(n - 1), 120 deep, under a pending 1000: ENTER spills at every level
 REC = """
 f_rec:
-        P_ENTER 2, 1
-        P_B PO_LLW, 0
+        P_ENTER 3, 1
+        P_B PO_LLW, 1
         P_BR PO_BRTRU, @r
         P_CN 0
-        P_B PO_LEAVE, 2
-@r:     P_B PO_LLW, 0
-        P_B PO_LLW, 0
+        P_OP PO_LEAVE
+@r:     P_B PO_LLW, 1
+        P_B PO_LLW, 1
         P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
         P_OP PO_ADD
-        P_B PO_LEAVE, 2
+        P_OP PO_LEAVE
 f_main:
         P_W PO_CW, 1000
         P_B PO_CB, %d

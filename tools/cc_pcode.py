@@ -342,7 +342,7 @@ class PGen(cc.Gen):
 
     def function(self, name, params, body, line):
         self.fn, self.vars = name, {}
-        self.frame, self.temps, self.depth, self.straight = 0, [], 0, 0
+        self.frame, self.temps, self.depth, self.straight = 1, [], 0, 0
         lbl = "fn_" + name
         self.claim(lbl, line)
         self.lab(lbl)
@@ -353,9 +353,9 @@ class PGen(cc.Gen):
                 self.frame += 1             # ENTER stores two bytes per parameter: a char reads the low one
         for s in body:
             self.stmt(s)
-        if not self.out[-1].strip().startswith("P_B PO_LEAVE"):     # after a return no label reaches this
+        if not self.out[-1].strip().startswith("P_OP PO_LEAVE"):     # after a return no label reaches this
             self.const(0)
-            self.op("P_B", "PO_LEAVE", f"FS_{name}")
+            self.op("P_OP", "PO_LEAVE")
         if self.frame > FRAME_MAX:
             raise CompileError(f"line {line}: {name}'s frame (parameters, locals and temporaries) takes "
                                f"{self.frame} bytes; the limit is {FRAME_MAX}")
@@ -466,7 +466,7 @@ class PGen(cc.Gen):
             else:
                 self.check(("int", False), self.expr(s[1]), s[1], s[2], "return")
                 self.pop()
-            self.op("P_B", "PO_LEAVE", f"FS_{self.fn}")
+            self.op("P_OP", "PO_LEAVE")
         elif kind == "if":
             _, cond, then, other, _line = s
             else_l, end_l = self.new_label(), self.new_label()
