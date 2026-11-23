@@ -72,12 +72,20 @@ int main() {
 """ % LONG_LINE
 
 
+# Programs this test never runs. The d64 has ~660 blocks and the generated .s files take ~170 of
+# them, so the shipped image's free space (it shrinks as userland grows) cannot hold them; the
+# test disk drops the big programs unrelated to `as` and the shell instead of failing ENOSPC.
+UNUSED = ("bas", "basic", "calc", "edit")
+
+
 def make_disk(programs):
     """A copy of the breadbin image with each program's .s in /home (the image is the root
     filesystem). One disk and one VICE session serve every program, so the boot is paid once."""
     tmp = tempfile.mkdtemp(prefix="cc-")
     root = os.path.join(tmp, "root")
     shutil.copytree(os.path.join(ROOT, "build", "root"), root)
+    for name in UNUSED:
+        os.remove(os.path.join(root, "bin", name))
     for name, asm in programs.items():
         with open(os.path.join(root, "home", name + ".s"), "w", encoding="ascii") as f:
             f.write(asm)
