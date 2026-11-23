@@ -695,6 +695,10 @@ class PGen(cc.Gen):
             self.pop()
             self.op("P_OP", "PO_NEG")
             return ("int", False)
+        if kind in ("neg", "comp") and e[1][0] == "num" and e[1][1] == (1 if kind == "neg" else 0):
+            self.op("P_OP", "PO_MINUS1")    # -1 and ~0: one byte, not a 1 and a NEG
+            self.push()
+            return ("int", False)
         if kind in ("neg", "comp"):
             if self.expr(e[1])[1]:
                 raise CompileError(f"line {e[2]}: {'-' if kind == 'neg' else '~'} of a pointer is not in this slice")
