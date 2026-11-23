@@ -91,7 +91,7 @@ Kept by every proposal: the BAM marks every sector used, the CBM directory on 18
 3. F8: when does the Ultimate write a drive-modified D64 back to the host file, and can UCI report the mounted image's path?
 4. The REU cache needs 19 banks, so a 512 KB 1750 gets no cache at all. Should the cache shrink `/tmp` on small REUs, so Expanded on period hardware benefits too?
 5. F1 moves message text to a file: acceptable for `EIO` paths (fallback `"error N"`)?
-6. Order of F5 against M0-8's fastboot1541 stage 1: F5 needs no drive code and works on any drive with an REU. I'd do F5+F6 first and keep fastboot for Classic once the stall is understood.
+6. Order of F5 against M0-8's fastboot1541 stage 1: F5 needs no drive code and works on any drive with an REU. I'd do F5+F6 first and keep fastboot for Classic (the stall is closed: it was harness DMA, 2026-11-18).
 
 ## Recommended staged plan
 

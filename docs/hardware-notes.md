@@ -765,6 +765,20 @@ Setup: C64 Ultimate firmware 1.1.0, drive A = device 9 (JiffyDOS 1541-II ROM), J
 - Config: the harness left drive A on `/Temp/test.d64`; remounted `/Temp/breadbin.d64` afterwards (no trap in the harness; `/v1/drives` before and after).
 - Not run: the full hardware list, JiffyDOS-ROM VICE runs, `tools/ci/run.sh test-smoke`.
 
+### 2026-11-18: the physical-1541 stall is closed (owner)
+
+Everything above about the root-mount stall, the 1581 series, `bus_acptr` and the throwaway `iec-*` branches is history. The cause was the harness's DMA reads halting the CPU mid-IEC-byte; see `docs/design/io-attack-log.md` ("2026-11-18: closed"). The hardware rule that follows: never read memory over REST while the bus is moving, and use the gate.
+
+## con80 (80-column console module) on the Ultimate, 2026-11-20
+
+Image built with `/etc/con80` (`experiments/con80/hw_boot.py`, `hw_type.py`), drive A on bus 9, eyes-on by the owner. Commit 0dc27bd plus the screen-off change.
+
+- **Boot:** login at 80 columns with a blinking cursor; column 0 legible with a black border and background; no colour or matrix artefacts seen.
+- **Mode switch:** before the change, an inverse `@` flickered for about 300-500 ms while `c80_init` built the matrix and cleared the bitmap with the VIC still in text mode. With `$D011` set to `$0B` (screen off) around `c80_init` the transition is a clean blank; confirmed by eye.
+- **Scroll (`ls /bin`, full screen):** about 2 s at 1 MHz (visibly slower than 40 columns, the cost of the 4-byte font unpack; acceptable, comparable to period soft-80 software); at 48 MHz (`U64 Specific Settings` / `CPU Speed`, Turbo Registers mode) the owner calls it excellent, milliseconds.
+- Config note: the `CPU Speed` values are space-padded (`" 1"`, `"48"`, `"64"`); an unpadded `1` is refused, so a restore trap that uses it silently leaves the speed up.
+- Not yet run on hardware: editor, Ctrl-C, unload/reload (needs a boot-time load; a running shell blocks the claim).
+
 ### 2026-11-19, `/lib/km/d81` against the physical 1581 (JiffyDOS 6.0 1581, bus 10) (cloud session)
 
 Setup: `main` at 5311612; C64 Ultimate firmware 1.1.0, drive A = device 9 (emulated 1541, JiffyDOS 1541-II ROM) holding the unlinked test boot image, JiffyDOS KERNAL; the physical 1581 at 10 with the owner's sacrificial disk, powered on (the owner's note: a plugged-in 1581 must be switched on or the bus hangs; likely termination; with every physical device on, no quirk seen that was not our own harness mistake). Physical 1541 not on the bus run. Under `tools/with-lock -r ultimate`, `BREADBIN_ULTIMATE_BUS=9`, `tests/d81_hw.py` (new; `--format` for stage 2).

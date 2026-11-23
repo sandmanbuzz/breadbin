@@ -104,3 +104,20 @@ io_set
 io_eoi
 ?io_txd
 ?io_jif
+# con80.km (src/mod/con80.s): the four console stubs and their 40-column bodies, the cursor and
+# busy flags, the page table (it claims the fixed pages $20-$3F), the screen colour fill
+tmp2
+tmp3
+con_write
+cursor_hide
+cursor_show
+c40_hide
+c40_show
+c40_putc
+c40_write
+con_busy
+cur_vis
+to_screen
+scr_color
+pg_used
+free_pages

@@ -60,7 +60,7 @@ Budget arithmetic (ESTIMATE, from the figures above; 14 B above BSS untouched in
 
 - **Full job control (1.1-1.7 KB):** at least 3 pool pages over the room today. Revisit after NBUF and the CP2 shell-BSS branch (`feat/cp2-sh-bss`, held, `wip.md:37`).
 - **Write-back (500-700 B):** needs a decision on data-loss policy; on an Ultimate UCI mount the cache does not apply. `wip.md:25` shows even write-through to a mounted image is not confirmed on the U2 path.
-- **Fast read (330 B), fast boot:** a Classic-tier win; the owner's Ultimate-first frame deprioritises it. Not proven on the JiffyDOS drive; the physical-1541 stall is mitigated, not root-caused (`CLAUDE.md`).
+- **Fast read (330 B), fast boot:** a Classic-tier win; the owner's Ultimate-first frame deprioritises it. Not proven on the JiffyDOS drive. The physical-1541 stall is closed (harness DMA, `docs/design/io-attack-log.md`).
 - **S5, M0-6:** no user value alone. Kernel line editor (~1,000 B) duplicates the shell version.
 - **Compiler on device:** 25-32 pages while running (against 154) for an example of scale; wait for S12b.
 
