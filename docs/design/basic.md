@@ -248,6 +248,8 @@ today) and the compiler K. **The peak is T + C + K, and only the peak limits a p
    `docs/design/pvm.md` §4): 18,688 bytes free at the shell (VICE), from 17,920. Paid: a `char`
    variable load or store takes one more op (`LLA`/`LA` then `LB`/`SB`), so the image grew a little
    and byte-heavy code runs a little slower. Not yet run: the full suite, JiffyDOS, hardware.
+   A second pass the same day took the VM to 7 pages (1,789 bytes; `pvm.md` §4): one more page for the
+   BASIC arena, with the image at 10,202 bytes (40 pages, unchanged). The banner figure was not re-read.
 
    *Landed (image pass 2, 2026-11-20):* 42 pages to 41 (code 9,161 bytes, BSS 1,006): 17,920 bytes
    free at the shell (VICE). Paid: `c_const`, the number reader, in assembly (about 35 bytes); the

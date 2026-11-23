@@ -220,8 +220,19 @@ compiler no longer treats a `char` variable as a "simple" operand: a load is `LL
 The tests and `src/pvm/test/bench.s` use the surviving ops (`bench.s` is no longer PLASMA's
 output verbatim; its result, 469, is unchanged). Dead opcode names are gone from `pvm.inc`.
 Evidence: the host tests, `SharedVM` (8 pages) and the smoke set under VICE; the full suite
-and the hardware run are milestone work. A seventh page needs about 200 bytes more (the
-`ENTER`/`LEAVE` spill, `SYS` and the `XOP` handler are the candidates).
+and the hardware run are milestone work. 
+**Second pass (same day): 1,992 to 1,789 bytes, 7 pages.** Dropped as well: `LNOT ISGE ISLE BRAND
+BROR IDXLW ADDAW`. `cc_pcode.py` and `bas.c` emit the replacements: `<=`/`>=` are `ISGT`/`ISLT`
+with the answer inverted (the branch sense in a condition; `ADDI 1` for a 0/1 value; `COMP` in
+BASIC, whose compare gives -1/0), `!x` is `CN 0; ISEQ; NEG` (two eval slots, which `need()` counts),
+`&&`/`||` as a value are `cond`'s branches then `CN 1` / `BRNCH` / `CN 0`, and a scaled local or a
+global added to TOS is `LLW`/`LAW` then `IDXW`/`ADD`. `SHL` and `SHR` are count loops (no 8-bit
+fast path: slower for counts of 8 and up, 36 bytes smaller). `FIXDROP` and the `XOP` tail reuse
+`FIXNEXT`, and `CALLTMP` tests for a `JSR pvm_interp` header with a three-byte loop. The BASIC image
+grew from 10,170 to 10,202 bytes, still 40 pages. Evidence: host tests (189), `SharedVM` (7 pages),
+`Basic`, `CompiledC` and the smoke set under VICE, a hater review (one block, `!x` depth, fixed
+with a test). A page-0 padding of 7 bytes remains and `pushov0` is dead code: both are slack for
+the next pass. Not run: the full suite, JiffyDOS, hardware.
 
 ## 5. Risks
 
