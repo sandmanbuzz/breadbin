@@ -1,6 +1,6 @@
 ; pvm.inc - p-code for the Breadbin VM (src/pvm/pvm.s) as ca65 macros. The opcode numbers are
 ; PLASMA's (docs/design/pvm.md). A bytecode function starts at its ENTER (native entry: P_FUNC); addresses are emitted as
-; .word so the CX relocation sees them; branch offsets are relative to the offset word.
+; .word so the CX relocation sees them; branch offsets are one signed byte from the offset byte.
 .import pvm_init, pvm_interp
 .importzp pvm_errno
 
@@ -40,9 +40,10 @@ P_IPY   = $2F
         .byte op
         .word .loword(w)
 .endmacro
-.macro P_BR op, target          ; branch: offset from the offset word
+.macro P_BR op, target          ; branch: a signed byte, from the offset byte (cc_pcode.py relaxes far ones to a JUMP)
         .byte op
-        .word .loword((target) - *)
+        .assert ((target) - *) >= -128 .and ((target) - *) <= 127, error, "branch out of range"
+        .byte .lobyte((target) - *)
 .endmacro
 .macro P_ENTER framesize, params
         .byte $58, framesize, params

@@ -74,7 +74,7 @@ FSTACK = 1024                        # bytes of frame stack (return IPs, spills,
 POOL = 39680                         # the user pool ($0800-$A2FF): static bytes past it can never load
 STRAIGHT = 240                       # most bytecode bytes past the IP base before a renormalising branch
 
-SIZE = {"P_CN": 1, "P_OP": 1, "P_B": 2, "P_W": 3, "P_BR": 3, "P_ENTER": 3, "P_SYS": 2}
+SIZE = {"P_CN": 1, "P_OP": 1, "P_B": 2, "P_W": 3, "P_BR": 2, "P_ENTER": 3, "P_SYS": 2}
 
 # A program with `/* xops */` keeps the vector table of the VM's XOP opcodes (pvm.s) in the 56
 # bytes under the bottom of its frame stack, copied at start from `xtab` (28 words, which the
@@ -294,12 +294,51 @@ class PGen(cc.Gen):
         total = sum(v.nbytes() for v in self.globals.values())
         if total > POOL:   # cc.STATIC_MAX is the native back end's (the on-system `as`); ca65 has none
             raise CompileError(f"the program's static variables take {total} bytes; the limit is {POOL}")
+        self.relax()
         helpers = "".join(HELPERS[h] for h in HELPERS if h in self.helpers)
         if self.externs:    # the natives may share the globals, by their labels
             helpers += "".join(f".export {v.label}\n" for v in self.globals.values())
         return (PRELUDE.format(fstack=self.fstack, **XOPS[self.xops]) + "\n".join(self.out) + "\n" + helpers
                 + '.segment "DATA"\n' + self.strings_text() + "\n".join(self.gdata) + "\n"
                 + '.segment "BSS"\n' + "\n".join(self.gres) + "\n" + '.segment "CODE"\n')
+
+    def relax(self):
+        """Branches are two bytes (a signed offset from the offset byte). One that cannot reach is
+        a JUMP (unconditional) or the opposite branch over a JUMP, found by growing the set of far
+        branches until no more are out of range (sizes only grow)."""
+        out = self.out
+        brs = [i for i, l in enumerate(out) if l.lstrip().startswith("P_BR ")]
+        far = {}
+        while True:
+            at, lab, pos = 0, {}, {}
+            for i, l in enumerate(out):
+                t = l.strip()
+                m = re.match(r"(P_\w+)", t)
+                pos[i] = at
+                if not m:
+                    if t.endswith(":"):
+                        lab[t[:-1]] = at
+                elif m[1] == "P_BR":
+                    at += (3 if "PO_BRNCH" in t else 5) if i in far else 2
+                else:
+                    at += SIZE[m[1]]
+            grew = False
+            for i in brs:
+                if i not in far:
+                    off = lab[out[i].rsplit(",", 1)[1].strip()] - (pos[i] + 1)
+                    if not -128 <= off <= 127:
+                        far[i] = True
+                        grew = True
+            if not grew:
+                break
+        for i in far:
+            op, tgt = (x.strip() for x in out[i].strip()[5:].split(","))
+            if op == "PO_BRNCH":
+                out[i] = f"        P_W PO_JUMP, {tgt}"
+            else:
+                skip = self.new_label()
+                inv = {"PO_BRTRU": "PO_BRFLS", "PO_BRFLS": "PO_BRTRU", "PO_BREQ": "PO_BRNE", "PO_BRNE": "PO_BREQ"}[op]
+                out[i] = f"        P_BR {inv}, {skip}\n        P_W PO_JUMP, {tgt}\n{skip}:"
 
     def function(self, name, params, body, line):
         self.fn, self.vars = name, {}

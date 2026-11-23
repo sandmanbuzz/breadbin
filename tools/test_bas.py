@@ -343,6 +343,12 @@ class Language(unittest.TestCase):
         self.assertEqual(self.out("10 PRINT 1\n20 PRINT 2\nRUN 20\nRUN 15\nGOTO 20\nGOTO 5\n"),
                          " 2 \n?UNDEF'D STATEMENT ERROR\n 2 \n?UNDEF'D STATEMENT ERROR\n")
 
+    def test_if_reaches_past_a_short_branch(self):
+        # the body of a false IF is skipped by a JUMP, so a line of more than 127 bytes of code still works
+        body = ":".join(["A=A+B*C-D"] * 7)
+        self.assertEqual(self.out("10 B=1:C=2:D=1:IF 0 THEN %s\n20 PRINT A\n30 IF 1 THEN %s:PRINT A\nRUN\n" % (body, body)),
+                         " 0 \n 7 \n")
+
     def test_gosub_and_return(self):
         out = self.out("10 FOR I=1 TO 3:GOSUB 100:NEXT:GOSUB 200:END\n100 PRINT I;:RETURN\n"
                        "200 FOR J=1 TO 5:IF J=2 THEN RETURN\n210 NEXT\nRUN\n")

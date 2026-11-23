@@ -618,29 +618,30 @@ BRTRU:  inx
         ora ESTKL-1,x
         bne BRNCH
 NOBRNCH: iny
-        iny
         bmi FIXNEXT
         jmp NEXTOP
 BRFLS:  inx
         lda ESTKH-1,x
         ora ESTKL-1,x
         bne NOBRNCH
-BRNCH:  tya                     ; flatten IP
+BRNCH:  tya                     ; flatten IP: TMP = the offset byte
         sec
         adc IP
         sta TMP
         lda #0
         tay
         adc IP+1
-        sta TMP+1               ; add the branch offset
-        lda (TMP),y
-        adc TMP                 ; no carry out of IP+Y
+        sta TMP+1
+        lda (TMP),y             ; a signed byte, from its own address
+        bpl :+
+        dey
+:       clc
+        adc TMP
         sta IP
-        iny
-        lda (TMP),y
+        tya
         adc TMP+1
         sta IP+1
-        dey
+        ldy #0
         jmp FETCHOP
 
 ; ---- calls ----

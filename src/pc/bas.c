@@ -320,7 +320,9 @@ int finish() {
 int prologue() {        /* the entry of a run: an error comes back here (rt_mark then gives 1),
                            and the run returns */
     c_ncall(&rt_mark);
-    c_opw(76 /* PO_BRFLS */, 4);  /* to the body, past the CN 0 and RET */
+    c_room(2);
+    c_emit(76 /* PO_BRFLS */);
+    c_emit(3);            /* to the body, past the CN 0 and RET */
     return finish();
 }
 
@@ -800,8 +802,11 @@ int ifs_() {            /* IF e THEN n | statements, IF e GOTO n: false goes to 
         c_fail(11);
         return 0;
     }
-    c_room(3);
-    c_emit(76 /* PO_BRFLS */);
+    c_room(5);            /* false: over a JUMP to the line's end (a branch reaches 127 bytes, a line may not) */
+    c_emit(78 /* PO_BRTRU */);
+    c_emit(4);
+    c_emit(196 /* PO_JUMP */);
+    straight = 0;
     ifs[nif] = cend;
     nif = nif + 1;
     c_emit(0);
@@ -919,7 +924,7 @@ int stmts() {           /* the statements of src from si, : between them */
 
 int endline() {         /* the IFs' false branches come here */
     int i;
-    for (i = 0; i < nif; i = i + 1) putw(mem + ifs[i], cend - ifs[i]);
+    for (i = 0; i < nif; i = i + 1) putw(mem + ifs[i], addr(cend));
     nif = 0;
     return 0;
 }

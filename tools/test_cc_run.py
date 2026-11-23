@@ -104,7 +104,14 @@ class Executed(Case):
         src = 'int main() { puts("hello, world!\\n"); return 0; }'
         self.assertEqual(self.run_c(src), b"hello, world!\n")
 
-    def test_operator_grid_signed(self):
+    def test_far_branches(self):
+        # a loop body and an if arm longer than a signed byte reaches: relax() turns them into JUMPs
+        body = "".join("n = n + %d; " % (i % 7 + 1) for i in range(60))
+        src = ("int main() { int n = 0; int i = 0; while (i < 2) { %s i = i + 1; } "
+               "if (n == 0) { %s } else { puts(\"A\"); } return 0; }" % (body, body))
+        self.assertEqual(self.run_c(src), b"A")
+
+
         # values as 16-bit patterns; the signed reading is signed_ops'
         pairs = [(0, 0), (0, 1), (1, 0), (5, 5), (0x7FFF, 0x8000), (0x8000, 0x7FFF), (0xFFFF, 1), (1, 0xFFFF),
                  (0xFFFF, 0), (0, 0xFFFF), (0xFFFF, 0xFFFE), (0x8000, 0x8001), (0xFFFF, 0x8000),
