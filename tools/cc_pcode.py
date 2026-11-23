@@ -867,6 +867,9 @@ class PGen(cc.Gen):
         bytecode-only, a native is called directly by name: NCAL); no arguments, its result is the value."""
         if len(args) != 1:
             raise CompileError(f"line {line}: icall takes 1 argument, not {len(args)}")
+        x = args[0][1] if args[0][0] == "addr" else None
+        if x and x[0] == "var" and x[1] in self.externs and x[1] not in self.vars and x[1] not in self.globals:
+            raise CompileError(f"line {line}: icall of the native {x[1]}: ICAL runs bytecode only; call it by name")
         if not self.expr(args[0])[1]:
             raise CompileError(f"line {line}: argument 1 of icall: a number where a pointer is needed")
         self.op("P_OP", "PO_ICAL")          # pops the address, pushes the result

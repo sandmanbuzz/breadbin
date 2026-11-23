@@ -553,6 +553,12 @@ class L3b(unittest.TestCase):
                    'int main() { char *p = &h; if (icall(p) != 7) return 1; return icall(&h) + 30; }',
                    b"HH", 37)
 
+    def test_icall_of_a_native_is_refused(self):
+        # ICAL is bytecode-only: icall(&native) would run the routine as bytecode and trap
+        with self.assertRaises(cc.CompileError) as cm:
+            cc_pcode.compile_pcode("extern int nat();\nint main() { return icall(&nat); }")
+        self.assertIn("icall of the native nat", str(cm.exception))
+
     def test_icall_runs_code_built_at_run_time(self):
         # what RUN does: bytecode built in a buffer and run by icall: CALL h; CB 5; ADD; RET
         # (PO_CALL $54, PO_CB $2A, PO_ADD $82, PO_RET $5C)
