@@ -863,8 +863,8 @@ class PGen(cc.Gen):
         self.temps += reversed(slots)
 
     def icall(self, args, line):
-        """icall(p): call the code at p, a bytecode function (one that starts with JSR
-        pvm_interp, as &f gives) or native code; no arguments, its result is the value."""
+        """icall(p): call the code at p, a bytecode function (as &f gives; ICAL is
+        bytecode-only, a native is called directly by name: NCAL); no arguments, its result is the value."""
         if len(args) != 1:
             raise CompileError(f"line {line}: icall takes 1 argument, not {len(args)}")
         if not self.expr(args[0])[1]:
@@ -933,7 +933,7 @@ def compile_pcode(src, fstack=None):
         xcalls, xvoid = {}, set()
         # an extern's comment: "xop N" (a one-byte op), "void" (it leaves no result: no DROP after a call
         # and none may read it; the routine pops its own arguments), or "xop N void"
-        for m in re.finditer(r"^extern\s[^;]*?(\w+)\s*\([^;]*\)[ \t]*;[ \t]*/\*[ \t]*(?:xop[ \t]+(\d+))?([ \t]*void)?(?![\w])", src, re.M):
+        for m in re.finditer(r"^extern\s[^;]*?(\w+)\s*\([^;]*\)[ \t]*;[ \t]*/\*[ \t]*(?:xop[ \t]+(\d+))?([ \t]*void)?[ \t]*\*/", src, re.M):
             if m.group(3):
                 xvoid.add(m.group(1))
             if m.group(2):

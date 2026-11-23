@@ -111,7 +111,7 @@ class Executed(Case):
                "if (n == 0) { %s } else { puts(\"A\"); } return 0; }" % (body, body))
         self.assertEqual(self.run_c(src), b"A")
 
-
+    def test_operator_grid_signed(self):
         # values as 16-bit patterns; the signed reading is signed_ops'
         pairs = [(0, 0), (0, 1), (1, 0), (5, 5), (0x7FFF, 0x8000), (0x8000, 0x7FFF), (0xFFFF, 1), (1, 0xFFFF),
                  (0xFFFF, 0), (0, 0xFFFF), (0xFFFF, 0xFFFE), (0x8000, 0x8001), (0xFFFF, 0x8000),

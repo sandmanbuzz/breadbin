@@ -920,7 +920,7 @@ int stmts() {           /* the statements of src from si, : between them */
 }
 
 int endline() {         /* the IFs' false branches come here */
-    for (; nif; nif = nif - 1) {
+    for (; nif && !err; nif = nif - 1) {   /* an error may have left the newest link unwritten */
         char *p;
         p = mem + ifh;
         ifh = getw(p);
