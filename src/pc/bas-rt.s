@@ -10,19 +10,23 @@
 ;
 ; Two calling conventions. The n_ routines are CALLed by compiled BASIC: they pop their
 ; arguments from the eval stack and push a result only where noted (the compiler knows which).
-; The c_ routines are the same for the mini C (`extern int c_add();`): each pushes one result,
-; as cc.py --pcode's extern contract requires.
+; The c_ routines are the same for the mini C (`extern int c_add();`): those bas.c declares
+; /* void */ push nothing (they are the n_ routines themselves), the others one result.
 ;
 ; Control (pvm.md section 4 item 2, "native callees"): a native routine reached by CALL or ICAL
 ; finds, above its own return address, the IP the VM resumes at when it returns: low byte at
 ; $0103 + S, high at $0104 + S. rt_go and rt_throw jump by rewriting it.
+;
+; Golfed (size over clarity, by the owner's leave): routines fall into each other, share tails,
+; skip instructions with BIT ($2C skips 2 bytes, $24 one; a BIT read never hits an I/O register
+; that a read changes), and pass flags and registers in conventions of their own, said where.
 .include "pvm.inc"
 .include "breadbin.inc"
 
-.export n_ldv, n_ldk, n_stv, n_dup, n_add, n_sub, n_mul, n_div, n_neg, n_abs, n_int, n_sgn
+.export n_ldv, n_stv, n_add, n_sub, n_mul, n_div, n_neg, n_abs, n_int, n_sgn
 .export n_fromi, n_toi, n_cmp, n_tst
 .export rt_mark, rt_go, rt_ln, xtab
-.export c_ldv, c_stv, c_dup, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_const, c_fmt
+.export c_ldv, c_stv, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_const, c_fmt
 .export c_grow, c_throw, c_err, c_curip, c_crunch, c_find
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 
@@ -42,20 +46,19 @@ t0:     .res 2
 nstk:   .res NDEPTH * 4
 nsp:    .res 1                  ; bytes in use
 acc:    .res 8                  ; the accumulator: 64 bits for products and dividends
+rem:    .res 4                  ; udiv's remainder, right after acc (one shift runs through both);
+                                ; umul's bit count
 opb:    .res 4                  ; the other operand, the multiplier or divisor
-rem:    .res 5                  ; the remainder (one bit more than the divisor)
 tq:     .res 4
 dvs:    .res 4                  ; n_div's divisor while the dividend is scaled
 sgn:    .res 1                  ; bit 7: the result is negative
-ms:     .res 1                  ; rt_mark: S, X, IFP, the resume IP and the return address
+msv:    .res 4                  ; rt_mark: the return address and the resume IP ($0101-$0104 + S),
+ms:     .res 1                  ; S, X and IFP
 mx:     .res 1
 mifp:   .res 2
-mip:    .res 2
-mret:   .res 2
 estk:   .res ESTKSZ
 err:    .res 1
 curip:  .res 2
-fx:     .res 5                  ; c_fmt: the fraction, then the whole part
 fbuf:   .res 12                 ; c_fmt's text: sign, 6 digits, point, 4 digits
 fend:
 kbase:  .res 2                  ; c_crunch and c_find
@@ -80,68 +83,38 @@ rt_mark:
         sta nsp
         sta err
         stx mx
-        tsx
-        stx ms
-        lda $0101,x
-        sta mret
-        lda $0102,x
-        sta mret+1
-        lda $0103,x
-        sta mip
-        lda $0104,x
-        sta mip+1
         lda P_IFP
         sta mifp
         lda P_IFP+1
         sta mifp+1
-        ldx #ESTKSZ - 1         ; the whole eval stack: a function called after this may
-:       lda P_ESTKH,x           ; spill the entries under X into its frame and reuse them
+        ldx #ESTKSZ - 1         ; the whole eval stack (the 0 too): a function called after this
+:       lda P_ESTKH,x           ; may spill the entries under X into its frame and reuse them
         sta estk,x
         dex
         bpl :-
+        tsx
+        stx ms
+        ldy #0
+:       lda $0101,x
+        sta msv,y
+        inx
+        iny
+        cpy #4
+        bne :-
         ldx mx
-        rts
-
-; throw: error A. Back to rt_mark's caller, which sees 1; the frame stack, the 6502 stack and
-; the eval stack as they were there.
-throw:  sta err
-        ldx ms
-        txs
-        lda mret
-        sta $0101,x
-        lda mret+1
-        sta $0102,x
-        lda mip
-        sta $0103,x
-        lda mip+1
-        sta $0104,x
-        lda mifp
-        sta P_IFP
-        lda mifp+1
-        sta P_IFP+1
-        ldx #ESTKSZ - 1
-:       lda estk,x
-        sta P_ESTKH,x
-        dex
-        bpl :-
-        ldx mx
-        lda #1
-        sta P_ESTKL,x
         rts
 
 ; rt_go: pop an address; if it is not 0, continue there (absolute, as JUMP).
-rt_go:  lda P_ESTKL,x
-        sta t0
-        lda P_ESTKH,x
-        sta t0+1
-        inx
-        ora t0
+rt_go:  inx
+        lda P_ESTKH-1,x
+        tay
+        ora P_ESTKL-1,x
         beq @r
+        lda P_ESTKL-1,x
         stx sx
         tsx
-        lda t0
         sta $0103,x
-        lda t0+1
+        tya
         sta $0104,x
         ldx sx
 @r:     rts
@@ -158,265 +131,271 @@ rt_ln:  stx sx
 
 ; ---- the number stack ----
 
-pusha:  ldy nsp
-        cpy #NDEPTH * 4
-        bcc :+
-        lda #E_OOM
-        jmp throw
-:       lda acc
-        sta nstk,y
-        lda acc+1
-        sta nstk+1,y
-        lda acc+2
-        sta nstk+2,y
-        lda acc+3
-        sta nstk+3,y
+; pop2: sx = X, then pop b to opb and a to acc. pop1: sx = X, pop to acc. popa, popb: no sx.
+; popa also zeroes acc[4-7], and leaves N set (X = $FF). All lose X and keep C.
+pop2:   stx sx
+        jsr popb
+        .byte $2C               ; skip pop1's STX (X is not the caller's now)
+pop1:   stx sx
+popa:   ldx #3
+        .byte $2C               ; skip popb's LDX
+popb:   ldx #opb - acc + 3
+        ldy nsp
+:       dey
+        lda nstk,y
+        sta acc,x
+        dex
         tya
-        clc
-        adc #4
-        sta nsp
-        rts
-
-popa:   jsr popy
-        lda nstk,y
-        sta acc
-        lda nstk+1,y
-        sta acc+1
-        lda nstk+2,y
-        sta acc+2
-        lda nstk+3,y
-        sta acc+3
+        and #3
+        bne :-
+        sty nsp
+        txa
+        bpl rts1                ; popb: X = 7
 clrhi:  lda #0
-        sta acc+4
-        sta acc+5
-        sta acc+6
-        sta acc+7
-        rts
-
-popb:   jsr popy
-        lda nstk,y
-        sta opb
-        lda nstk+1,y
-        sta opb+1
-        lda nstk+2,y
-        sta opb+2
-        lda nstk+3,y
-        sta opb+3
-        rts
-
-popy:   lda nsp
-        sec
-        sbc #4
-        sta nsp
-        tay
-        rts
+        ldx #3
+:       sta acc+4,x
+        dex
+        bpl :-
+rts1:   rts
 
 ; ---- arithmetic on acc and opb ----
 
-nega:   ldy #$FC                ; acc = -acc (32 bits)
+; abs2: acc and opb to their magnitudes, sgn the sign of their product. abs0: sgn = 0, acc to
+; its magnitude. absx: acc[X..X+3] to its magnitude, sgn ^= $80 if it was negative.
+; nega: acc = -acc. negx: acc[X..X+3] = -itself. Y is lost; X too.
+abs2:   jsr abs0
+        ldx #opb - acc
+        bne absx
+abs0:   lda #0
+        sta sgn
+        tax
+absx:   lda acc+3,x
+        bpl rts2
+        lda sgn
+        eor #$80
+        sta sgn
+        .byte $2C               ; skip nega's LDX
+nega:   ldx #0
+negx:   ldy #4
         sec
 :       lda #0
-        sbc acc - $FC,y
-        sta acc - $FC,y
+        sbc acc,x
+        sta acc,x
+        inx
+        dey
+        bne :-
+rts2:   rts
+
+; ab: pop b and a (sx = X), b = -b if C is set, then acc += opb: A the top byte, V overflow.
+; add4: acc[0-3] += opb. addx: acc[X..X+3] += opb (C out; Y lost).
+ab:     jsr pop2
+        bcc add4
+        ldx #opb - acc
+        jsr negx
+add4:   ldx #0
+addx:   ldy #$FC
+        clc
+:       lda acc,x
+        adc opb - $FC,y
+        sta acc,x
+        inx
         iny
         bne :-
         rts
 
-absa:   lda acc+3               ; acc = |acc|, sgn ^= its sign
-        bpl :+
-        lda sgn
-        eor #$80
-        sta sgn
-        jmp nega
-:       rts
-
-absb:   lda opb+3               ; opb = |opb|, sgn ^= its sign
-        bpl :++
-        lda sgn
-        eor #$80
-        sta sgn
-        ldy #$FC
-        sec
-:       lda #0
-        sbc opb - $FC,y
-        sta opb - $FC,y
-        iny
+; addb: acc (64 bits) += opb (32 bits). ripple: acc[X..7] += C.
+addb:   jsr add4
+ripple: bcc @r
+:       inc acc,x
+        bne @r
+        inx
+        cpx #8
         bne :-
-:       rts
+@r:     rts
 
-; umul: acc[0-3] * opb -> acc (64 bits), unsigned
+; setb8: opb = A. tenk: opb = 10,000. tena: acc[0-3] = 10,000. setx: acc[X..X+3] = A | Y << 8.
+tena:   ldx #0
+        .byte $2C               ; skip tenk's LDX
+tenk:   ldx #opb - acc
+        lda #<10000
+        ldy #>10000
+        bne setx
+setb8:  ldy #0
+        ldx #opb - acc
+setx:   sta acc,x
+        tya
+        sta acc+1,x
+        lda #0
+        sta acc+2,x
+        sta acc+3,x
+        rts
+
+; umul: acc[0-3] * opb -> acc (64 bits), unsigned. m10k: acc[0-3] * 10,000.
+m10k:   jsr tenk
 umul:   jsr clrhi
-        ldx #32
+        lda #32
+        sta rem
 @l:     lda acc
         lsr a
         bcc @n
-        ldy #$FC                ; acc[4-7] += opb; the carry out goes in at the top
-        clc
-:       lda acc + 4 - $FC,y
-        adc opb - $FC,y
-        sta acc + 4 - $FC,y
-        iny
-        bne :-
-@n:     ror acc+7
-        ror acc+6
-        ror acc+5
-        ror acc+4
-        ror acc+3
-        ror acc+2
-        ror acc+1
-        ror acc
+        ldx #4
+        jsr addx                ; acc[4-7] += opb; the carry out goes in at the top
+@n:     ldx #8
+:       ror acc-1,x
         dex
+        bne :-
+        dec rem
         bne @l
         rts
 
-; udiv: acc / opb -> quotient in acc, remainder in rem, unsigned. udiv32 takes a 32-bit
-; dividend (acc[0-3]) and udiv48 a 48-bit one (acc[0-5]): they move it to the top of acc and
-; run 32 or 48 steps instead of 64.
-udiv32: ldy #3
-:       lda acc,y
-        sta acc+4,y
+; udiv: acc (64 bits) / opb -> quotient in acc, remainder in rem, unsigned; opb 1 to 2^31
+; (so rem, under opb, fits 4 bytes even shifted). ustep: Y more steps.
+udiv:   ldx #3
         lda #0
-        sta acc,y
-        dey
+:       sta rem,x
+        dex
         bpl :-
-        ldx #32
-        bne udiv
-udiv48: ldy #5
-:       lda acc,y
-        sta acc+2,y
-        dey
-        bpl :-
-        lda #0
-        sta acc
-        sta acc+1
-        ldx #48
-udiv:   lda #0
-        ldy #4
-:       sta rem,y
-        dey
-        bpl :-
-@l:     asl acc
-        rol acc+1
-        rol acc+2
-        rol acc+3
-        rol acc+4
-        rol acc+5
-        rol acc+6
-        rol acc+7
-        rol rem
-        rol rem+1
-        rol rem+2
-        rol rem+3
-        rol rem+4
-        ldy #$FC                ; tq = rem - opb, the borrow into rem[4]
-        sec
-:       lda rem - $FC,y
-        sbc opb - $FC,y
-        sta tq - $FC,y
-        iny
+        ldy #64
+@z:     lda acc+7               ; a 0 top byte while rem is 0: 8 steps that only shift, at once
+        bne ustep
+        ldx #7
+:       lda acc-1,x
+        sta acc,x
+        dex
         bne :-
-        lda rem+4
-        sbc #0
-        bcc @n
-        sta rem+4
-        ldy #3
-:       lda tq,y
-        sta rem,y
-        dey
+        stx acc
+        tya
+        sec
+        sbc #8
+        tay
+        bne @z
+        rts
+ustep:  ldx #<-12               ; acc and rem, one bit left
+        clc
+:       rol acc + 12 - $100,x
+        inx
+        bne :-
+        ldx #$FC                ; tq = rem - opb
+        sec
+:       lda rem - $FC,x
+        sbc opb - $FC,x
+        sta tq - $FC,x
+        inx
+        bne :-
+        bcc @n                  ; under opb
+        ldx #3
+:       lda tq,x
+        sta rem,x
+        dex
         bpl :-
         inc acc                 ; the quotient bit (bit 0 is 0 after the shift)
-@n:     dex
-        bne @l
+@n:     dey
+        bne ustep
         rts
 
-setb:   sta opb                 ; opb = A | Y << 8
-        sty opb+1
-        lda #0
-        sta opb+2
-        sta opb+3
+; big: Z clear (A not 0) if acc (64 bits) is past 2^31 - 1. X is lost.
+big:    lda acc+3
+        and #$80
+        ldx #3
+:       ora acc+4,x
+        dex
+        bpl :-
+        tay
         rts
 
-tenk:   lda #<10000
-        ldy #>10000
-        bne setb
+; the errors: each entry's LDA, then BITs over the LDAs after it, into throw with A intact
+ovf:    lda #E_OVF
+        .byte $2C
+c_throw: lda P_ESTKL,x          ; error n: never returns
+        .byte $2C
+ilq:    lda #E_ILQ
+        .byte $2C
+div0:   lda #E_DIV0
+        .byte $2C
+oom:    lda #E_OOM
+
+; throw: error A. Back to rt_mark's caller, which sees 1; the frame stack, the 6502 stack and
+; the eval stack as they were there.
+throw:  sta err
+        ldx ms
+        txs
+        ldy #0
+:       lda msv,y
+        sta $0101,x
+        inx
+        iny
+        cpy #4
+        bne :-
+        lda mifp
+        sta P_IFP
+        lda mifp+1
+        sta P_IFP+1
+        ldx #ESTKSZ - 1
+:       lda estk,x
+        sta P_ESTKH,x
+        dex
+        bpl :-
+        ldx mx
+        inc P_ESTKL,x           ; rt_mark's 0, now 1
+        rts
+
+; pusha: acc[0-3] onto the number stack, or OUT OF MEMORY. X is lost.
+pusha:  ldy nsp
+        cpy #NDEPTH * 4
+        bcs oom
+        ldx #$FC
+:       lda acc - $FC,x
+        sta nstk,y
+        iny
+        inx
+        bne :-
+        sty nsp
+        rts
+
+n_sub:  sec
+        .byte $24               ; skip the CLC
+n_add:  clc
+        jsr ab
+        bvs ovf
+        lda acc+3               ; a signed 32-bit result: -2^31 is an overflow
+        eor #$80
+        ora acc+2
+        ora acc+1
+        ora acc
+        beq ovf
+        bne push
 
 ; fin: acc is a magnitude (64 bits) and sgn its sign: push it, or OVERFLOW past 2^31 - 1.
-fin:    lda acc+4
-        ora acc+5
-        ora acc+6
-        ora acc+7
+fin:    jsr big
         bne ovf
-        lda acc+3
-        bmi ovf
         bit sgn
-        bpl :+
-        jsr nega
-:       jsr pusha
+        bpl push
+negp:   jsr nega
+push:   jsr pusha
         ldx sx
         rts
-ovf:    lda #E_OVF
-        jmp throw
-
-; scale48: acc (a 64-bit magnitude) must fit 48 bits for udiv48; past them the quotient by
-; 10,000 or more would overflow anyway
-scale48: lda acc+6
-        ora acc+7
-        bne ovf
-        rts
-
-; addb: acc (64 bits) += opb (32 bits)
-addb:   ldy #$FC
-        clc
-:       lda acc - $FC,y
-        adc opb - $FC,y
-        sta acc - $FC,y
-        iny
-        bne :-
-        bcc @r
-        ldy #4
-:       lda acc,y
-        adc #0                  ; carry is set: adds 1
-        sta acc,y
-        bcc @r
-        iny
-        cpy #8                  ; cpy clobbers carry: set it again for the next byte
-        bcs @r
-        sec
-        bcs :-
-@r:     rts
 
 ; ---- the n_ routines ----
 
-n_ldk:  lda P_ESTKL,x           ; a CS constant: its 4 bytes follow the length byte
-        clc
-        adc #1
-        sta ptr
-        lda P_ESTKH,x
-        adc #0
-        sta ptr+1
-        jmp ldv2
-n_ldv:  lda P_ESTKL,x           ; push the number at an address
+; popptr: ptr = the eval stack's top, popped
+popptr: lda P_ESTKL,x
         sta ptr
         lda P_ESTKH,x
         sta ptr+1
-ldv2:   inx
+        inx
+        rts
+
+n_ldv:  jsr popptr              ; push the number at an address
 ldv3:   stx sx
         ldy #3
 :       lda (ptr),y
         sta acc,y
         dey
         bpl :-
-push:   jsr pusha
-        ldx sx
-        rts
+        bmi push
 
-n_stv:  lda P_ESTKL,x           ; pop the number to an address
-        sta ptr
-        lda P_ESTKH,x
-        sta ptr+1
-        inx
-        stx sx
-stv2:   jsr popa
+n_stv:  jsr popptr              ; pop the number to an address
+stv2:   jsr pop1
         ldy #3
 :       lda acc,y
         sta (ptr),y
@@ -425,86 +404,22 @@ stv2:   jsr popa
         ldx sx
         rts
 
-n_dup:  stx sx
-        jsr popa
-        jsr pusha
-        jmp push
-
-n_add:  stx sx
-        jsr popb
-        jsr popa
-        ldy #$FC
-        clc
-:       lda acc - $FC,y
-        adc opb - $FC,y
-        sta acc - $FC,y
-        iny
-        bne :-
-        bvc :+
-        jmp ovf
-:
-        jmp signed
-n_sub:  stx sx
-        jsr popb
-        jsr popa
-        ldy #$FC
-        sec
-:       lda acc - $FC,y
-        sbc opb - $FC,y
-        sta acc - $FC,y
-        iny
-        bne :-
-        bvc :+
-        jmp ovf
-:
-signed: lda acc+3               ; a signed 32-bit result: -2^31 is an overflow
-        cmp #$80
-        bne push
-        lda acc
-        ora acc+1
-        ora acc+2
-        bne :+
-        jmp ovf
-:
-        bne push
-
-n_neg:  stx sx
-        jsr popa
-        jsr nega
-        jmp push
-
-n_abs:  stx sx
-        jsr popa
+n_abs:  jsr pop1
         lda acc+3
-        bmi :+
-        jmp push
-:
-        jsr nega
-        jmp push
+        bpl push
+        bmi negp
+n_neg:  jsr pop1
+        bmi negp                ; (popa leaves N set)
 
-n_sgn:  stx sx                  ; -1, 0 or 1
-        jsr popa
+n_sgn:  jsr pop1                ; -1, 0 or 1
         lda acc+3
-        bmi @neg
+        sta sgn                 ; bit 7: the sign, for fin
         ora acc+2
         ora acc+1
         ora acc
-        bne :+
-        jmp push
-:
-        lda #0
-        sta sgn
-        beq one
-@neg:   lda #$80
-        sta sgn
-one:    lda #<10000
-        sta acc
-        lda #>10000
-        sta acc+1
-        lda #0
-        sta acc+2
-        sta acc+3
-        jmp fin
+        beq push                ; 0
+        jsr tena
+        jmp fin                 ; (popa zeroed acc[4-7])
 
 n_fromi: lda P_ESTKL,x          ; pop an int, push it as a number
         sta acc
@@ -518,230 +433,155 @@ n_fromi: lda P_ESTKL,x          ; pop an int, push it as a number
         dey
 :       sty acc+2
         sty acc+3
-        lda #0
-        sta sgn
-        jsr absa
+        jsr abs0
+        jmp mul10k
+
+; whole: acc = the integer part of the popped number's magnitude, sgn its sign, rem the
+; fraction (sx = X)
+whole:  jsr pop1
+        jsr abs0
         jsr tenk
-        jsr umul
-        jmp fin
+        jmp udiv
 
-; whole: acc = the integer part of the popped number's magnitude, sgn its sign, rem the fraction
-whole:  jsr popa
-        lda #0
-        sta sgn
-        jsr absa
-        jsr tenk
-        jmp udiv32
-
-n_toi:  stx sx                  ; pop a number, push it as an int (toward zero); past
-        jsr whole               ; -32768 to 32767, ILLEGAL QUANTITY
-        lda acc+2
-        ora acc+3
-        bne ilq
-        bit sgn
-        bmi @neg
-        lda acc+1
-        bmi ilq
-        bpl pushi
-@neg:   lda acc+1               ; up to 32768
-        cmp #$80
-        bcc :+
-        bne ilq
-        lda acc
-        bne ilq
-:       jsr nega
-pushi:  ldx sx
-        dex
-        lda acc
-        sta P_ESTKL,x
-        lda acc+1
-        sta P_ESTKH,x
-        rts
-ilq:    lda #E_ILQ
-        jmp throw
-
-n_int:  stx sx                  ; the largest whole number not above it
-        jsr whole
-        bit sgn
+n_toi:  jsr whole               ; pop a number, push it as an int (toward zero); past
+        bit sgn                 ; -32768 to 32767, ILLEGAL QUANTITY
         bpl :+
+        jsr nega
+:       lda acc+1               ; it fits if acc[2-3] are bit 15 copied: acc[2] + C and
+        asl a                   ; acc[3] + C (C on from the one before) are both 0
+        lda acc+2
+        adc #0
+        bne @ilq
+        lda acc+3
+        adc #0
+        bne @ilq
+        lda acc
+        ldy acc+1
+        jmp pushs
+@ilq:   jmp ilq
+
+n_int:  jsr whole               ; the largest whole number not above it
+        bit sgn
+        bpl mul10k
         lda rem                 ; negative with a fraction: one further from 0
         ora rem+1
-        beq :+
-        inc acc
-        bne :+
-        inc acc+1
-        bne :+
-        inc acc+2
-:       jsr tenk
-        jsr umul
+        cmp #1                  ; C: there is one
+        ldx #0
+        jsr ripple
+mul10k: jsr m10k
         jmp fin
 
-n_mul:  stx sx
-        jsr popb
-        jsr popa
-        lda #0
-        sta sgn
-        jsr absa
-        jsr absb
+n_mul:  jsr pop2
+        jsr abs2
         jsr umul
-        lda #<5000              ; round half away from zero
-        ldy #>5000
-        jsr setb
-        jsr addb
-        jsr scale48
         jsr tenk
-        jsr udiv48
+; rdiv: acc / opb rounded half away from zero, then fin
+rdiv:   jsr udiv
+        ldy #1
+        jsr ustep               ; one more quotient bit: acc = 2q + (2 rem >= opb)
+        ldx #8
+        clc
+:       ror acc-1,x
+        dex
+        bne :-                  ; q, C that bit
+        jsr ripple              ; (X = 0)
         jmp fin
 
-n_div:  stx sx
-        jsr popb
-        jsr popa
+n_div:  jsr pop2
         lda opb
         ora opb+1
         ora opb+2
         ora opb+3
         bne :+
-        lda #E_DIV0
-        jmp throw
-:       lda #0
-        sta sgn
-        jsr absa
-        jsr absb
-        ldy #3
-:       lda opb,y
-        sta dvs,y
-        dey
+        jmp div0
+:       jsr abs2
+        ldx #3
+:       lda opb,x
+        sta dvs,x
+        dex
         bpl :-
-        jsr tenk                ; the dividend times 10,000 (under 2^45)
-        jsr umul
-        lda dvs+3               ; plus half the divisor, to round
-        lsr a
-        sta opb+3
-        lda dvs+2
-        ror a
-        sta opb+2
-        lda dvs+1
-        ror a
-        sta opb+1
-        lda dvs
-        ror a
-        sta opb
-        jsr addb
-        ldy #3
-:       lda dvs,y
-        sta opb,y
-        dey
+        jsr m10k                ; the dividend times 10,000 (under 2^45)
+        ldx #3
+:       lda dvs,x
+        sta opb,x
+        dex
         bpl :-
-        jsr udiv48
-        jmp fin
+        bmi rdiv
 
-n_cmp:  stx sx                  ; pop b, then a: push the int -1, 0 or 1 (a against b)
-        jsr popb
-        jsr popa
-        ldy #$FC
-        sec
-:       lda acc - $FC,y
-        sbc opb - $FC,y
-        sta acc - $FC,y
-        iny
-        bne :-
-        bvc @nv
-        eor #$80                ; the sign of the true difference (which is not 0)
-        bmi @lt
-        bpl @gt
-@nv:    ora #0
-        bmi @lt
+n_cmp:  sec                     ; pop b, then a: push the int -1, 0 or 1 (a against b)
+        jsr ab
+        bvs @v
+        tay
         ora acc
         ora acc+1
         ora acc+2
-        beq @eq
-@gt:    lda #1
-        ldy #0
-        beq @r
-@lt:    lda #$FF
+        beq @eq                 ; A = 0
+        tya
+        .byte $2C               ; skip the EOR
+@v:     eor #$80                ; overflowed: the true sign is the other one (and it is not 0)
+        asl a                   ; C: the sign
+        lda #$FF
+        adc #0
+        eor #$FF                ; $FF if negative, else 0
         tay
-        bne @r
-@eq:    lda #0
-        tay
-@r:     ldx sx
-        jmp pushay
+        ora #1                  ; $FF or 1
+        .byte $24               ; skip the TAY
+@eq:    tay
+pushs:  ldx sx                  ; push A | Y << 8 at sx
+pushay: dex
+stay:   sta P_ESTKL,x
+        tya
+        sta P_ESTKH,x
+        rts
 
-n_tst:  stx sx                  ; pop a number: push the int -1 if it is not 0, else 0
-        jsr popa
+n_tst:  jsr pop1                ; pop a number: push the int -1 if it is not 0, else 0
         lda acc
         ora acc+1
         ora acc+2
         ora acc+3
         beq :+
         lda #$FF
-:       ldx sx
-        dex
-        sta P_ESTKL,x
-        sta P_ESTKH,x
-        rts
+:       tay
+        jmp pushs
 
-; ---- the c_ routines, for the mini C: one result each ----
+; ---- the c_ routines, for the mini C ----
 
-push0:  dex
-        lda #0
-        sta P_ESTKL,x
-        sta P_ESTKH,x
-        rts
 c_ldv   = n_ldv                 ; void, as c_fail
 c_stv   = n_stv
-c_dup:  jsr n_dup
-        jmp push0
-c_add:  jsr n_add
-        jmp push0
-c_sub:  jsr n_sub
-        jmp push0
-c_mul:  jsr n_mul
-        jmp push0
-c_div:  jsr n_div
-        jmp push0
-c_int:  jsr n_int
-        jmp push0
-c_fromi: jsr n_fromi
-        jmp push0
+c_add   = n_add                 ; void too: the number stack only
+c_sub   = n_sub
+c_mul   = n_mul
+c_div   = n_div
+c_int   = n_int
+c_fromi = n_fromi
 c_toi   = n_toi
 c_cmp   = n_cmp
-
-c_throw: lda P_ESTKL,x          ; error n: never returns
-        jmp throw
 
 c_err:  lda err
         ldy #0
         beq pushay
 c_curip: lda curip
         ldy curip+1
-pushay: dex
-        sta P_ESTKL,x
-        tya
-        sta P_ESTKH,x
-        rts
+        jmp pushay
 
 ; c_const(buf): read a number at si: digits, a point, digits (spaces among them stepped over, as MS);
 ; its 4 bytes (units of 1/10000, rounded past 4 decimals) go to buf. Returns the value when it is a whole
 ; number under 32768, else -2. FAIL 1 for no digits, 4 for a number past 2^31 - 1.
 ; State, all in the lexer's bytes: li digits seen, lo the decimals seen (-1 in the whole part), lc
-; nonzero decimals, lj the 4th decimal + the rounding, lq overflow, tq the whole part (tq+2: past 32767).
-c_const: lda P_ESTKL,x
-        sta dvs
-        lda P_ESTKH,x
-        sta dvs+1
-        stx sx
+; nonzero decimals, lj 1 to round up, lq overflow, tq the whole part (tq+2: past 32767). buf stays
+; on the eval stack at sx throughout.
+c_const: stx sx
         lda #0
         ldy #7
 :       sta acc,y
         dey
         bpl :-
+        sty lo                  ; -1
         sta li
         sta lc
         sta lq
         sta lj
         sta nsp                 ; and the number stack is empty (a run that failed can leave it full)
-        lda #$FF
-        sta lo
 @loop:  jsr srcp
         lda (ptr),y
         sec
@@ -752,33 +592,20 @@ c_const: lda P_ESTKL,x
         ldy lo
         bmi @mac                ; a whole-part digit
         cpy #4
-        bcs @f4
-        lda lc
-        ora t0
-        sta lc
-        cpy #3
-        bcs @f3
-        jsr mac
-        jmp @bump
-@f3:    lda t0                  ; the 4th decimal
-        sta lj
-        bcs @bump
-@f4:    bne @bump               ; the 5th rounds the 4th up, and counts as nonzero
-        lda t0
+        bcc @dec
+        bne @next               ; past the 5th decimal: dropped
+        inc lo                  ; the 5th rounds the 4th up, and counts as nonzero
         cmp #5
-        bcc @bump
+        bcc @next
         inc lj
         inc lc
-@bump:  lda lo
-        cmp #5
         bcs @next
+@dec:   ora lc
+        sta lc
         inc lo
-        bne @next
 @mac:   jsr mac
-@next:  inc g_si
-        bne :+
-        inc g_si+1
-:       jsr c_sp
+@next:  jsr incsi
+        jsr c_sp
         inx
         inc li
         bne @loop
@@ -797,36 +624,28 @@ c_const: lda P_ESTKL,x
         lda (ptr),y
         cmp #'.'
         beq @next               ; step over the point (it counts in li, so a bare . is a number: 0, as MS)
-@pad:   lda lo                  ; three decimals at least
-        cmp #3
-        bcs @end
-        lda #0
+@pad:   lda #0                  ; four decimals
         sta t0
+        ldy lo
+        cpy #4
+        bcs @end
         jsr mac
         inc lo
         bne @pad
 @end:   lda lj
-        sta t0
-        jsr mac
-        lda dvs
-        sta ptr
-        lda dvs+1
-        sta ptr+1
-        ldy #3
-:       lda acc,y
-        sta (ptr),y
-        dey
-        bpl :-
-        lda li
-        bne :+
+        jsr maca
+        jsr pusha
+        ldx sx
+        jsr n_stv               ; to buf; X = sx + 1 after
+        dex
         lda #1
-        jsr seterr
-:       lda lq
+        ldy li
         beq :+
+        lda lq
+        beq @ok
         lda #E_OVF
-        jsr seterr
-:       ldx sx
-        lda lc
+:       jsr seterr
+@ok:    lda lc
         ora tq+2
         ora lq
         ldy li
@@ -835,112 +654,66 @@ c_const: lda P_ESTKL,x
         bne @big
         lda tq
         ldy tq+1
-        bpl @ret
+        jmp stay
 @big:   lda #$FE
         ldy #$FF
-@ret:   sta P_ESTKL,x
-        tya
-        sta P_ESTKH,x
+        jmp stay
+
+; mac: acc = acc * 10 + t0 (maca: + A); lq nonzero past 2^31 - 1. X = sx after.
+mac:    lda #10
+        jsr setb8
+        jsr umul
+        lda t0
+maca:   jsr setb8
+        jsr addb
+        jsr big
+        beq :+
+        sta lq
+:       ldx sx
         rts
 
-; mac: acc = acc * 10 + t0; lq = 1 past 2^31 - 1
-mac:    jsr clrhi
-        jsr mul10
-        lda t0
-        ldy #0
-        jsr setb
-        jsr addb
-        lda acc+4
-        ora acc+5
-        ora acc+6
-        ora acc+7
+incsi:  inc g_si                ; si + 1; Z clear after (si is never 0 then)
         bne :+
-        lda acc+3
-        bpl @r
-:       sta lq
-@r:     ldx sx                  ; (mul10 used X)
-        rts
+        inc g_si+1
+:       rts
 
 ; c_fmt(buf): pop a number and write its text as PRINT shows it to buf (12 bytes at most),
 ; giving the length: a space or -, then the digits (none before the point when the whole part is 0
 ; and there is a fraction), the point and the fraction's digits without trailing zeros.
-c_fmt:  lda P_ESTKL,x
-        sta ptr
-        lda P_ESTKH,x
-        sta ptr+1
-        inx
-        stx sx
-        jsr whole
+; Built backward from the last digit: the first 4 that div10 gives are the fraction's.
+c_fmt:  jsr popptr
+        jsr pop1
+        jsr abs0
         lda #fend - fbuf
-        sta t0                  ; t0: where the text starts (it is built backward)
-        lda rem                 ; the fraction, 0-9999
-        sta fx
-        lda rem+1
-        sta fx+1
-        lda acc                 ; the whole part (under 2^18)
-        sta fx+2
-        lda acc+1
-        sta fx+3
-        lda acc+2
-        sta fx+4
-        lda fx
-        ora fx+1
-        beq @whole
-        ldx #4                  ; four fraction digits; trailing zeros are dropped
-        lda #1
-        sta dvs+1               ; still dropping zeros
-@frac:  stx dvs+2
-        lda fx
-        sta acc
-        lda fx+1
-        sta acc+1
-        lda #0
-        sta acc+2
-        sta acc+3
-        jsr div10
-        lda acc
-        sta fx
-        lda acc+1
-        sta fx+1
+        sta t0                  ; t0: where the text starts
+        lda #4
+        sta lc                  ; lc: fraction digits to come (then negative)
+@l:     lda #10
+        jsr setb8
+        jsr udiv                ; rem: the next digit
+        dec lc
+        bmi @w
         lda rem
-        ldy dvs+1
-        beq @keep
-        cmp #0
-        beq @next
-        ldy #0
-        sty dvs+1
-@keep:  jsr putd
-@next:  ldx dvs+2
-        dex
-        bne @frac
+        bne @k
+        ldy t0
+        cpy #fend - fbuf
+        beq @f                  ; a trailing zero: dropped
+@k:     jsr putd
+@f:     lda lc
+        bne @l
+        ldy t0
+        cpy #fend - fbuf
+        beq @l                  ; no fraction: the whole part, 0 at least
         lda #'.'
         jsr putc
-        lda fx+2
-        ora fx+3
-        ora fx+4
-        beq @sign               ; " .5": no 0 before the point
-@whole: lda fx+2
-        sta acc
-        lda fx+3
-        sta acc+1
-        lda fx+4
-        sta acc+2
-        lda #0
-        sta acc+3
-        jsr div10
-        lda acc
-        sta fx+2
-        lda acc+1
-        sta fx+3
-        lda acc+2
-        sta fx+4
-        lda rem
+        bne @t                  ; (putc ends with Z clear)
+@w:     lda rem
         jsr putd
-        lda fx+2
-        ora fx+3
-        ora fx+4
-        bne @whole
-@sign:  lda #' '
+@t:     lda acc                 ; the whole part is under 2^18
+        ora acc+1
+        ora acc+2
+        bne @l                  ; " .5": no 0 before the point
+        lda #' '
         bit sgn
         bpl :+
         lda #'-'
@@ -955,38 +728,8 @@ c_fmt:  lda P_ESTKL,x
         bne :-
         tya
         ldy #0
-        ldx sx
-        jmp pushay
+        jmp pushs
 
-mul10:  jsr @dbl                ; acc = acc * 10, for acc under 2^32: (2a) * 4 + 2a, in 5 bytes
-        ldy #4
-:       lda acc,y
-        sta rem,y
-        dey
-        bpl :-
-        jsr @dbl
-        jsr @dbl
-        ldy #0
-        ldx #5
-        clc
-:       lda acc,y
-        adc rem,y
-        sta acc,y
-        iny
-        dex
-        bne :-
-        rts
-@dbl:   asl acc
-        rol acc+1
-        rol acc+2
-        rol acc+3
-        rol acc+4
-        rts
-
-div10:  lda #10
-        ldy #0
-        jsr setb
-        jmp udiv32
 putd:   ora #'0'
 putc:   dec t0
         ldy t0

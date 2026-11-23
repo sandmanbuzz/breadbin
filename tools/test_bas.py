@@ -306,6 +306,14 @@ class Language(unittest.TestCase):
         self.assertEqual(self.out("PRINT ABS(-3.5);INT(-3.5);INT(2.7);SGN(-2);SGN(0);SGN(.0001);-(1)+ +1\n"),
                          " 3.5 -4  2 -1  0  1  0 \n")
 
+    def test_unary_edges(self):
+        # ABS, negation, SGN and the truth test (n_abs, n_neg, n_sgn, n_tst) at 0, the extremes and
+        # the smallest fraction, on variables so nothing is folded
+        self.assertEqual(self.out("A=-214748.3647:B=0:C=.0001\n"
+                                  "PRINT ABS(A);-A;-B;ABS(B);SGN(A);SGN(-A);SGN(B);SGN(-C);ABS(-C)\n"
+                                  "IF A THEN PRINT 1\nIF B THEN PRINT 2\nIF C THEN PRINT 3\nPRINT NOT B;NOT C\n"),
+                         " 214748.3647  214748.3647  0  0 -1  1  0 -1  .0001 \n 1 \n 3 \n-1 -1 \n")
+
     def test_constants(self):
         # four decimals, the fifth rounds; spaces inside a number are skipped, as MS
         self.assertEqual(self.out("PRINT 1.23456;.00005;.00004;214748.3647;1 000\n"),
