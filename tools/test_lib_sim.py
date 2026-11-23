@@ -1,4 +1,4 @@
-"""The user library (src/lib: lib.s, num.s, err.s) routine by routine under py65, through tools/libsim.py.
+"""The user library (src/lib: the per-routine objects and err.s) routine by routine under py65, through tools/libsim.py.
 
 Two kinds of test, both on the library as built from this tree:
   * the contract: what each routine returns and writes, against a model written in Python from the routine's
