@@ -89,7 +89,7 @@ before the VM became a library (the code moved, so the change is layout).
 
 The port (§4) is 2,556 bytes (`src/pvm/pvm.s`, segment `PVM`, the opcode table at offset `$100`
 with no alignment padding left, an assert keeping it under 8) and no BSS: the library file
-`/lib/pvm` is 2,813 bytes, 12 blocks, 10 pages when loaded. Before the divide-by-zero guard (§6
+`/lib/pvm` is 2,813 bytes, 12 blocks, 10 pages when loaded (measured then; the squish below brought it to 1,992 bytes, 8 pages). Before the divide-by-zero guard (§6
 L2) they were 2,544 and 2,801; the guard's 12 bytes still fit the 10 pages.
 
 The C64 VM (`src/vmsrc/c64/plvmc64.s`, upstream commit `f209e30`, 2026-11-03) has no KERNAL
@@ -202,8 +202,37 @@ Rules for our front ends, found while porting:
 - **IP offset wrap.** The VM keeps the IP as a base plus `Y`; ops that cross page boundaries
   renormalise. Straight-line code longer than about 250 bytes without a branch, call or
   `LA`/`LLA` must get a renormalising op from the front end (upstream has the same limit).
-- **`SEL` tables:** a count byte, then (value, offset) word pairs sorted by value, each offset
-  relative to its own offset word; the default case follows the table.
+- **`SEL` tables** (historical, see the squish below): a count byte, then (value, offset) word
+  pairs sorted by value, each offset relative to its own offset word; the default case follows
+  the table.
+
+### The squish (2026-11-22, `ee06ae8`)
+
+`/lib/pvm` went from 2,660 to 1,992 bytes (11 to 8 pages when loaded, so +768 bytes of BYTES
+FREE under the BASIC runtime: 17,920 to 18,688 on the VICE banner). Thirty opcodes that no
+compiler path emits were deleted: `DROP2 DUP DIVMOD ANDI ORI SEL CFFB DLB DLW DAB DAW INCR DECR
+BRGT BRLT BRGE BRLE` (and their fused forms `DECBRGE INCBRLE SUBBRGE ADDBRLE`), `NATV JUMPZ
+ADDLB IDXLB ADDAB IDXAB IDXAW LLB LAB SLB SAB`. Their table slots point at `BAD`
+(`pvm_overflow`: a stray opcode exits with `ENOMEM`, 12, as a stack overflow does). The
+compiler no longer treats a `char` variable as a "simple" operand: a load is `LLA`/`LA` then
+`LB`, a store `LLA`/`LA` then `SB`, and an address plus a scaled local is `LAW; IDXW`. `ADD`,
+`SB` and `SUB` were moved into page 0 so that the table's padding assert (under 8 bytes) holds.
+The tests and `src/pvm/test/bench.s` use the surviving ops (`bench.s` is no longer PLASMA's
+output verbatim; its result, 469, is unchanged). Dead opcode names are gone from `pvm.inc`.
+Evidence: the host tests, `SharedVM` (8 pages) and the smoke set under VICE; the full suite
+and the hardware run are milestone work. 
+**Second pass (same day): 1,992 to 1,789 bytes, 7 pages.** Dropped as well: `LNOT ISGE ISLE BRAND
+BROR IDXLW ADDAW`. `cc_pcode.py` and `bas.c` emit the replacements: `<=`/`>=` are `ISGT`/`ISLT`
+with the answer inverted (the branch sense in a condition; `ADDI 1` for a 0/1 value; `COMP` in
+BASIC, whose compare gives -1/0), `!x` is `CN 0; ISEQ; NEG` (two eval slots, which `need()` counts),
+`&&`/`||` as a value are `cond`'s branches then `CN 1` / `BRNCH` / `CN 0`, and a scaled local or a
+global added to TOS is `LLW`/`LAW` then `IDXW`/`ADD`. `SHL` and `SHR` are count loops (no 8-bit
+fast path: slower for counts of 8 and up, 36 bytes smaller). `FIXDROP` and the `XOP` tail reuse
+`FIXNEXT`, and `CALLTMP` tests for a `JSR pvm_interp` header with a three-byte loop. The BASIC image
+grew from 10,170 to 10,202 bytes, still 40 pages. Evidence: host tests (189), `SharedVM` (7 pages),
+`Basic`, `CompiledC` and the smoke set under VICE, a hater review (one block, `!x` depth, fixed
+with a test). A page-0 padding of 7 bytes remains and `pushov0` is dead code: both are slack for
+the next pass. Not run: the full suite, JiffyDOS, hardware.
 
 ## 5. Risks
 
@@ -232,8 +261,8 @@ Rules for our front ends, found while porting:
   of a loop, recursion 50 deep and a syscall (`write`) on the ported VM. Met by
   `tools/test_pvm.py`: a loop, recursion 200 deep with the 6502 stack balanced afterwards,
   arithmetic and compares, `write` with a value surviving under it and a bad descriptor giving
-  -1 and `EBADF`, a native call, `SEL`, compiler-shaped recursion 120 deep with a pending value
-  at every level (spilling), spills under `#0` and `#2` functions, the overflow trap, `NATV` from a called function, and the benchmark
+  -1 and `EBADF`, a native call, compiler-shaped recursion 120 deep with a pending value
+  at every level (spilling), spills under `#0` and `#2` functions, the overflow trap, and the benchmark
   as upstream's compiler emits it (`src/pvm/test/bench.s`, result 469, checked independently).
 - **L1**: the ported VM as a CX program under VICE; size and speed of the §3 benchmark against
   `cc.py` and cc65 recorded here (done); the eval-stack overflow trap tested (done in L0), and
@@ -269,7 +298,7 @@ Rules for our front ends, found while porting:
   to frame temporaries when an expression or a call's arguments need more than the 8 entries
   `ENTER` guarantees (the compiler counts depth; the operand order is kept), straight-line code
   past the IP window (the compiler inserts a renormalising `BRNCH` before 240 bytes), the fused
-  operand ops (`ADDI` … `IDXAW`), and frame-stack exhaustion exiting with `ENOMEM`. Under VICE,
+  operand ops (`ADDI` … `ADDLW`), and frame-stack exhaustion exiting with `ENOMEM`. Under VICE,
   `tests.test_pvm_machine.CompiledC` runs `tests/test_compiled.py`'s programs as p-code, fib(12)
   and fact(7), and the exit status of runaway recursion (12). Sizes as CX files, against the
   native image with its runtime: hello 105 (666), loop 116 (769), ops 352 (1,085), slice2 326

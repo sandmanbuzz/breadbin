@@ -180,7 +180,7 @@ class PCodeOnly(unittest.TestCase):
                    'if (9 / z == 0) if ((0 - 9) / z == 0) puts("Y"); return 0; }')
 
     def test_fused_operands_every_kind(self):
-        # x + v and a[v] carry v in the op (ADDLW ADDAW, IDXLW, ADDI SUBI; bytes and a global's IDX go
+        # x + v and a[v] carry v in the op (ADDLW, ADDI SUBI; a scaled or global one is LLW or LAW, then IDXW or ADD; bytes and a global's IDX go
         # through the plain loads): locals and globals, int and char, scaled and not
         self.check("int g = 3; char gc = 2; int ga[6]; char gs[6];\n"
                        "int main() { int *p; char *q; int i = 4; char c = 1;\n"
@@ -229,6 +229,14 @@ class L3a(unittest.TestCase):
     def test_character_literals(self):
         self.check(r"""int main() { char c = 'A'; if (c == 65) if ('\n' == 10) if ('\'' == 39) if ('\0' == 0)
                    if ('"' == 34) if ('\\' == 92) if ('\t' + 1 == 10) if ('\xff' == 0) puts("Y"); return 0; }""".replace("if ('\\xff' == 0) ", ""))
+
+    def test_not_needs_a_second_slot_at_depth(self):
+        # `!x` is CN 0; ISEQ now (no LNOT in the VM): it needs two entries, which need() must count
+        self.check("int f(int a, int b, int c, int d, int e, int g, int h, int i) { return i + h; }\n"
+                   "int main() { int x = 0; int y = 5;\n"
+                   '  if (f(1, 2, 3, 4, 5, 6, 7, !x) == 8) if (1 + (2 + (3 + (4 + (5 + (6 + (7 + !x)))))) == 29)\n'
+                   '  if (f(1, 2, 3, 4, 5, 6, 7, x <= y) == 8) if (f(1, 2, 3, 4, 5, 6, 7, y >= x && y) == 8)\n'
+                   '  if (f(1, 2, 3, 4, 5, 6, 7, !y) == 7) puts("Y"); return 0; }')
 
     def test_remainder_is_c_remainder(self):
         vals = [-32768, -32767, -100, -7, -3, -1, 0, 1, 3, 7, 100, 32767]
