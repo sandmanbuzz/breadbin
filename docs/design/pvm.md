@@ -287,7 +287,7 @@ and the hardware run are milestone work. A seventh page needs about 200 bytes mo
   to frame temporaries when an expression or a call's arguments need more than the 8 entries
   `ENTER` guarantees (the compiler counts depth; the operand order is kept), straight-line code
   past the IP window (the compiler inserts a renormalising `BRNCH` before 240 bytes), the fused
-  operand ops (`ADDI` … `IDXLW`), and frame-stack exhaustion exiting with `ENOMEM`. Under VICE,
+  operand ops (`ADDI` … `ADDLW`), and frame-stack exhaustion exiting with `ENOMEM`. Under VICE,
   `tests.test_pvm_machine.CompiledC` runs `tests/test_compiled.py`'s programs as p-code, fib(12)
   and fact(7), and the exit status of runaway recursion (12). Sizes as CX files, against the
   native image with its runtime: hello 105 (666), loop 116 (769), ops 352 (1,085), slice2 326

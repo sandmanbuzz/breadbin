@@ -208,14 +208,14 @@ OPTBL:  .word CN,CN,CN,CN,CN,CN,CN,CN                           ; 00 02 04 06 08
         .word CN,CN,CN,CN,CN,CN,CN,CN                           ; 10 12 14 16 18 1A 1C 1E
         .word MINUS1,BREQ,BRNE,LA,LLA,CB,CW,CS                  ; 20 22 24 26 28 2A 2C 2E
         .word DROP,BAD,BAD,BAD,ADDI,SUBI,BAD,BAD        ; 30 32 34 36 38 3A 3C 3E
-        .word ISEQ,ISNE,ISGT,ISLT,ISGE,ISLE,BRFLS,BRTRU         ; 40 42 44 46 48 4A 4C 4E
+        .word ISEQ,ISNE,ISGT,ISLT,BAD,BAD,BRFLS,BRTRU         ; 40 42 44 46 48 4A 4C 4E
         .word BRNCH,BAD,CALL,ICAL,ENTER,LEAVE,RET,BAD          ; 50 52 54 56 58 5A 5C 5E
         .word LB,LW,BAD,LLW,BAD,LAW,BAD,BAD                     ; 60 62 64 66 68 6A 6C 6E
         .word SB,SW,BAD,SLW,BAD,SAW,BAD,BAD                     ; 70 72 74 76 78 7A 7C 7E
-        .word LNOT,ADD,SUB,MUL,DIV,MOD,BAD,BAD                     ; 80 82 84 86 88 8A 8C 8E
+        .word BAD,ADD,SUB,MUL,DIV,MOD,BAD,BAD                     ; 80 82 84 86 88 8A 8C 8E
         .word NEG,COMP,BAND,IOR,XOR,SHL,SHR,IDXW                ; 90 92 94 96 98 9A 9C 9E
-        .word BAD,BAD,BAD,BAD,BAD,BAD,BRAND,BROR                      ; A0 A2 A4 A6 A8 AA AC AE
-        .word BAD,ADDLW,BAD,ADDAW,BAD,IDXLW,BAD,BAD                   ; B0 B2 B4 B6 B8 BA BC BE
+        .word BAD,BAD,BAD,BAD,BAD,BAD,BAD,BAD                      ; A0 A2 A4 A6 A8 AA AC AE
+        .word BAD,ADDLW,BAD,BAD,BAD,BAD,BAD,BAD                   ; B0 B2 B4 B6 B8 BA BC BE
         .word BAD,BAD,JUMP,SYS                                       ; C0 C2 C4 C6
 .assert * - OPTBL = OP_SYS + 2, error, "SYS is not at its opcode"
         .word XOP,XOP,XOP,XOP,XOP,XOP,XOP,XOP                   ; C8 CA CC CE D0 D2 D4 D6
@@ -250,14 +250,7 @@ XOP:    sty IPY
         sta TMP
         jsr JMPTMP
         ldy IPY
-        tya
-        sec
-        adc IP
-        sta IP
-        bcc :+
-        inc IP+1
-:       ldy #0
-        jmp FETCHOP
+        jmp FIXNEXT
 
 _DIV:   sty IPY
         ldy #$11                ; bits + 1
@@ -321,47 +314,24 @@ IDXW:   lda ESTKL,x             ; TOS * 2 + TOS-1
         sta ESTKH+1,x
         jmp DROP
 SHL:    sty IPY
-        lda ESTKL,x
-        cmp #8
-        bcc @a
-        ldy ESTKL+1,x
-        sty ESTKH+1,x
-        ldy #0
-        sty ESTKL+1,x
-        sbc #8
-@a:     tay
-        beq @done
-        lda ESTKL+1,x
-@lp:    asl
+        ldy ESTKL,x             ; the count, 0 to 255: a loop (fast enough, and 36 bytes smaller)
+        beq @sd
+@sl:    asl ESTKL+1,x
         rol ESTKH+1,x
         dey
-        bne @lp
-        sta ESTKL+1,x
-@done:  ldy IPY
+        bne @sl
+@sd:    ldy IPY
         jmp DROP
 SHR:    sty IPY
-        lda ESTKL,x
-        cmp #8
-        bcc @a
-        ldy ESTKH+1,x
-        sty ESTKL+1,x
-        cpy #$80
-        ldy #0
-        bcc @b
-        dey
-@b:     sty ESTKH+1,x
-        sec
-        sbc #8
-@a:     tay
-        beq @done
-        lda ESTKH+1,x
-@lp:    cmp #$80
-        ror
+        ldy ESTKL,x
+        beq @rd
+@rl:    lda ESTKH+1,x
+        cmp #$80                ; arithmetic: the sign goes back in
+        ror ESTKH+1,x
         ror ESTKL+1,x
         dey
-        bne @lp
-        sta ESTKH+1,x
-@done:  ldy IPY
+        bne @rl
+@rd:    ldy IPY
         jmp DROP
 ADDI:   iny
         lda (IP),y
@@ -379,13 +349,6 @@ SUBI:   iny
         bcs :+
         dec ESTKH,x
 :       jmp NEXTOP
-LNOT:   lda ESTKL,x
-        ora ESTKH,x
-        beq SETTRUE
-        lda #0
-        sta ESTKL,x
-        sta ESTKH,x
-        jmp NEXTOP
 
 ; ---- constants ----
 MINUS1: dex
@@ -520,26 +483,6 @@ ADDLW:  iny
         sta ESTKH,x
         ldy IPY
         jmp NEXTOP
-IDXLW:  iny
-        lda (IP),y
-        sty IPY
-        tay
-        lda (IFP),y
-        asl
-        sta TMP
-        iny
-        lda (IFP),y
-        rol
-        sta TMP+1
-        lda TMP
-        clc
-        adc ESTKL,x
-        sta ESTKL,x
-        lda TMP+1
-        adc ESTKH,x
-        sta ESTKH,x
-        ldy IPY
-        jmp NEXTOP
 pushov3:  jmp pvm_overflow       ; for the push guards in branch range
 LAW:    iny
         lda (IP),y
@@ -555,24 +498,6 @@ LAW:    iny
         sta ESTKL,x
         iny
         lda (TMP),y
-        sta ESTKH,x
-        ldy IPY
-        jmp NEXTOP
-ADDAW:  iny
-        lda (IP),y
-        sta SRC
-        iny
-        lda (IP),y
-        sta SRC+1
-        sty IPY
-        ldy #0
-        lda (SRC),y
-        clc
-        adc ESTKL,x
-        sta ESTKL,x
-        iny
-        lda (SRC),y
-        adc ESTKH,x
         sta ESTKH,x
         ldy IPY
         jmp NEXTOP
@@ -604,14 +529,8 @@ SLW:    iny
         ldy IPY
         bmi FIXDROP
         jmp DROP
-FIXDROP: tya
-        ldy #0
-        clc
-        adc IP
-        sta IP
-        bcc :+
-        inc IP+1
-:       jmp DROP
+FIXDROP: inx                    ; DROP, but Y is past the window: flatten IP first
+        jmp FIXNEXT
 SAW:    iny
         lda (IP),y
         sta TMP
@@ -650,22 +569,6 @@ ISFLS:  lda #0
         sta ESTKL+1,x
         sta ESTKH+1,x
         jmp DROP
-ISGE:   lda ESTKL+1,x
-        cmp ESTKL,x
-        lda ESTKH+1,x
-        sbc ESTKH,x
-        bvs ISGEV
-        bpl ISTRU
-        bmi ISFLS
-ISGEV:  bpl ISFLS               ; overflow: the sign is inverted
-        bmi ISTRU
-ISLE:   lda ESTKL,x
-        cmp ESTKL+1,x
-        lda ESTKH,x
-        sbc ESTKH+1,x
-        bvs ISGEV
-        bpl ISTRU
-        bmi ISFLS
 ISGT:   lda ESTKL,x
         cmp ESTKL+1,x
         lda ESTKH,x
@@ -692,16 +595,6 @@ FIXNEXT: tya
         bcc :+
         inc IP+1
 :       jmp FETCHOP
-BRAND:  lda ESTKL,x
-        ora ESTKH,x
-        beq BRNCH
-        inx                     ; drop the left half of the AND
-        bne NOBRNCH
-BROR:   lda ESTKL,x
-        ora ESTKH,x
-        bne BRNCH
-        inx                     ; drop the left half of the OR
-        bne NOBRNCH
 BREQ:   inx
         inx
         lda ESTKL-2,x
@@ -789,18 +682,12 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
         sta IP
         bcc :+
         inc IP+1
-:       ldy #0                  ; a bytecode function starts with JSR pvm_interp
-        lda (TMP),y
-        cmp #$20
+:       ldy #2                  ; a bytecode function starts with JSR pvm_interp
+@hd:    lda (TMP),y
+        cmp @jsr,y
         bne @native
-        iny
-        lda (TMP),y
-        cmp #<pvm_interp
-        bne @native
-        iny
-        lda (TMP),y
-        cmp #>pvm_interp
-        bne @native
+        dey
+        bpl @hd
         lda #2                  ; push the return IP on the frame stack
         jsr fsalloc
         ldy #0
@@ -818,6 +705,7 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
         sta IP+1
         ldy #0
         jmp FETCHOP
+@jsr:   jsr pvm_interp          ; (data: what a bytecode function starts with)
 @native: lda IP+1
         pha
         lda IP

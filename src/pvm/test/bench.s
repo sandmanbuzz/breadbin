@@ -1,8 +1,8 @@
 ; bench.pla's bytecode (the docs/design/pvm.md benchmark). It began as PLASMA's xplasm -AO output
 ; (upstream f209e30, MIT) and is now written with the P_ macros of pvm.inc: this VM dropped the
 ; opcodes the compilers here never emit, so each PLASMA for loop (DLW, INCBRLE) keeps its counter
-; in the local instead of on the eval stack (SLW, then LLW; ADDI 1; SLW; LLW; CB limit; ISLE;
-; BRTRU), INCR is ADDI 1 and DUP a second LLW. The module init (_INIT) is left out:
+; in the local instead of on the eval stack (SLW, then LLW; ADDI 1; SLW; LLW; CB limit; ISGT;
+; BRFLS: the loop is `while not i > limit`), INCR is ADDI 1 and DUP a second LLW. The module init (_INIT) is left out:
 ; tools/test_pvm.py calls main (_C003) itself.
 _D000:	.res 200
 
@@ -24,8 +24,8 @@ _B002:	P_CN 1
 	P_B PO_SLW, 0
 	P_B PO_LLW, 0
 	P_B PO_CB, 199
-	P_OP PO_ISLE
-	P_BR PO_BRTRU, _B002
+	P_OP PO_ISGT
+	P_BR PO_BRFLS, _B002
 	P_CN 2
 	P_B PO_SLW, 0
 _B005:	P_W PO_LA, _D000
@@ -55,8 +55,8 @@ _B007:	P_B PO_LLW, 0
 	P_B PO_SLW, 0
 	P_B PO_LLW, 0
 	P_B PO_CB, 199
-	P_OP PO_ISLE
-	P_BR PO_BRTRU, _B005
+	P_OP PO_ISGT
+	P_BR PO_BRFLS, _B005
 	P_B PO_LLW, 4
 	P_B PO_LEAVE, 6
 
@@ -93,22 +93,24 @@ _B018:	P_B PO_LLW, 0
 	P_B PO_LLW, 0
 	P_OP PO_IDXW
 	P_W PO_LA, _D001
-	P_B PO_IDXLW, 0
+	P_B PO_LLW, 0
+	P_OP PO_IDXW
 	P_OP PO_SW
 	P_B PO_LLW, 0
 	P_B PO_ADDI, 1
 	P_B PO_SLW, 0
 	P_B PO_LLW, 0
 	P_B PO_CB, 9
-	P_OP PO_ISLE
-	P_BR PO_BRTRU, _B018
+	P_OP PO_ISGT
+	P_BR PO_BRFLS, _B018
 	P_CN 0
 	P_B PO_SLW, 2
 	P_CN 0
 	P_B PO_SLW, 0
 _B021:	P_B PO_LLW, 2
 	P_W PO_LA, _D001
-	P_B PO_IDXLW, 0
+	P_B PO_LLW, 0
+	P_OP PO_IDXW
 	P_OP PO_LW
 	P_OP PO_ADD
 	P_B PO_SLW, 2
@@ -117,8 +119,8 @@ _B021:	P_B PO_LLW, 2
 	P_B PO_SLW, 0
 	P_B PO_LLW, 0
 	P_B PO_CB, 9
-	P_OP PO_ISLE
-	P_BR PO_BRTRU, _B021
+	P_OP PO_ISGT
+	P_BR PO_BRFLS, _B021
 	P_B PO_LLW, 2
 	P_B PO_LEAVE, 4
 
@@ -142,8 +144,8 @@ _B024:	P_B PO_LLW, 0
 	P_B PO_SLW, 2
 	P_B PO_LLW, 2
 	P_B PO_CB, 20
-	P_OP PO_ISLE
-	P_BR PO_BRTRU, _B024
+	P_OP PO_ISGT
+	P_BR PO_BRFLS, _B024
 	P_B PO_LLW, 0
 	P_W PO_CALL, _C002
 	P_OP PO_ADD

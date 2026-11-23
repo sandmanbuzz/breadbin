@@ -186,7 +186,8 @@ SYSCALLS = {
 }
 assert set(SYSCALLS) == set(cc.SYSCALLS)
 BITOPS = {"&": "PO_BAND", "|": "PO_IOR", "^": "PO_XOR", "<<": "PO_SHL", ">>": "PO_SHR"}
-VMCMP = {"<": "PO_ISLT", ">": "PO_ISGT", "<=": "PO_ISLE", ">=": "PO_ISGE"}   # signed; true is -1
+# signed; true is -1. <= and >= are the VM's > and < with the answer inverted (no ISLE/ISGE)
+VMCMP = {"<": ("PO_ISLT", False), ">": ("PO_ISGT", False), "<=": ("PO_ISGT", True), ">=": ("PO_ISLT", True)}
 
 
 class Local(Var):
@@ -488,8 +489,9 @@ class PGen(cc.Gen):
             return
         if e[0] == "bin" and e[1] in VMCMP:
             self.operands(e)
-            self.op("P_OP", VMCMP[e[1]])
+            self.op("P_OP", VMCMP[e[1]][0])
             self.pop()
+            when ^= VMCMP[e[1]][1]
         else:
             self.expr(e)
         self.op("P_BR", "PO_BRTRU" if when else "PO_BRFLS", lbl)
@@ -571,13 +573,11 @@ class PGen(cc.Gen):
             if n:
                 self.op("P_B", "PO_SUBI" if neg else "PO_ADDI", n)
             return
-        if x[0] == "L":
-            self.op("P_B", "PO_IDXLW" if scaled else "PO_ADDLW", x[1])
-        elif scaled:                    # no IDXAW in the VM: three uses did not pay for its 43 bytes
-            self.op("P_W", "PO_LAW", x[1])
-            self.op("P_OP", "PO_IDXW")
-        else:
-            self.op("P_W", "PO_ADDAW", x[1])
+        if x[0] == "L" and not scaled:
+            self.op("P_B", "PO_ADDLW", x[1])
+        else:                           # no IDXLW, IDXAW or ADDAW in the VM: LLW/LAW, then IDXW/ADD
+            self.op("P_B", "PO_LLW", x[1]) if x[0] == "L" else self.op("P_W", "PO_LAW", x[1])
+            self.op("P_OP", "PO_IDXW" if scaled else "PO_ADD")
 
     def load_var(self, v):
         if v.arr is not None:
@@ -627,8 +627,11 @@ class PGen(cc.Gen):
             return ("int", False)
         if kind == "not":
             self.expr(e[1])
-            self.op("P_OP", "PO_LNOT")
-            self.op("P_OP", "PO_NEG")       # LNOT's true is -1
+            self.const(0)
+            self.push()
+            self.op("P_OP", "PO_ISEQ")      # no LNOT in the VM: x == 0 is -1 or 0
+            self.pop()
+            self.op("P_OP", "PO_NEG")
             return ("int", False)
         if kind in ("neg", "comp"):
             if self.expr(e[1])[1]:
@@ -689,17 +692,15 @@ class PGen(cc.Gen):
         return ta, tb
 
     def logical(self, e):
-        """a && b, a || b as a value: BRAND/BROR keep the left value when it decides, then LNOT
-        and ADDI 1 make 0 or 1 of either side's value."""
-        _, op, a, b, line = e
-        end = self.new_label()
-        self.expr(a)
-        self.op("P_BR", "PO_BRAND" if op == "&&" else "PO_BROR", end)
-        self.pop()
-        self.expr(b)
+        """a && b, a || b as a value (0 or 1): the branches of `cond`, then the constant."""
+        f, end = self.new_label(), self.new_label()
+        self.cond(e, f, False)
+        self.const(1)
+        self.op("P_BR", "PO_BRNCH", end)
+        self.lab(f)
+        self.const(0)
         self.lab(end)
-        self.op("P_OP", "PO_LNOT")
-        self.op("P_B", "PO_ADDI", 1)
+        self.push()
         return ("int", False)
 
     def binary(self, e):
@@ -742,8 +743,11 @@ class PGen(cc.Gen):
             self.op("P_OP", "PO_ISEQ" if op == "==" else "PO_ISNE")
             self.op("P_OP", "PO_NEG")       # the VM's true is -1; C's is 1
         else:
-            self.op("P_OP", VMCMP[op])
-            self.op("P_OP", "PO_NEG")       # as above
+            self.op("P_OP", VMCMP[op][0])
+            if VMCMP[op][1]:
+                self.op("P_B", "PO_ADDI", 1)    # 0 or 1 of the inverted answer (-1 or 0)
+            else:
+                self.op("P_OP", "PO_NEG")       # as above
         self.pop()
         return (ta[0], True) if ta[1] else ("int", False)
 

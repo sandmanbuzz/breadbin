@@ -158,8 +158,8 @@ f_main: P_FUNC
         P_B PO_SLW, 2
         P_B PO_LLW, 2
         P_B PO_CB, 100
-        P_OP PO_ISLE
-        P_BR PO_BRTRU, @top
+        P_OP PO_ISGT
+        P_BR PO_BRFLS, @top
         P_B PO_LLW, 0
         P_W PO_SAW, buf
         P_CN 2
@@ -200,7 +200,11 @@ f_main: P_FUNC
         ops = [("-7", "3", "PO_MUL", -21), ("-7", "2", "PO_DIV", -3), ("-7", "2", "PO_MOD", -1),
                ("1000", "7", "PO_DIV", 142), ("1", "12", "PO_SHL", 4096), ("-32768", "4", "PO_SHR", -2048),
                ("-1", "1", "PO_ISLT", -1), ("-1", "1", "PO_ISGT", 0), ("30000", "-30000", "PO_ISGT", -1),
-               ("-30000", "30000", "PO_ISGE", 0), ("5", "3", "PO_SUB", 2), ("$F0F0", "$0FF0", "PO_XOR", -256)]
+               ("-30000", "30000", "PO_ISGT", 0), ("5", "3", "PO_SUB", 2), ("$F0F0", "$0FF0", "PO_XOR", -256),
+               # shifts are loops: counts 0, 8 and over, and past 16
+               ("1", "0", "PO_SHL", 1), ("1", "8", "PO_SHL", 256), ("3", "15", "PO_SHL", -32768),
+               ("1", "17", "PO_SHL", 0), ("-32768", "0", "PO_SHR", -32768), ("-1", "15", "PO_SHR", -1),
+               ("$4000", "14", "PO_SHR", 1), ("12345", "9", "PO_SHR", 24), ("-12345", "9", "PO_SHR", -25)]
         body = "f_main: P_FUNC\n"
         for i, (a, b, op, _) in enumerate(ops):
             body += f"        P_W PO_CW, {a}\n        P_W PO_CW, {b}\n        P_OP {op}\n        P_W PO_SAW, buf+{2 * i}\n"
