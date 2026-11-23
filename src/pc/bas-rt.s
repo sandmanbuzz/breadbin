@@ -687,10 +687,8 @@ push0:  dex
         sta P_ESTKL,x
         sta P_ESTKH,x
         rts
-c_ldv:  jsr n_ldv
-        jmp push0
-c_stv:  jsr n_stv
-        jmp push0
+c_ldv   = n_ldv                 ; void, as c_fail
+c_stv   = n_stv
 c_dup:  jsr n_dup
         jmp push0
 c_add:  jsr n_add
@@ -1302,8 +1300,8 @@ c_tok:  jsr srcp
 
 ; c_fail(e): err = e, unless one came first. 0. seterr: the same for A.
 c_fail: lda P_ESTKL,x
-        jsr seterr
-        jmp ret0
+        inx                     ; void: the routine pops its own argument
+        jmp seterr
 seterr: sta t0                  ; (Y is the VM's IP offset when c_fail runs as an XOP: keep it)
         lda g_err
         ora g_err+1
@@ -1382,19 +1380,16 @@ roomb:  ldy g_straight+1
 
 ; c_emit(b), c_room(n), c_op1(b): as bas.c's comments on emit, room and op1. 0.
 c_emit: lda P_ESTKL,x
-        jsr emitb
-        jmp ret0
+        inx
+        jmp emitb
 c_room: lda P_ESTKL,x
-        jsr roomb
-        jmp ret0
+        inx
+        jmp roomb
 c_op1:  lda #1
         jsr roomb
         lda P_ESTKL,x
-        jsr emitb
-ret0:   lda #0
-        sta P_ESTKL,x
-        sta P_ESTKH,x
-        rts
+        inx
+        jmp emitb
 
 ; c_opw(b, w): an op with a word operand. c_ncall(f): NCAL f (82), after which the return has
 ; reset Y. 0.
@@ -1404,16 +1399,14 @@ c_opw:  lda #3
         jsr emitb
         jsr word
         inx
-        jmp ret0
+        inx
+        rts
 c_ncall: lda #3
         jsr roomb
         lda #82
         jsr emitb
         jsr word
-        lda #0
-        sta g_straight
-        sta g_straight+1
-        jmp ret0
+        jmp xstr
 ; c_xop(b): an XOP with no operand. c_xopw(b, w): one with a word operand. Like CALL, an XOP
 ; has the VM renormalise IP, so straight-line counting starts over. 0.
 c_xop:  lda #1
@@ -1427,10 +1420,11 @@ c_xopw: lda #3
         jsr emitb
         jsr word
         inx
-xstr:   lda #0
+xstr:   inx
+        lda #0
         sta g_straight
         sta g_straight+1
-        jmp ret0
+        rts
 word:   lda P_ESTKL,x
         jsr emitb
         lda P_ESTKH,x

@@ -102,6 +102,25 @@ class Refused(unittest.TestCase):
         f = two[two.index("fn_f:"):two.index("fn_main:")]
         self.assertEqual(f.count("PO_LEAVE"), 2)
 
+    def test_a_function_nobody_reads_returns_nothing(self):
+        # every call a statement and no address taken: no 0 to return and no DROP after the call
+        src = "int g(int a) { return 0; }\nint h(int a) { return a; }\nint main() { g(1); return h(2) + h(3); }"
+        t = cc_pcode.compile_pcode(src)
+        g = t[t.index("fn_g:"):t.index("fn_h:")]
+        self.assertNotIn("PO_DROP", t[t.index("fn_main:"):t.index("P_W PO_CALL, fn_h")])
+        self.assertEqual(g.count("P_CN"), 0)       # no 0 pushed for the return, none read
+        self.assertEqual(g.count("PO_LEAVE"), 1)
+        # one read anywhere (or &g for icall) keeps the value
+        t = cc_pcode.compile_pcode(src.replace("g(1);", "int x = g(1);"))
+        self.assertEqual(t[t.index("fn_g:"):t.index("fn_h:")].count("P_CN"), 1)
+
+    def test_a_void_extern_has_no_result(self):
+        src = "extern int e(int a); /* void */\nint main() { e(1); return 0; }"
+        self.assertNotIn("PO_DROP", cc_pcode.compile_pcode(src))
+        self.fails("extern int e(int a); /* void */\nint main() { int x; x = e(1); return x; }", "leaves no result")
+        # return e(1) is fine: the function returns 0
+        cc_pcode.compile_pcode("extern int e(int a); /* void */\nint f() { return e(1); }\nint main() { return f(); }")
+
     def test_the_type_rules_are_the_native_ones(self):
         self.fails("int main() { int *p; int x; x = p; return 0; }", "a pointer where a number is needed")
 

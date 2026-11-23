@@ -202,11 +202,14 @@ class Local(Var):
 
 
 class PGen(cc.Gen):
-    def __init__(self, funcs, fstack=FSTACK, xops=False, xcalls=None):
+    def __init__(self, funcs, fstack=FSTACK, xops=False, xcalls=None, voids=(), xvoid=()):
         super().__init__(funcs)
+        self.voids = frozenset(voids) | frozenset(xvoid)   # functions whose result nobody reads: they return nothing
+        self.valued = set()              # the functions whose result is read, or whose address is taken
         self.fstack = fstack
         self.xops = xops
         self.xcalls = xcalls or {}       # extern name -> its XOP opcode: a call is one byte
+        self.xvoid = xvoid               # those whose routine leaves nothing on the eval stack (/* xop N void */)
         self.helpers = set()
         self._need = {}
         self.loops = []                  # (break label, continue label), innermost last
@@ -354,7 +357,8 @@ class PGen(cc.Gen):
         for s in body:
             self.stmt(s)
         if not self.out[-1].strip().startswith("P_OP PO_LEAVE"):     # after a return no label reaches this
-            self.const(0)
+            if name not in self.voids:
+                self.const(0)
             self.op("P_OP", "PO_LEAVE")
         if self.frame > FRAME_MAX:
             raise CompileError(f"line {line}: {name}'s frame (parameters, locals and temporaries) takes "
@@ -456,15 +460,30 @@ class PGen(cc.Gen):
             e = s[1]
             if e[0] == "call" and e[1] == "puts":
                 self.puts(e[2], e[3], value=False)
+            elif e[0] == "call" and e[1] not in cc.BUILTINS:
+                self.call(e[1], e[2], e[3], False)
+                if e[1] not in self.voids:
+                    self.op("P_OP", "PO_DROP")
+                    self.pop()
             else:
                 self.expr(e)
                 self.op("P_OP", "PO_DROP")
                 self.pop()
         elif kind == "return":
+            void = self.fn in self.voids
             if s[1] is None:
-                self.const(0)
+                if not void:
+                    self.const(0)
+            elif void and s[1][0] == "num":     # nobody reads it: no op at all
+                pass
+            elif s[1][0] == "call" and s[1][1] in self.xvoid:    # return f(): f leaves nothing, the result is 0
+                self.call(s[1][1], s[1][2], s[1][3], False)
+                if not void:
+                    self.const(0)
             else:
                 self.check(("int", False), self.expr(s[1]), s[1], s[2], "return")
+                if void:
+                    self.op("P_OP", "PO_DROP")
                 self.pop()
             self.op("P_OP", "PO_LEAVE")
         elif kind == "if":
@@ -702,6 +721,7 @@ class PGen(cc.Gen):
         if x[0] == "var":
             if x[1] not in self.vars and x[1] not in self.globals and x[1] in self.funcs:
                 name = x[1]             # a function's address, typed char *: for icall
+                self.valued.add(name)
                 self.op("P_W", "PO_LA", name if name in self.externs else "fn_" + name)
                 self.push()
                 return ("char", True)
@@ -794,7 +814,7 @@ class PGen(cc.Gen):
         self.pop()
         return (ta[0], True) if ta[1] else ("int", False)
 
-    def call(self, name, args, line):
+    def call(self, name, args, line, value=True):
         if name not in self.funcs:
             raise CompileError(f"line {line}: undefined function {name}")
         params = self.params[name]
@@ -808,7 +828,12 @@ class PGen(cc.Gen):
         else:
             self.op("P_W", "PO_NCAL", name) if name in self.externs else self.op("P_W", "PO_CALL", "fn_" + name)
         self.pop(len(args))
-        self.push()
+        if value and name in self.xvoid:
+            raise CompileError(f"line {line}: {name} leaves no result (xop void)")
+        if value:
+            self.valued.add(name)
+        if name not in self.voids:
+            self.push()
 
     def arguments(self, name, args, params, line):
         """Push the arguments, the first deepest; through frame temporaries when they would not
@@ -901,13 +926,23 @@ def compile_pcode(src, fstack=None):
                 raise CompileError(f"line {line}: function {name} is defined twice")
             seen.add(name)
         xops = bool(re.search(r"^/\*\s*xops\s*\*/", src, re.M))
-        xcalls = {}
-        for m in re.finditer(r"^extern\s[^;]*?(\w+)\s*\([^;]*\)[ \t]*;[ \t]*/\*[ \t]*xop[ \t]+(\d+)", src, re.M):
-            n = int(m.group(2))
-            if not xops or n % 2 or not 200 <= n <= 254:
-                raise CompileError(f"extern {m.group(1)}: xop {n}: needs /* xops */ and an even number, 200 to 254")
-            xcalls[m.group(1)] = n
-        return PGen(funcs, fstack, xops, xcalls).program(funcs, globs)
+        xcalls, xvoid = {}, set()
+        # an extern's comment: "xop N" (a one-byte op), "void" (it leaves no result: no DROP after a call
+        # and none may read it; the routine pops its own arguments), or "xop N void"
+        for m in re.finditer(r"^extern\s[^;]*?(\w+)\s*\([^;]*\)[ \t]*;[ \t]*/\*[ \t]*(?:xop[ \t]+(\d+))?([ \t]*void)?(?![\w])", src, re.M):
+            if m.group(3):
+                xvoid.add(m.group(1))
+            if m.group(2):
+                n = int(m.group(2))
+                if not xops or n % 2 or not 200 <= n <= 254:
+                    raise CompileError(f"extern {m.group(1)}: xop {n}: needs /* xops */ and an even number, 200 to 254")
+                xcalls[m.group(1)] = n
+        g = PGen(funcs, fstack, xops, xcalls, xvoid=xvoid)
+        text = g.program(funcs, globs)
+        voids = {n for n, _, b, _ in funcs if b is not None and n != "main"} - g.valued
+        if voids:               # a second pass: nobody reads those results, so no 0 to return and no DROP
+            text = PGen(funcs, fstack, xops, xcalls, voids, xvoid).program(funcs, globs)
+        return text
     except RecursionError:
         raise CompileError("expression nested too deeply for the compiler") from None
     finally:

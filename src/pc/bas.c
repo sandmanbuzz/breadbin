@@ -22,8 +22,8 @@
 extern int rt_mark();   /* bas-rt.s, for the compiled code: these take their arguments from the */
 extern int rt_go();     /* eval stack and the number stack as the comments there say; the */
 extern int rt_ln();     /* compiler only takes their addresses */
-extern int c_ldv(char *p); /* xop 240 */      /* bas-rt.s, for the mini C: one result each */
-extern int c_stv(char *p); /* xop 246 */
+extern int c_ldv(char *p); /* xop 240 void */      /* bas-rt.s, for the mini C: one result each */
+extern int c_stv(char *p); /* xop 246 void */
 extern int c_add();
 extern int c_mul();
 extern int c_div();
@@ -43,14 +43,14 @@ extern int c_digit(); /* xop 242 */
 extern int c_letter();
 extern int c_tok(int t); /* xop 234 */
 extern int c_ult(int a, int b);
-extern int c_emit(int b); /* xop 236 */
-extern int c_room(int n); /* xop 248 */
-extern int c_op1(int b); /* xop 238 */
-extern int c_opw(int b, int w); /* xop 250 */
-extern int c_ncall(char *f); /* xop 244 */
-extern int c_xop(int b); /* xop 254 */
-extern int c_xopw(int b, int w);
-extern int c_fail(int e); /* xop 252 */   /* err = e, unless one came first */
+extern int c_emit(int b); /* xop 236 void */
+extern int c_room(int n); /* xop 248 void */
+extern int c_op1(int b); /* xop 238 void */
+extern int c_opw(int b, int w); /* xop 250 void */
+extern int c_ncall(char *f); /* xop 244 void */
+extern int c_xop(int b); /* xop 254 void */
+extern int c_xopw(int b, int w); /* void */
+extern int c_fail(int e); /* xop 252 void */   /* err = e, unless one came first */
 extern int c_grow(int n);       /* up to n pages from the kernel for mem (bas-rt.s); the pages granted */
 
 char *mem;              /* MEM: the arena, msz bytes of pages the kernel grants at start (c_grow) */

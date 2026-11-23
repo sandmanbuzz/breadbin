@@ -69,8 +69,8 @@ def fmt(v):
 
 HARNESS = r"""
 extern int rt_mark();
-extern int c_ldv(char *p);
-extern int c_stv(char *p);
+extern int c_ldv(char *p); /* void */
+extern int c_stv(char *p); /* void */
 extern int c_add();
 extern int c_sub();
 extern int c_mul();
@@ -92,7 +92,7 @@ int cend;
 int vbot;
 int straight;
 int err;
-int ld(int lo, int hi) { v[0] = lo; v[1] = lo >> 8; v[2] = hi; v[3] = hi >> 8; return c_ldv(v); }
+int ld(int lo, int hi) { v[0] = lo; v[1] = lo >> 8; v[2] = hi; v[3] = hi >> 8; c_ldv(v); return 0; }
 int str(char *p) { int n; n = 0; while (p[n]) n = n + 1; write(1, p, n); return 0; }
 int num(int i) { char b[8]; int n; n = 7; if (i == 0 - 32767 - 1) { write(1, "-32768", 6); return 0; }
   if (i < 0) { write(1, "-", 1); i = 0 - i; }
