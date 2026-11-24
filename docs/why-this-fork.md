@@ -2,7 +2,7 @@
 
 Breadbox is a fork of Breadbin, the Unix-like operating system for the Commodore 64 by Konstantinos Patronas (<https://github.com/kpatr1981/breadbin>). The fork point is upstream commit `aa58d27`, when upstream's version string read 0.2 (`docs/design/upstream-survey.md`).
 
-**The name is temporary.** "Breadbox" was chosen so that the fork is not confused with upstream and makes no claim to track it. It can change if a collision or a better idea turns up. The version string restarts at 0.1 for the same reason: upstream's number is upstream's.
+**The name is temporary.** Breadbox is the outward name (banner, README, docs); the Breadbin names stay in the internals (`docs/README.md`). "Breadbox" was chosen so that the fork is not confused with upstream and makes no claim to track it. It can change if a collision or a better idea turns up. The version string restarts at 0.1 for the same reason: upstream's number is upstream's.
 
 Status: 2026-11-18, on main `185c35a` (this page was last brought up to date on 2026-11-07; much of what was true then has moved). Every claim below points at a file or commit in this repo, or at an upstream commit. Upstream moves quickly; where this page compares, it says which upstream commit it looked at: `0b3f621` on upstream `main` (2026-11-17; its commit messages say version 0.9) and its release branches up to 0.8. Re-check before relying on a line.
 
