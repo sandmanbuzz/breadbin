@@ -2,7 +2,7 @@
 """Shard list helper for tools/ci/sharded.sh (no VICE, no podman).
 
   shards.py list            print "name<TAB>specs" per shard
-  shards.py check [N]       every VICE test is in exactly one shard, at most N shards (default 8);
+  shards.py check [N]       every VICE test is in exactly one shard, at most N shards (default 6);
                             prints "count <n>" and exits 0, or names the problems and exits 1
 """
 import importlib.util
@@ -103,7 +103,7 @@ def main(argv):
             print(f"{n}\t{' '.join(specs)}")
         return 0
     if cmd == "check":
-        nmax = int(argv[2]) if len(argv) > 2 else 8
+        nmax = int(argv[2]) if len(argv) > 2 else 6
         ids = discovered()
         bad = problems(sl, ids, nmax)
         for b in bad:

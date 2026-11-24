@@ -15,7 +15,7 @@
 ; uci.km (docs/design/next/uci-v1.md, addendum "uci.km"): this file is a kernel module, loaded
 ; from /lib/km/uci by `mount uci` and unloaded again at its umount (or when that mount fails),
 ; so a machine that never mounts UCI carries none of it. The resident part (src/kernel/uci.s)
-; is a row of sixteen `jmp` stubs, the names file.s/fs.s/exec.s/cbm.s call at their bmi sites;
+; is a row of seventeen `jmp` stubs, the names file.s/fs.s/exec.s/cbm.s call at their bmi sites;
 ; init points them here, fini points them back at cbm_none (ENODEV). Both refuse unless the
 ; kernel itself is loading or unloading (uci_sl = $FF), so `mod load`/`mod unload` by hand
 ; cannot get the module out of step with the mount.
@@ -64,6 +64,9 @@ hs_own:  .res 2         ; owner of DOS target 1 / 2
 hs_p0:   .res 2         ; the host's position in that file, 24 bits
 hs_p1:   .res 2
 hs_p2:   .res 2
+hs_h0:   .res 2         ; the end of what that handle has written since it opened, 24 bits:
+hs_h1:   .res 2         ; FILE INFO reads the directory entry, which a close updates, so it
+hs_h2:   .res 2         ; misses an open handle's own writes (hardware-notes H11)
 hs_lru:  .res 1         ; the slot to take next
 ps_used: .res NUPATH
 u_page:  .res 1         ; the path-slot page
@@ -107,6 +110,7 @@ uvtab:  jmp uci_namei
         jmp uci_rmdir
         jmp uci_unlink
         jmp uci_rename
+        jmp uci_size
 .assert * - uvtab = NUV*3, error, "uvtab and the stubs in src/kernel/uci.s differ in length"
 ps_off:  .byte 0, 48, 96, 144, 192
 omode:   .byte 1, 2, 3, 3
@@ -403,6 +407,9 @@ hs_claim:
         sta hs_p0,x
         sta hs_p1,x
         sta hs_p2,x
+        sta hs_h0,x
+        sta hs_h1,x
+        sta hs_h2,x
 hs_used:
         txa
         eor #1
@@ -435,6 +442,23 @@ hs_at:  stx u_s
         jmp ut_run
 @ok:    clc
         rts
+
+; u_advw: u_adv after a write: the handle has written up to u_pos (hs_h, if that is further)
+u_advw: jsr u_adv
+        lda hs_h0,x
+        cmp u_pos
+        lda hs_h1,x
+        sbc u_pos+1
+        lda hs_h2,x
+        sbc u_pos+2
+        bcs u_ar
+        lda u_pos
+        sta hs_h0,x
+        lda u_pos+1
+        sta hs_h1,x
+        lda u_pos+2
+        sta hs_h2,x
+u_ar:   rts
 
 ; u_adv: u_pos += ut_got; the host of slot u_s is there now
 u_adv:  clc
@@ -827,6 +851,87 @@ uci_open:
 @fail:  ldx u_e
         rts
 
+; u_sz: X = open-file entry -> u_info = FILE INFO from a slot open on it, its size raised to
+; what that handle has written (INFO gives the size at the last close: H11). The host's position
+; is not moved: a SEEK in write mode past the end (another descriptor may have shortened the
+; file) would extend it with undefined bytes, and INFO does not need a position.
+u_sz:   txa
+        tay
+        lda #0              ; a slot that is opened now starts at 0
+        sta u_pos
+        sta u_pos+1
+        sta u_pos+2
+        tya
+        jsr hs_find
+        bmi @o
+        lda hs_p0,x         ; a slot already on it: stay where its host is
+        sta u_pos
+        lda hs_p1,x
+        sta u_pos+1
+        lda hs_p2,x
+        sta u_pos+2
+@o:     tya
+        tax
+        jsr uci_ensure
+        bcs @r
+        ldx u_s
+        lda #C_INFO
+        jsr u_get12
+        bcs @r
+        ldx u_s
+        lda u_info+3
+        bne @k              ; 16 MB or more: more than any handle wrote
+        lda u_info
+        cmp hs_h0,x
+        lda u_info+1
+        sbc hs_h1,x
+        lda u_info+2
+        sbc hs_h2,x
+        bcs @k
+        lda hs_h0,x
+        sta u_info
+        lda hs_h1,x
+        sta u_info+1
+        lda hs_h2,x
+        sta u_info+2
+@k:     clc
+@r:     rts
+
+; uci_size: from sys_lseek, X = an open-file entry -> ci+I_SIZE = the file's size, from FILE
+; INFO (u_sz: 16 MB or more is clamped, as the probe does). A directory's position counts
+; entries (uci_readdir skips that many on each read, so any count it can hold is sound: 16
+; bits): it has no end, so SEEK_END (sb5) is EINVAL and the bound is $00FFFF.
+uci_size:
+        lda f_type,x
+        cmp #FT_DIR
+        bne @f
+        lda sb5
+        cmp #SEEK_END
+        beq @inv
+        lda #$ff
+        sta u_info
+        sta u_info+1
+        lda #0
+        sta u_info+2
+        sta u_info+3
+        beq @k
+@f:     jsr u_sz
+        bcs @r
+@k:     ldx #2
+@c:     lda u_info+3        ; 16 MB or more: $FFFFFF
+        beq @b
+        lda #$ff
+        bne @s
+@b:     lda u_info,x
+@s:     sta ci+I_SIZE,x
+        dex
+        bpl @c
+        clc
+@r:     rts
+@inv:   lda #EINVAL
+        sec
+        rts
+
 ; uci_release: from oft_unref, X = an entry being freed. Keeps X.
 uci_release:
         lda f_dev,x
@@ -932,6 +1037,25 @@ u_ret0: rts
 ; WRITE DATA in requests of up to 512 bytes; no write-behind.
 uci_write:
         ldx sb6
+        lda f_flags,x       ; appending: every write starts at the end (a seek may have moved it)
+        and #O_APPEND
+        beq @na
+        jsr u_sz
+        bcs u_ret0
+        lda u_info+3        ; 16 MB or more: EFBIG below
+        beq @sz
+        lda #$ff
+        sta u_info
+        sta u_info+1
+        sta u_info+2
+@sz:    ldx sb6
+        lda u_info
+        sta f_pos0,x
+        lda u_info+1
+        sta f_pos1,x
+        lda u_info+2
+        sta f_pos2,x
+@na:    ldx sb6
         jsr e_getpos
         lda u_pos           ; positions are 24 bits: stop at 16 MB rather than wrap
         clc
@@ -990,7 +1114,7 @@ uci_write:
         bne @b
         jsr ut_run          ; (keeps ut_got = n)
         bcs @err
-        jsr u_adv
+        jsr u_advw
         lda u_w
         sec
         sbc ut_got

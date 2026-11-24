@@ -93,8 +93,8 @@ if [ -n "$jiffy" ]; then
     done
     viceargs="-kernal /jiffy/JiffyDOS-C64.bin -dos1541 /jiffy/JiffyDOS_1541-II.bin -dos1541II /jiffy/JiffyDOS_1541-II.bin $viceargs"
 fi
-# A run that starts VICE takes its own slot (tools/with-lock: up to 6 at once,
-# BREADBIN_VICE_SLOTS); BREADBIN_CI_EXCLUSIVE=1 takes them all, for runs whose wall-clock
+# A run that starts VICE takes its own slot (tools/with-lock: up to 12 at once,
+# BREADBIN_VICE_SLOTS; a work unit takes at most six); BREADBIN_CI_EXCLUSIVE=1 takes them all, for runs whose wall-clock
 # data matters. A caller that already holds the lock passes straight through. Build-only
 # targets (test-host, size, all, clean) take no slot; any other target is assumed to
 # start VICE.
@@ -125,7 +125,7 @@ set -- -v "$repo:/src:ro" -v "$roms:/roms:ro" "$@"
 [ -n "$reason" ] && set -- --label "breadbin.ci.reason=$reason" "$@"
 set -- podman run --rm --init --name "$name" "$@"
 if [ -n "$lockbin" ]; then
-    if [ "${BREADBIN_CI_EXCLUSIVE:-}" = 1 ]; then set -- "$lockbin" -x -- "$@"; else set -- "$lockbin" -- "$@"; fi
+    if [ "${BREADBIN_CI_EXCLUSIVE:-}" = 1 ]; then set -- "$lockbin" -x --emergency -- "$@"; else set -- "$lockbin" -- "$@"; fi
 fi
 # Not exec'd: a signal removes the container, otherwise podman's own helper (its own
 # session) would keep the VICE running after the lock holder died, outside the lock. A
