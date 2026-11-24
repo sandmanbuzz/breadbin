@@ -1,10 +1,8 @@
-"""A held sector must not outlive the disk it came from (finding 1 of the ce02c7f hater).
+"""Finding 1 of the ce02c7f hater: a held sector must not outlive the disk it came from.
 
-Two disks built from the same image. On both, the root directory is moved to block N and
-file f (12 blocks) sits on the 12 blocks just before it, so the block a two-sector pass keeps
-after f's last block is the root directory. Disk B also has /z. Read f from A (the fast path
-keeps the root directory in the drive), swap in B, list /mnt: B's listing must show z. A stale
-hit serves A's root directory and z is missing.
+Only the umount path is tested (FastClose): umount reaches ft_close through iec_close and
+sets ft_inval, so the next read drops the held sector. A swap with no umount is NOT covered,
+and no layout tried reproduces the stale hit; see docs/hardware-notes.md.
 """
 import os
 import shutil
@@ -80,46 +78,6 @@ def drive_byte(v, a):
     m = re.search(r">8:%04x\s+([0-9a-f]{2})" % a, out)
     return int(m.group(1), 16) if m else -1
 
-
-class FastSwap(unittest.TestCase):
-    def test_swap_disk_after_read(self):
-        """Find a layout whose last fast read leaves the root directory's sector held (checked in the
-        drive: track and sector), then swap disks and list: B's listing must show z."""
-        os.makedirs(WORK, exist_ok=True)
-        probe = mkimage.FS(mkimage.load(IMAGE))
-        starts = runs(probe, K)[:6]
-        self.assertTrue(starts, "no free run of %d blocks on one track" % K)
-        img = os.path.join(WORK, "boot.d64")
-        shutil.copy(IMAGE, img)
-        v = Vice(img, warp=True, reu=2048, reu_image=os.path.join(WORK, "reu.img"))
-        chosen = None
-        try:
-            v.wait_shell()
-            self.assertEqual(v.run("eject", timeout=900), "")
-            for s0 in starts:
-                a = make_disk("A", with_z=False, s=s0)
-                b = make_disk("B", with_z=True, s=s0)
-                v._cmd("detach 8")
-                v._cmd(f'attach "{a}" 8')
-                v.run("umount /mnt")
-                self.assertEqual(v.run("mount 8 /mnt"), "")
-                if chosen is None and not v.run("mod ls").count("(fast)"):
-                    self.assertEqual(v.run("mod load /lib/km/fast"), "")
-                v.run("wc /mnt/f", timeout=900)
-                root_ts = mkimage.block_to_ts(s0 + K)
-                kt, k2 = drive_byte(v, 0x04EA), drive_byte(v, 0x04EB)
-                if (kt, k2) == (root_ts[0], root_ts[1]):
-                    chosen = (s0, a, b)
-                    break
-            if chosen is None:
-                self.skipTest("no candidate layout left the root directory's sector held after the read")
-            s0, a, b = chosen
-            v._cmd("detach 8")
-            v._cmd(f'attach "{b}" 8')
-            listing = v.run("ls /mnt", timeout=900).split()
-            self.assertIn("z", listing, "B's root directory is A's: a held sector from the previous disk")
-        finally:
-            v.close()
 
 class FastClose(unittest.TestCase):
     def test_close_marks_next_read(self):

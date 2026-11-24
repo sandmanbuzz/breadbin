@@ -787,3 +787,14 @@ Setup: `main` at 5311612; C64 Ultimate firmware 1.1.0, drive A = device 9 (emula
 - Stage 2 (`--format`): `format 10 c64fs vol` finished (`done`); `mount 10 /mnt` OK; `mkdir /mnt/d`, `cp /etc/help /mnt/d/help`; `wc` 13 75 414 (same as the source); `hexdump` head and tail equal to the source's; `umount`, `mount` again, and the same again: all equal. **9 of 9 checks, 1 run.** This is the first run of the d81 module against a real 1581 and its real DOS (the 2026-11 emulated-1581 run above used the Ultimate's 1581 ROM).
 - Not measured: time of the format or the copy, speed, more than one run, a second disk, the JiffyDOS fast path (whether the probe engaged on the 1581 is not recorded), the physical 1541 on the bus at the same time. `format` erased whatever was on that disk.
 - After the run drive A holds `/Temp/breadbin.d64` (it was empty before the run; the harness leaves it like this).
+
+## 2026-11-24: fast.km held sector after a disk swap (VICE, not hardware)
+
+Not a hardware finding: the runs are in the container under VICE. Recorded here because the gap is a hardware-facing one (a user swapping floppies in a real 1541).
+
+- Run: `tools/ci/run.sh test-only T="tests.test_fast_swap.FastClose"` on fix/fast-held-swap (59ef85f) and on cbd0d88 (run from that tree's own `run.sh`, which takes the tree it sits in). Fix: PASS, `ft_inval` 1 after umount. cbd0d88: FAIL, 0 != 1. A monitor store watchpoint on `ft_inval` during umount did not fire on cbd0d88, so the close hook is the only writer on that path.
+- Run: a sweep of block counts 10 to 13 over four candidate starts each, on cbd0d88: umount, swap, mount, list (and swap with no umount). In every layout `z` was listed, so no stale root directory was served. The stale-hit reproduction is NOT produced. The track of the held sector matched the file's track in the runs, but the sector was not identified (`d_k2` held 0x05, which is not a GCR code of any sector), so no layout is shown to hold the root directory's sector.
+- Remaining gap, not fixed: a swap with no umount. No close hook fires, so the held sector survives into the next request. The fix is limited to umount.
+- Same-ID gap: a disk-ID check (`$0209` at capture, `d_cap`) catches a different disk only when the IDs differ. Most CBM disks share an ID, so a same-ID swap is still missed. Comparing the track 18 ID pair needs a 6-byte header read in `d_cap` (today 5), which changes every capture.
+- Serve-time check, not done: validating a hold on every hit needs a header read on the hit, up to a revolution (about 200 ms at 300 rpm). That would cost more than a mode-2 hit saves, so it is not added without measurement.
+- Commit: 59ef85f (FastClose; the swap test and its shard entry were removed, see the commit message of the following commit).
