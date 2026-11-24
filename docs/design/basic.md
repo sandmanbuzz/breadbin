@@ -336,6 +336,29 @@ within about 10 %.
   `valued` list, so `rtid` changes and old `.bx` files are refused; layouts of `bas` and `brun`
   stay identical (host test).
 
+### 6.3 INPUT and arrays (L3d, S3-S4)
+
+- **INPUT.** `rt_inp(prompt, mask | n * 128)` reads one line into `ib` and fills `n` variables
+  (`inputs()` prescans the list, with paren depth, to build the numeric mask). A short line
+  prompts again with `??`; a bad number prints `?REDO FROM START` and rereads the whole line; extra
+  fields print `?EXTRA IGNORED`; an empty numeric field is 0. End of input is error 9 (BREAK), so a
+  piped program ends instead of looping. Fields come from `rt_ifld()` as temporaries; numbers
+  then go through `rt_val`. Elements of arrays are valid targets (`eassign`).
+- **Arrays.** Table entry `[c1|32, c2, n1(2), n2(2)]` and the elements after it (4 bytes for
+  numbers, 2 for int and string); `n2` is 0 for one dimension; the element is `(i * n2 + j)`.
+  Each subscript is checked by `rt_sub(i, n)` (BAD SUBSCRIPT, error 14); string elements are
+  owned cells like `A$` and follow the collector. `DIM` sizes are **constants**: arrays are
+  allocated at compile time (`predim()` scans every line first, so a DIM in a late subroutine is
+  seen). Implicit arrays are 0..10 (11 x 11 for two subscripts). A second, different DIM is
+  REDIM'D ARRAY (15); a DIM that runs again is a no-op. `DIM A(N)` with a variable is a SYNTAX
+  error for now (a runtime DIM is a decision for later: it needs the heap and variable table to
+  grow together).
+- **Cost.** `bas` 12,881 -> 15,983 B across strings, INPUT and arrays; the arena at the shell
+  fell about 1.8 KB, below the 16 KB the compiler started with (size pass owed; see the status
+  line at L3d). `c_mcpy` (rt.s) is the one native byte copy and fill: `scopy`, `move` and the
+  zeroing in `grab` use it instead of p-code loops (a `DIM A(1000)` is then a few thousand
+  cycles, not hundreds of thousands).
+
 ## 7. Open questions
 
 - **Compile speed.** The compiler is p-code, at the VM's speed. *Estimate:* a 100-line
