@@ -22,6 +22,7 @@ extern int c_fromi(int i); /* void */
 extern int c_cmp();
 extern int c_fmt(char *buf);
 extern int c_throw(int e);
+extern int c_mcpy(int d, int s, int n); /* ascending byte copy */
 
 int err;                /* the error numbers are emsg's */
 char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|STRING TOO LONG|TYPE MISMATCH|BAD SUBSCRIPT|REDIM'D ARRAY|";
@@ -120,9 +121,7 @@ int salloc(int n) {     /* a temporary of n bytes, 1 to 255: its address */
 }
 
 int scopy(int d, int s, int n) {
-    int i;
-    for (i = 0; i < n; i = i + 1) nul[d + i] = nul[s + i];
-    return 0;
+    return c_mcpy(d, s, n);
 }
 
 int sgc() {             /* the live blocks down over the dead ones, each variable following its block */

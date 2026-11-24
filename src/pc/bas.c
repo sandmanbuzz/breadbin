@@ -146,17 +146,13 @@ int find(int n) {       /* the first line numbered n or above */
 }
 
 int move(char *d, char *s, int n) {
-    int i = 0;
     if (d - s > 0) {
         while (n > 0) {
             n = n - 1;
             d[n] = s[n];
         }
     } else {
-        while (i < n) {
-            d[i] = s[i];
-            i = i + 1;
-        }
+        c_mcpy(d - nul, s - nul, n);
     }
     return 0;
 }
@@ -364,7 +360,8 @@ int grab(int size) {    /* a new table entry of size bytes, zeroed, at vbot: its
     vbot = vbot - size;
     hhi = addr(vbot);
     if (!hlo) clim = vbot;
-    for (p = 0; p < size; p = p + 1) mem[vbot + p] = 0;
+    mem[vbot] = 0;
+    c_mcpy(addr(vbot) + 1, addr(vbot), size - 1);
     return vbot;
 }
 
