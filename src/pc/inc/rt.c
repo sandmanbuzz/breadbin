@@ -106,6 +106,11 @@ int inheap(int s) {
     return s && s - hlo > 0 && s - htop < 0;
 }
 
+int slen(int s) {       /* a string's length; "" (0) has none */
+    if (s) return nul[s];
+    return 0;
+}
+
 int sfree(int s) {      /* a temporary used up */
     if (inheap(s) && getw(nul + s - 2) == -1) putw(nul + s - 2, 0);
     return 0;
@@ -271,11 +276,9 @@ int rt_sres(int n) {    /* room for n temporaries of any length, before a statem
 }
 
 int rt_scat(int a, int b) {
-    int la = 0;
-    int lb = 0;
+    int la = slen(a);
+    int lb = slen(b);
     int r;
-    if (a) la = nul[a];
-    if (b) lb = nul[b];
     if (la + lb > 255) c_throw(12);
     if (!la) return b;
     if (!lb) return a;
@@ -307,13 +310,11 @@ int rt_sset(int c, int s) {     /* the variable at c := the string s: a temporar
 }
 
 int rt_scmp(int a, int b) {     /* -1, 0 or 1 */
-    int la = 0;
-    int lb = 0;
+    int la = slen(a);
+    int lb = slen(b);
     int i = 0;
     int r = 0;
     int m;
-    if (a) la = nul[a];
-    if (b) lb = nul[b];
     m = la;
     if (lb < la) m = lb;
     while (i < m && !r) {
@@ -329,8 +330,7 @@ int rt_scmp(int a, int b) {     /* -1, 0 or 1 */
 }
 
 int rt_len(int s) {
-    int n = 0;
-    if (s) n = nul[s];
+    int n = slen(s);
     sfree(s);
     return n;
 }
@@ -352,9 +352,8 @@ int rt_chr(int n) {
 }
 
 int rt_mid(int s, int i, int n) {       /* n characters from the i-th (1 is the first): the string itself when that is all of it */
-    int l = 0;
+    int l = slen(s);
     int r;
-    if (s) l = nul[s];
     if (i < 1 || n < 0) c_throw(6);
     if (i > l) n = 0;
     else if (n > l - i + 1) n = l - i + 1;
@@ -374,8 +373,7 @@ int rt_left(int s, int n) {
 }
 
 int rt_right(int s, int n) {
-    int l = 0;
-    if (s) l = nul[s];
+    int l = slen(s);
     if (n < 0) c_throw(6);
     if (n > l) n = l;
     return rt_mid(s, l - n + 1, n);
@@ -391,22 +389,22 @@ int rt_str() {          /* STR$ of the number on top of the number stack: as PRI
 
 int rt_val(int s) {     /* VAL: the number at the start of s (spaces, a sign, digits, a point, to 4 decimals: the rest is
                            dropped, not rounded), on the number stack; 0 if there is none */
-    int l = 0;
+    char *p = nul + s;
+    int l = slen(s);
     int i = 1;
     int neg = 0;
     int d;
     int f = 0;
     int k = 0;
     int pw = 1000;
-    if (s) l = nul[s];
     c_fromi(0);
-    while (i <= l && nul[s + i] == ' ') i = i + 1;
-    if (i <= l && (nul[s + i] == '-' || nul[s + i] == '+')) {
-        neg = nul[s + i] == '-';
+    while (i <= l && p[i] == ' ') i = i + 1;
+    if (i <= l && (p[i] == '-' || p[i] == '+')) {
+        neg = p[i] == '-';
         i = i + 1;
     }
     while (i <= l) {
-        d = nul[s + i] - '0';
+        d = p[i] - '0';
         if (d < 0 || d > 9) {
             if (d != -2 || k) break;        /* the point, once */
             k = 1;

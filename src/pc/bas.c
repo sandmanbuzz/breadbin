@@ -43,6 +43,10 @@ extern int c_xop(int b); /* xop 254 void */
 extern int c_xopw(int b, int w); /* void */
 extern int c_fail(int e); /* xop 252 void */   /* err = e, unless one came first */
 extern int incsi(); /* void */   /* si + 1 */
+extern int c_sres();
+extern int c_more();
+extern int c_binop(int c);
+extern int c_relop(int m); /* void */
 extern int c_grow(int n);       /* up to n pages from the kernel for mem (bas-rt.s); the pages granted */
 
 char *mem;              /* MEM: the arena, msz bytes of pages the kernel grants at start (c_grow) */
@@ -58,7 +62,7 @@ int eline;              /* the line a compile error is in */
 char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|LEFT$|RIGHT$|MID$|LEN|CHR$|ASC|STR$|VAL|INPUT|DIM|";
                         /* the keywords: the program holds each as a token, 128 + its place
                            here, written as the number with "tk NAME" in a comment (test_bas checks the
-                           numbers; bas-rt.s has PRINT's and REM's); a keyword before its prefixes, as
+                           numbers; bas-rt.s has PRINT's, REM's and DIM's); a keyword before its prefixes, as
                            the first that matches wins (so TOTAL is TO TAL, as MS) */
 char *src;
 int si;                 /* the parse position in src */
@@ -219,14 +223,16 @@ int list(int a, int b) {
    cc_pcode's op()). No line reaches it today: each starts with CALL rt_ln and 160 characters
    compile to under 240 bytes between calls; it is kept so that a new statement cannot break Y. */
 
-int pcall(char *f) {    /* CALL f, a bytecode function (c_ncall is for the natives) */
+int pcall(char *f, int d) {     /* CALL f, a bytecode function, which changes the eval stack's depth by d
+                                   (c_ncall is for the natives) */
     c_opw(84 /* PO_CALL */, f - nul);
     straight = 0;
+    epush(d);
     return 0;
 }
 
-int ecall(char *f) {    /* CALL f, DROP its result */
-    pcall(f);
+int ecall(char *f, int d) {     /* pcall, then DROP its result */
+    pcall(f, d);
     return c_op1(48 /* PO_DROP */);
 }
 
@@ -393,20 +399,6 @@ int array(int n1, int n2) {     /* the array nc1, nc2 of n1 elements (n2 by n1 f
     return p;
 }
 
-int more() {            /* does the parenthesis at si hold a comma of its own: a second subscript */
-    int i = si;
-    int d = 0;
-    while (src[i]) {
-        if (src[i] == '(') d = d + 1;
-        if (src[i] == ')') {
-            d = d - 1;
-            if (!d) return 0;
-        }
-        if (src[i] == ',' && d == 1) return 1;
-        i = i + 1;
-    }
-    return 0;
-}
 
 int pushi(int v) {      /* pushint, counted on the eval stack */
     pushint(v);
@@ -422,13 +414,12 @@ int iop(int op) {       /* a VM op on the eval stack's top two ints */
 
 int isub(int m) {       /* the subscript on top checked for 0 to m */
     pushi(m);
-    pcall(&rt_sub);
-    epush(-1);
+    pcall(&rt_sub, -1);
     return 0;
 }
 
 int elem() {            /* A(i) or A(i, j): the element's address on the eval stack, after a check of each subscript */
-    int n2 = more();
+    int n2 = c_more();
     int p = array(0, n2);
     int m1;
     int m2;
@@ -511,8 +502,7 @@ int strlit() {          /* a string literal after its quote: a CS, whose address
 }
 
 int val() {             /* VAL of the string on the eval stack, to the number stack */
-    ecall(&rt_val);
-    epush(-1);
+    ecall(&rt_val, -1);
     npush(1);
     return 1;
 }
@@ -524,19 +514,18 @@ int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$
     deep = deep + 2;
     if (t == 161) {
         tonum(climb(1));
-        pcall(&rt_str);
+        pcall(&rt_str, 1);
         npush(-1);
-        epush(1);
     } else if (t == 159) {
         toint(climb(1));
-        pcall(&rt_chr);
+        pcall(&rt_chr, 0);
     } else {
         if (climb(1) != 3) c_fail(13);
         if (t == 158) {
-            pcall(&rt_len);
+            pcall(&rt_len, 0);
             k = 2;
         } else if (t == 160) {
-            pcall(&rt_asc);
+            pcall(&rt_asc, 0);
             k = 2;
         } else if (t == 162) k = val(); else {
             need(',');
@@ -546,11 +535,9 @@ int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$
                     need(',');
                     toint(climb(1));
                 } else pushint(255);
-                pcall(&rt_mid);
-                epush(-1);
-            } else if (t == 155) pcall(&rt_left);
-            else pcall(&rt_right);
-            epush(-1);
+                pcall(&rt_mid, -2);
+            } else if (t == 155) pcall(&rt_left, -1);
+            else pcall(&rt_right, -1);
         }
     }
     need(')');
@@ -607,15 +594,6 @@ int primary() {
     return 1;
 }
 
-int relop(int m) {      /* the VM's compare of n_cmp's -1, 0 or 1 with 0: -1 when true */
-    if (m == 1) return c_op1(70 /* PO_ISLT */);
-    if (m == 2) return c_op1(64 /* PO_ISEQ */);
-    if (m == 3) { c_op1(68 /* PO_ISGT */); return c_op1(146 /* PO_COMP */); }   /* no ISLE/ISGE: */
-    if (m == 4) return c_op1(68 /* PO_ISGT */);
-    if (m == 5) return c_op1(66 /* PO_ISNE */);
-    c_op1(70 /* PO_ISLT */);    /* the other compare, then COMP */
-    return c_op1(146 /* PO_COMP */);
-}
 
 int operand() {         /* a primary, or - + NOT and theirs. Each ( and unary op nests through
                            here (climb counts the frames: see there) */
@@ -637,15 +615,6 @@ int operand() {         /* a primary, or - + NOT and theirs. Each ( and unary op
     return k;
 }
 
-int binop(int c) {      /* the precedence of the binary operator c; 0 for none */
-    if (c == '^') return 10;
-    if (c == '*' || c == '/') return 8;
-    if (c == '+' || c == '-') return 7;
-    if (c == '<' || c == '=' || c == '>') return 6;
-    if (c == 129 /* tk AND */) return 4;
-    if (c == 143 /* tk OR */) return 3;
-    return 0;
-}
 
 int cmpops(int c) {     /* the relation's characters from si: < = > as bits 1, 2, 4 */
     int m = 0;
@@ -678,14 +647,13 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
     else k = operand();
     while (!err) {
         c = c_sp();
-        p = binop(c);
+        p = c_binop(c);
         if (p < min) break;         /* none is 0 */
         if (p == 6) {
             p = cmpops(c);   /* the relation's bits: p is not needed again here */
             if (k == 3) {
                 if (climb(7) != 3) c_fail(13);
-                pcall(&rt_scmp);
-                epush(-1);
+                pcall(&rt_scmp, -1);
             } else {
                 tonum(k);
                 tonum(climb(7));
@@ -694,7 +662,7 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
                 epush(1);
             }
             pushi(0);
-            relop(p);
+            c_relop(p);
             epush(-1);
             k = 2;
             continue;
@@ -710,13 +678,12 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
         }
         if (k == 3) {           /* a string: + joins */
             if (c != '+' || climb(p + 1) != 3) c_fail(13);
-            pcall(&rt_scat);
-            epush(-1);
+            pcall(&rt_scat, -1);
             continue;
         }
         tonum(k);
         tonum(climb(p + 1));
-        if (c == '^') ecall(&rt_pow);
+        if (c == '^') ecall(&rt_pow, 0);
         else if (c == '*') c_xop(212 /* x MUL */);
         else if (c == '/') c_xop(214 /* x DIV */);
         else if (c == '+') c_xop(208 /* x ADD */);
@@ -734,8 +701,7 @@ int assign(int a, int t, int k) {       /* the value of kind k to the variable o
                                            a = 0 to the array element whose address is under the value */
     if (t == 2) {               /* the address of the variable was pushed before the expression */
         if (k != 3) c_fail(13);
-        ecall(&rt_sset);
-        epush(-2);
+        ecall(&rt_sset, -2);
         return 0;
     }
     if (t) {
@@ -745,8 +711,7 @@ int assign(int a, int t, int k) {       /* the value of kind k to the variable o
             epush(-1);
             return 0;
         }
-        ecall(&rt_sw);
-        epush(-2);
+        ecall(&rt_sw, -2);
         return 0;
     }
     tonum(k);
@@ -795,21 +760,20 @@ int prints() {          /* PRINT: strings and numbers; ; between them, or after 
         nl = 0;
         if (c_tok(';')) continue;
         if (c_tok(',')) {
-            ecall(&rt_tab);
+            ecall(&rt_tab, 0);
             continue;
         }
         nl = 1;
         c = climb(1);
         if (c == 3) {
-            ecall(&rt_prs);
-            epush(-1);
+            ecall(&rt_prs, -1);
         } else {
             tonum(c);
-            ecall(&rt_prn);
+            ecall(&rt_prn, 0);
             npush(-1);
         }
     }
-    if (nl) ecall(&rt_nl);
+    if (nl) ecall(&rt_nl, 0);
     return 0;
 }
 
@@ -905,7 +869,7 @@ int fors() {            /* FOR v = a TO b [STEP c] */
     c_room(9);            /* so that the body is 10 bytes on */
     c_opw(38 /* PO_LA */, addr(cend + 10));
     c_opw(38 /* PO_LA */, a);
-    ecall(&rt_for);
+    ecall(&rt_for, 0);
     c_ncall(&rt_ln);      /* the body starts here */
     npush(-2);
     return 0;
@@ -921,7 +885,7 @@ int nexts() {           /* NEXT [v [, w ...]] */
             if (vint || !a) c_fail(1);
         }
         c_opw(38 /* PO_LA */, a);
-        pcall(&rt_next);
+        pcall(&rt_next, 0);
         c_ncall(&rt_go);
         c_sp();
         if (!c_tok(',')) return 0;
@@ -929,28 +893,12 @@ int nexts() {           /* NEXT [v [, w ...]] */
     return 0;
 }
 
-int sres() {            /* before a statement with strings in it, room for the temporaries it can make: one for
-                           each $, string function and +, to 6 (rt_sres). A GC moves blocks, so it runs only
-                           here, where nothing is on the stacks */
-    int i = si;
-    int q = 0;
-    int s = 0;
-    int n = 0;
-    int c;
-    while (src[i] && (src[i] != ':' || q)) {
-        c = src[i];
-        if (c == '"') q = 1 - q;
-        if (!q) {
-            if (c == '$' || c > 154) s = s + 1;
-            if (c == '+') n = n + 1;
-        }
-        i = i + 1;
+int sres() {            /* rt_sres's room for the statement's temporaries (c_sres), if it has strings */
+    int n = c_sres();
+    if (n) {
+        pushint(n);
+        ecall(&rt_sres, 0);
     }
-    if (!s || src[si] == 145 /* tk REM */ || src[si] == 164 /* tk DIM */) return 0;
-    n = n + s;
-    if (n > 6) n = 6;
-    pushint(n);
-    ecall(&rt_sres);
     return 0;
 }
 
@@ -985,8 +933,7 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
     if (n > 7) c_fail(11);
     pushi(n * 128);
     i = cend - 1 - (n > 1);     /* the constant's low byte (a CB's or a CW's): the mask is added to it */
-    ecall(&rt_inp);
-    epush(-2);
+    ecall(&rt_inp, -2);
     for (k = 0; k < n && !err; k = k + 1) {
         if (k) need(',');
         if (!c_sp() || !c_letter()) {
@@ -997,8 +944,7 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
         t = vint;
         if (t != 2) m = m + (1 << k);
         sla(a, t);
-        pcall(&rt_ifld);
-        epush(1);
+        pcall(&rt_ifld, 1);
         c = 3;
         if (t != 2) c = val();
         assign(a, t, c);
@@ -1078,7 +1024,7 @@ int stmt() {
     if (c_tok(133 /* tk GOSUB */)) {
         c_room(6);        /* the return address is 10 bytes on */
         c_opw(38 /* PO_LA */, addr(cend + 10));
-        ecall(&rt_gosub);
+        ecall(&rt_gosub, 0);
         gotol();
         c_ncall(&rt_ln);  /* the return address: the line is current again */
         return 0;
@@ -1089,7 +1035,7 @@ int stmt() {
         return 0;
     }
     if (c_tok(146 /* tk RETURN */)) {
-        pcall(&rt_return);
+        pcall(&rt_return, 0);
         return c_ncall(&rt_go);
     }
     if (c_tok(132 /* tk FOR */)) { fors(); return 0; }
