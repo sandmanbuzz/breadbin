@@ -149,7 +149,9 @@ prove the whole path with one tiny program end to end before widening anything.
   - `DIM`;
   - `INPUT`.
 - **L3e. Files and acceptance:**
-  - `SAVE`, `LOAD` and `basic FILE`;
+  - `SAVE`, `LOAD` (done, `docs/manual/files.md`: SAVE is LIST into a file, LOAD is NEW then the
+    file's lines as typed; `bas` +305 B, `brun` +27, the shell arena 16,384 -> 16,128 B, accepted by
+    the owner). `basic FILE` is open: mini C has no argv, so `bas < file` is the way for now;
   - error messages;
   - the period-style listings (written for this, not copied) that the roadmap's acceptance
     names;
@@ -353,9 +355,8 @@ within about 10 %.
   REDIM'D ARRAY (15); a DIM that runs again is a no-op. `DIM A(N)` with a variable is a SYNTAX
   error for now (a runtime DIM is a decision for later: it needs the heap and variable table to
   grow together).
-- **Cost.** `bas` 12,881 -> 15,983 B across strings, INPUT and arrays; the arena at the shell
-  fell about 1.8 KB, below the 16 KB the compiler started with (size pass owed; see the status
-  line at L3d). `c_mcpy` (rt.s) is the one native byte copy and fill: `scopy`, `move` and the
+- **Cost.** `bas` 10,402 -> 14,411 B across strings, INPUT and arrays, after the size pass; the
+  shell arena stayed at exactly 16,384 B, with no margin (`docs/program-size-ledger.tsv`). `c_mcpy` (rt.s) is the one native byte copy and fill: `scopy`, `move` and the
   zeroing in `grab` use it instead of p-code loops (a `DIM A(1000)` is then a few thousand
   cycles, not hundreds of thousands).
 
