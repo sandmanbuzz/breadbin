@@ -30,6 +30,9 @@ $(BUILD)/mod/%.o: src/mod/%.s $(BUILD)/kapi.stamp include/breadbin.inc
 	@mkdir -p $(dir $@)
 	ca65 -g -I $(BUILD) $(MODFLAGS) $< -o $@
 
+# a module's .incbin and .include files (the font and driver of con80) are inputs too
+$(BUILD)/mod/con80.o: src/mod/con80.inc src/mod/con80.font
+
 # link twice (origin $0000 and $0100) and diff into a relocatable CX file, as for programs
 $(BUILD)/root/lib/km/%: $(BUILD)/mod/%.o $(BUILD)/kexp.o src/mod/module.cfg tools/cx.py
 	@mkdir -p $(dir $@) $(BUILD)/mod

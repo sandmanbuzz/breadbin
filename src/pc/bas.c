@@ -584,10 +584,11 @@ int primary() {
 int relop(int m) {      /* the VM's compare of n_cmp's -1, 0 or 1 with 0: -1 when true */
     if (m == 1) return c_op1(70 /* PO_ISLT */);
     if (m == 2) return c_op1(64 /* PO_ISEQ */);
-    if (m == 3) return c_op1(74 /* PO_ISLE */);
+    if (m == 3) { c_op1(68 /* PO_ISGT */); return c_op1(146 /* PO_COMP */); }   /* no ISLE/ISGE: */
     if (m == 4) return c_op1(68 /* PO_ISGT */);
     if (m == 5) return c_op1(66 /* PO_ISNE */);
-    return c_op1(72 /* PO_ISGE */);
+    c_op1(70 /* PO_ISLT */);    /* the other compare, then COMP */
+    return c_op1(146 /* PO_COMP */);
 }
 
 int operand() {         /* a primary, or - + NOT and theirs. Each ( and unary op nests through

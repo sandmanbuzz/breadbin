@@ -112,6 +112,16 @@ At the `login:` prompt, type `root` or `user`; neither has a password until you 
 
 On a C64 keyboard, `|` is **SHIFT + `-`**, and RUN/STOP interrupts the running command.
 
+## 80 columns
+
+An optional 80-column console runs as a kernel module (`/lib/km/con80`): a hires bitmap with a 4 x 8 font, 80 by 25 characters. The 40-column console is unchanged and stays the default.
+
+- **Start in 80 columns at boot:** as root, `echo 1 > /etc/con80`, then reboot. The module loads before the first shell.
+- **Switch on from a shell:** `mod load /lib/km/con80`. A shell that is already running can hold the pages it needs, and the load then fails with ENODEV: use the boot file instead.
+- **Switch off:** `mod ls` shows the slot (`slot N (con80)`); `mod unload N` puts the 40-column console back. A second load works after that.
+
+It needs no REU and no Ultimate. The screen is drawn in software, so scrolling is slower than on the 40-column console (on a stock 1 MHz C64 a full-screen `ls` takes a couple of seconds). On an Ultimate, `turbo max` (or a higher speed) makes scrolling much faster. The font is Novaterm's 80-column font by Nick Rossi, redrawn in part (credit in `src/mod/con80.s`). Details: [docs/design/soft80-spike.md](docs/design/soft80-spike.md).
+
 ## Platform tiers
 
 One disk boots everywhere; features are chosen by probing at run time. The core never requires an REU or an Ultimate. Details: [docs/roadmap.md](docs/roadmap.md).
@@ -130,7 +140,7 @@ The boot disk is mounted at `/`. More drives work too: put a disk in drive 9, 10
 
 ## Commands
 
-`sh` `init` `login` `ls [-l] [-a]` `cat` `echo` `grep [-v] [-c]` `wc` `head [-n]` `tail` `tee` `sort` `touch` `more` `edit` `cp` `mv` `rm` `mkdir` `rmdir` `pwd` `stat` `hexdump` `ps` `kill [-sig]` `sleep` `free` `df` `du` `mount` `umount` `format` `uptime` `date` `uname [-a]` `version` `whoami` `passwd` `theme` `turbo [0-15|off|max]` `help` `clear` `count` `basic` `as` `cache` `mod` `exec`
+`sh` `init` `login` `ls [-l] [-a]` `cat` `echo` `grep [-v] [-c]` `wc` `head [-n]` `tail` `tee` `sort` `touch` `more` `edit` `cp` `mv` `rm` `mkdir` `rmdir` `pwd` `stat` `hexdump` `ps` `kill [-sig]` `sleep` `free` `df` `mount` `umount` `format` `uptime` `date` `uname [-a]` `version` `whoami` `passwd` `theme` `turbo [0-15|off|max]` `help` `clear` `count` `basic` `as` `cache` `mod` `exec`
 
 Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 

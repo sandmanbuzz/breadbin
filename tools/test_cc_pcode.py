@@ -180,7 +180,7 @@ class PCodeOnly(unittest.TestCase):
                    'if (9 / z == 0) if ((0 - 9) / z == 0) puts("Y"); return 0; }')
 
     def test_fused_operands_every_kind(self):
-        # x + v and a[v] carry v in the op (ADDLW ADDAW, IDXLW, ADDI SUBI; bytes and a global's IDX go
+        # x + v and a[v] carry v in the op (ADDLW, ADDI SUBI; a scaled or global one is LLW or LAW, then IDXW or ADD; bytes and a global's IDX go
         # through the plain loads): locals and globals, int and char, scaled and not
         self.check("int g = 3; char gc = 2; int ga[6]; char gs[6];\n"
                        "int main() { int *p; char *q; int i = 4; char c = 1;\n"
@@ -229,6 +229,14 @@ class L3a(unittest.TestCase):
     def test_character_literals(self):
         self.check(r"""int main() { char c = 'A'; if (c == 65) if ('\n' == 10) if ('\'' == 39) if ('\0' == 0)
                    if ('"' == 34) if ('\\' == 92) if ('\t' + 1 == 10) if ('\xff' == 0) puts("Y"); return 0; }""".replace("if ('\\xff' == 0) ", ""))
+
+    def test_not_needs_a_second_slot_at_depth(self):
+        # `!x` is CN 0; ISEQ now (no LNOT in the VM): it needs two entries, which need() must count
+        self.check("int f(int a, int b, int c, int d, int e, int g, int h, int i) { return i + h; }\n"
+                   "int main() { int x = 0; int y = 5;\n"
+                   '  if (f(1, 2, 3, 4, 5, 6, 7, !x) == 8) if (1 + (2 + (3 + (4 + (5 + (6 + (7 + !x)))))) == 29)\n'
+                   '  if (f(1, 2, 3, 4, 5, 6, 7, x <= y) == 8) if (f(1, 2, 3, 4, 5, 6, 7, y >= x && y) == 8)\n'
+                   '  if (f(1, 2, 3, 4, 5, 6, 7, !y) == 7) puts("Y"); return 0; }')
 
     def test_remainder_is_c_remainder(self):
         vals = [-32768, -32767, -100, -7, -3, -1, 0, 1, 3, 7, 100, 32767]
@@ -486,6 +494,7 @@ class L3b(unittest.TestCase):
         self.assertEqual((r.out, r.exit), (want, status), src)
         return r
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_bit_operations_and_shifts_against_a_model(self):
         vals = [-32768, -32767, -256, -255, -2, -1, 0, 1, 2, 5, 255, 256, 4660, 32767]
         ops = {"&": lambda a, b: a & b, "|": lambda a, b: a | b, "^": lambda a, b: a ^ b}
@@ -501,18 +510,21 @@ class L3b(unittest.TestCase):
                 lines.append("if ((%s >> %d) != %s) return 4;" % (lit(a), n, lit(a >> n)))   # arithmetic
         self.check("int main() {\n%s\nputs(\"Y\"); return 0; }" % "\n".join(lines))
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_precedence_is_c_precedence(self):
         # * over + over << over < over == over & over ^ over | over &&
         self.check('int main() { if ((1 + 2 << 1) == 6) if ((1 << 2 < 5) == 1) if ((3 & 1 == 1) == 1)'
                    ' if ((6 ^ 3 & 1) == 7) if ((1 | 6 ^ 3) == 5) if ((1 | 2 && 0) == 0) if ((~0 & 7) == 7)'
                    ' if ((2 * 3 << 1) == 12) if (-1 >> 4 == -1) puts("Y"); return 0; }')
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_bit_operations_in_conditions_and_with_variables(self):
         self.check("int main() { int a = 12; char c = 255; int n = 0;\n"
                    "  if (a & 3) return 1; if (!(a & 4)) return 2; while (a) { a = a >> 1; n = n + 1; }\n"
                    "  if (n != 4) return 3; if ((c << 8 >> 8) != -1) return 4; if ((c ^ 15) != 240) return 5;\n"
                    '  puts("Y"); return 0; }')
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_pointer_difference(self):
         self.check('char s[10]; int w[6];\n'
                    'int main() { char *p = s; char *q = &s[7]; int *a = w; int *b = &w[5]; char *z = 0;\n'
@@ -521,11 +533,13 @@ class L3b(unittest.TestCase):
                    '  if (p - z == 0) return 6; if ((p + 3) - z != (p - z) + 3) return 7;\n'
                    '  puts("Y"); return 0; }')
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_icall_runs_a_function_by_its_address(self):
         self.check('int h() { puts("H"); return 7; }\n'
                    'int main() { char *p = &h; if (icall(p) != 7) return 1; return icall(&h) + 30; }',
                    b"HH", 37)
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_icall_runs_code_built_at_run_time(self):
         # what RUN does: the JSR pvm_interp header copied from a function of the program, then
         # bytecode: CALL h; CB 5; ADD; RET (PO_CALL $54, PO_CB $2A, PO_ADD $82, PO_RET $5C)
@@ -537,6 +551,7 @@ class L3b(unittest.TestCase):
                    ' buf[9] = 92;\n'
                    '  return icall(buf); }', b"H", 12)
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_isatty_is_one_or_zero(self):
         src = "int main() { return isatty(0) * 10 + isatty(1) * 2 + isatty(7) + 40; }"
         self.check(src, b"", 52, tty=True)

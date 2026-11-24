@@ -12,14 +12,15 @@ make size             # bytes per kernel module and the headroom; quote it in co
 tools/ci/run.sh test-smoke      # boot, echo, pipe, Ctrl-C: about 2 minutes
 tools/ci/run.sh test-only T="tests.test_system.Boot.test_24_editor"
 tools/ci/run.sh test-keyboard   # real keystrokes (xdotool); also test-console; docs/ci.md
-BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test   # the whole suite, every VICE slot (podman; about 47 minutes)
+tools/ci/sharded.sh             # the whole suite, six containers at once (podman; 136 tests in about 24 minutes)
+# Serial `run.sh test` holds every slot for about two hours and is refused without --serial-because "<why>".
 ```
 
-The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. VICE runs only in the container (`tools/ci/run.sh`; host VICE is being retired). Run targeted tests per change and the full suite at milestones (63 VICE tests in 2,804 s on the runner, exclusive; the older 55-test, 2,511 s figure on 4778b1a was another tree and host). `run.sh` takes a `vice` slot itself (a pool, `docs/process.md`); a run whose timing you will quote takes every slot (`BREADBIN_CI_EXCLUSIVE=1`). Hardware runs go under `tools/with-lock -r ultimate`.
+The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. VICE runs only in the container (`tools/ci/run.sh`; host VICE is being retired). Run targeted tests per change and the full suite at milestones (136 tests in 1,439 s sharded on 6158182, `docs/ci.md`; the serial 63-test run took 2,804 s, so serial is now about two hours). `run.sh` takes a `vice` slot itself (a pool, `docs/process.md`); a run whose timing you will quote takes every slot (`BREADBIN_CI_EXCLUSIVE=1`). Hardware runs go under `tools/with-lock -r ultimate`.
 
 ## Test policy
 
-Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 47 minutes under VICE in a container, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
+Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 24 minutes sharded under VICE in a container, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
 
 - **During a story:** `make test-host`, the targeted tests for what you changed (the table in `docs/testing.md`), and `tools/ci/run.sh test-smoke` before committing. No full suite.
 - **At a milestone** (the end of an M group, or any change to the interrupt path, the bus, the memory map or the linker layout): the full suite with stock ROMs, the disk and bus tests again with the JiffyDOS ROMs (`BREADBIN_CI_JIFFY=<dir>`, see `docs/testing.md`; not yet proven in the container), and a hardware run of the list in `docs/hardware-notes.md`.
@@ -40,7 +41,7 @@ Targeted tests inside a story, the full regression at milestones. Tests are slow
 
 M0 (taking over the KERNAL) is done under VICE (stock and JiffyDOS ROMs) and runs on the real Ultimate: own interrupt entry, keyboard, screen, serial bus and channels; the KERNAL ROM is not used. Since then (2026-10/11): the **REU block cache** for the boot drive (`cache` command, `make CACHE=0|1|2`, keyed by a build id the first write of each boot changes, plus the disk label); a **footprint pass** (boot-only `INIT` code released to the pool, cold code above the BSS in `CODEHI`, the syscall entry in the `$CF00` page, a split user library); **kernel modules** (a CX image loaded top-down in the pool, `mod` command, root-only syscall ops) with the **CBM DOS filesystem** (`/lib/km/cbm`) and **UCI v1** for the Ultimate's file API (`/lib/km/uci`, `mount uci /u`) as modules; **`exec`** (`SP_EXEC`; `login` execs into `sh`); `turbo`. The user pool is **155 pages (`$0800-$A2FF`, 39,680 bytes)**, above a stock C64's 38,911 BASIC bytes; `KSTART` (`k.inc`) and `KRAM` (`kernel.cfg`) move together, a page at a time. Room below `$CF00` and above the BSS and `CODEHI` is tiny (a link-time assert guards the latter): the current figures per commit are in `docs/size-ledger.tsv` (`tools/size_ledger.py`); see also `docs/wip.md`.
 
-Physical 1541: the root-mount stall that predates all of this is **mitigated, not root-caused**: a bounded wait in `bus_acptr` and three retries with UNTALK in `iec_read` took it from about 1 boot in 4 to 13 of 13 (`docs/hardware-notes.md`). The JiffyDOS-drive series and the JiffyDOS-ROM test subset on the final tip are the open milestone gates.
+Physical 1541: the root-mount stall is **closed** (owner, 2026-11-18). The cause was the test harness: every REST memory read halts the 6510 (a DMA), a sender cannot know the machine paused, and a halt inside an IEC byte overruns into a hang. It never shows on VICE or the Ultimate's emulated drives because nothing there is halted mid-transfer. The bounded waits and retries stay as defence (the IO release, 9d1b949: session 5, 0 failures in 300 write-verify, 300 read-back and 50 reboot cycles on a physical JiffyDOS 1541). Treat a new IO failure as new evidence against a passed gate, and check the harness's DMA gate first (`docs/design/io-attack-log.md`, closing entry). The JiffyDOS-drive series and the JiffyDOS-ROM test subset on the final tip are the open milestone gates.
 
 ## Hardware and external references
 

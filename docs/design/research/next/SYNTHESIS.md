@@ -55,7 +55,7 @@ agent claim not marked here as re-checked is the agent's own VERIFIED/UNVERIFIED
  - Cheap/high-wow: line-editor history in `con_read` (reaches sh/basic/more/login at once), screen save/restore (`ESC S/s`), blanker (+5% CPU), per-tick user callback -> `play` (SID), `turbo` (BASIC 51x at 48 MHz per hardware-notes), `uci time`.
  - UCI backend (transport + fs module), REU warm boot via 1-2 sector first stage, compressed kernel (decompressor in INIT).
  - Medium: 2 vconsoles, REU scrollback, job control, wget/nc via UCI network target.
- - Stretch: fast 1541 loader module (waits on the stall), program overlays, swap-to-REU, soft 80-col as a user program.
+ - Stretch: fast 1541 loader module (the stall that it waited on is closed: harness DMA, 2026-11-18), program overlays, swap-to-REU, soft 80-col as a user program.
 
 ## Findings that change plans already in the roadmap
 

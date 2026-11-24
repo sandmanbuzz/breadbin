@@ -15,7 +15,15 @@
 #      BREADBIN_VICE_ARGS extra VICE options for the whole run (passed through)
 #      BREADBIN_FAST_BENCH   passed through: tests/test_fast.py likewise, with the module and without
 #      BREADBIN_JIFFY_BENCH  passed through: tests/test_jiffy.py runs at real speed and prints the copy time
+#      BREADBIN_VICE_PROFILE     passed through: =1 makes the harness print `vice-profile {json}` at exit (.blocks/vice-prof)
 #      BREADBIN_VICE_PRINT_ARGS  passed through: the harness prints the VICE command line (tools/vicetest.py)
+#   tools/ci/run.sh --serial-because "REASON" test
+#                         the whole VICE suite in ONE container, every test in turn, holding
+#                         every slot for the whole run (about two hours at 136+ tests; nothing
+#                         else VICE runs, so landings queue behind it). Refused without a
+#                         reason. For the full suite use tools/ci/sharded.sh (about 25 minutes).
+#                         The reason goes on the container as a label, so the lock's holder
+#                         line says why it is held.
 # The repo is mounted read-only and copied inside, so concurrent runs do not collide.
 # Exit code is make's. Set BREADBIN_CI_KEEP_BUILD=<dir> to copy build/ out afterwards.
 set -eu
@@ -23,7 +31,30 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 img=${BREADBIN_CI_IMAGE:-breadbin-ci}
 roms=${BREADBIN_CI_ROMS:-$HOME/.cache/breadbin-ci/roms}
-[ $# -gt 0 ] || { echo "usage: run.sh <make target...>" >&2; exit 2; }
+reason=
+if [ "${1:-}" = --serial-because ]; then
+    [ $# -ge 3 ] && [ -n "$2" ] || { echo "run.sh: --serial-because needs a reason and a target" >&2; exit 2; }
+    reason=$2; shift 2
+fi
+[ $# -gt 0 ] || { echo "usage: run.sh [--serial-because REASON] <make target...>" >&2; exit 2; }
+# The bare `test` target is the whole suite in one container: about two hours that holds the
+# machine (BREADBIN_CI_EXCLUSIVE=1 holds every slot). It is almost never what is wanted.
+for t in "$@"; do
+    if [ "$t" = test ] && [ -z "$reason" ]; then
+        cat >&2 <<'MSG'
+run.sh: refusing the serial full suite (`test`): one container runs every VICE test in turn,
+        about two hours, and under BREADBIN_CI_EXCLUSIVE=1 it blocks every other VICE run
+        and every landing for that long. Better:
+          tools/ci/sharded.sh                                   the full suite, about 25 minutes
+          tools/ci/run.sh test-smoke                            boot, echo, pipe, Ctrl-C
+          tools/ci/run.sh test-only T="tests.test_console"      the classes you changed
+        If the serial run is really what you need (a timing reference, say):
+          tools/ci/run.sh --serial-because "<why>" test
+MSG
+        exit 2
+    fi
+done
+[ -n "$reason" ] && echo "run.sh: serial full suite, reason: $reason (holds the machine; sharded.sh is the quick way)" >&2
 
 # The image is rebuilt when it is missing or, for the default image, when the Containerfile
 # or entrypoint changed since it was built (a label holds their hash): a host that already
@@ -81,6 +112,7 @@ set -- "$img" "$@"
 [ -n "$viceargs" ] && set -- -e "BREADBIN_VICE_ARGS=$viceargs" "$@"
 [ -n "$jiffy" ] && set -- -v "$jiffy:/jiffy:ro" "$@"
 [ -n "$broker" ] && set -- -e "BREADBIN_BROKER=$broker" "$@"
+[ -n "${BREADBIN_VICE_PROFILE:-}" ] && set -- -e "BREADBIN_VICE_PROFILE=$BREADBIN_VICE_PROFILE" "$@"
 [ -n "${BREADBIN_VICE_PRINT_ARGS:-}" ] && set -- -e "BREADBIN_VICE_PRINT_ARGS=$BREADBIN_VICE_PRINT_ARGS" "$@"
 [ -n "${BREADBIN_JIFFY_BENCH:-}" ] && set -- -e "BREADBIN_JIFFY_BENCH=$BREADBIN_JIFFY_BENCH" "$@"
 [ -n "${BREADBIN_FAST_BENCH:-}" ] && set -- -e "BREADBIN_FAST_BENCH=$BREADBIN_FAST_BENCH" "$@"
@@ -90,6 +122,7 @@ rev=${BUILDREV:-$(make -s -C "$repo" --no-print-directory print-buildrev 2>/dev/
 set -- -e "BUILDREV=$rev" "$@"
 set -- -v "$repo:/src:ro" -v "$roms:/roms:ro" "$@"
 [ -n "$mem" ] && set -- "$mem" "$@"
+[ -n "$reason" ] && set -- --label "breadbin.ci.reason=$reason" "$@"
 set -- podman run --rm --init --name "$name" "$@"
 if [ -n "$lockbin" ]; then
     if [ "${BREADBIN_CI_EXCLUSIVE:-}" = 1 ]; then set -- "$lockbin" -x -- "$@"; else set -- "$lockbin" -- "$@"; fi
