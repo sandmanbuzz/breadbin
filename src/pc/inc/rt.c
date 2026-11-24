@@ -203,9 +203,10 @@ int rt_pow() {          /* the number under the top to the power on top, by squa
 }
 
 int rt_gosub(int r) {
+    char *t = ctl + csp;
     if (csp > 192 - 3) c_throw(2);
-    putw(ctl + csp, r);
-    ctl[csp + 2] = 'G';
+    putw(t, r);
+    t[2] = 'G';
     csp = csp + 3;
     return 0;
 }
@@ -220,16 +221,18 @@ int rt_return() {       /* the address after the last GOSUB, dropping the loops 
 int rt_for(int body, int v) {   /* the limit and the step are on the number stack, the step on
                                    top; a loop on v already running ends, with those inside it */
     int p = csp;
+    char *t;
     while (p && ctl[p - 1] == 'F') {
         p = p - 13;
         if (getw(ctl + p) == v) csp = p;
     }
     if (csp > 192 - 13) c_throw(2);
-    putw(ctl + csp, v);
-    putw(ctl + csp + 2, body);
-    c_stv(ctl + csp + 8);
-    c_stv(ctl + csp + 4);
-    ctl[csp + 12] = 'F';
+    t = ctl + csp;
+    putw(t, v);
+    putw(t + 2, body);
+    c_stv(t + 8);
+    c_stv(t + 4);
+    t[12] = 'F';
     csp = csp + 13;
     return 0;
 }
@@ -239,26 +242,28 @@ int rt_next(int v) {    /* step the loop on v (0: the innermost): the body's add
     int e;
     int r;
     char *x;
+    char *t;
     while (1) {
         if (!csp || ctl[csp - 1] != 'F') c_throw(8);
         e = csp - 13;
         if (!v || getw(ctl + e) == v) break;
         csp = e;
     }
-    x = nul + getw(ctl + e);
+    t = ctl + e;
+    x = nul + getw(t);
     c_ldv(x);
-    c_ldv(ctl + e + 8);
+    c_ldv(t + 8);
     c_add();
     c_stv(x);
     c_ldv(x);
-    c_ldv(ctl + e + 4);
+    c_ldv(t + 4);
     r = c_cmp();
-    if (ctl[e + 11] & 128) r = 0 - r;   /* a negative step counts down */
+    if (t[11] & 128) r = 0 - r;     /* a negative step counts down */
     if (r > 0) {
         csp = e;
         return 0;
     }
-    return getw(ctl + e + 2);
+    return getw(t + 2);
 }
 
 int rt_sres(int n) {    /* room for n temporaries of any length, before a statement that makes them */

@@ -84,6 +84,11 @@ int nfix;               /* forward GOTOs, in ctl while compiling (a run starts w
 
 /* ---- parsing: c_sp, c_digit, c_letter and c_tok (bas-rt.s) read src[si] ---- */
 
+int scan(char *s) {      /* parse s from its start */
+    src = s;
+    si = 0;
+    return 0;
+}
 int number() {          /* a line number at si (0 to 63999, unsigned), spaces among its digits
                            and after it skipped, as MS; none or too big is a syntax error */
     int n = 0;
@@ -157,19 +162,20 @@ int store(int n, int t, int len) {  /* line n is ib from t, len bytes; none dele
     int p = find(n);
     int old = 0;
     int add = 0;
+    char *q = mem + p;
     if (p < ptop && mw(p) == n) old = next(p) - p;
     if (len) add = len + 6;
     if (ptop - old + add > msz) {
         c_fail(2);
         return 0;
     }
-    move(mem + p + add, mem + p + old, ptop - p - old);
+    move(q + add, q + old, ptop - p - old);
     ptop = ptop - old + add;
     if (len) {
-        putw(mem + p, n);
-        mem[p + 2] = len;
-        move(mem + p + 5, ib + t, len);
-        mem[p + 5 + len] = 0;   /* the compiler reads the text in place */
+        putw(q, n);
+        q[2] = len;
+        move(q + 5, ib + t, len);
+        q[5 + len] = 0;         /* the compiler reads the text in place */
     }
     clearv();    /* as MS: an edit clears the variables */
     return 0;
@@ -311,16 +317,19 @@ int vsz(int c2) {      /* the bytes of a value, by the name's second character: 
 
 int esz(int p) {        /* the size of the table entry at p: a variable's 6 or 4 bytes, or an array's header (name, the
                            counts of its two dimensions: the second 0 for one) and its elements, 4 bytes or 2 */
-    int n = 1;
-    if (!(mem[p] & 32)) return 2 + vsz(mem[p + 1]);
-    if (mw(p + 4)) n = mw(p + 4);
-    return 6 + n * mw(p + 2) * vsz(mem[p + 1]);
+    int z = vsz(mem[p + 1]);
+    int n;
+    if (!(mem[p] & 32)) return 2 + z;
+    n = mw(p + 4);
+    if (!n) n = 1;
+    return 6 + n * mw(p + 2) * z;
 }
 
 int slot(int c1, int c2) {      /* the table entry named so, or -1 */
     int p = vbot;
+    c1 = c1 + (c2 << 8);        /* the name as a word */
     while (p < msz) {
-        if (mem[p] == c1 && mem[p + 1] == c2) return p;
+        if (mw(p) == c1) return p;
         p = p + esz(p);
     }
     return -1;
@@ -334,10 +343,11 @@ int grab(int size) {    /* a new table entry of size bytes, zeroed, at vbot: its
         return 0;
     }
     vbot = vbot - size;
-    hhi = addr(vbot);
+    p = addr(vbot);
+    hhi = p;
     if (!hlo) clim = vbot;
     mem[vbot] = 0;
-    c_mcpy(addr(vbot) + 1, addr(vbot), size - 1);
+    c_mcpy(p + 1, p, size - 1);
     return vbot;
 }
 
@@ -351,8 +361,7 @@ int var() {             /* the variable at si (a letter): its value's address, m
     if (p >= 0) return addr(p + 2);
     p = grab(2 + vsz(nc2));
     if (err) return 0;
-    mem[p] = nc1;
-    mem[p + 1] = nc2;
+    putw(mem + p, nc1 + (nc2 << 8));
     return addr(p + 2);
 }
 
@@ -360,6 +369,7 @@ int array(int n1, int n2) {     /* the array nc1, nc2 of n1 elements (n2 by n1 f
                                    not there: its offset. An explicit DIM that disagrees with it is a REDIM'D ARRAY */
     int p = slot(nc1 | 32, nc2);
     int q;
+    char *e;
     if (p >= 0) {
         if (n1 && (mw(p + 2) != n1 || mw(p + 4) != n2)) c_fail(15);
         return p;
@@ -378,10 +388,11 @@ int array(int n1, int n2) {     /* the array nc1, nc2 of n1 elements (n2 by n1 f
     if (n2) q = n1 * n2;
     p = grab(6 + q * vsz(nc2));
     if (err) return 0;
-    mem[p] = nc1 | 32;
-    mem[p + 1] = nc2;
-    putw(mem + p + 2, n1);
-    putw(mem + p + 4, n2);
+    e = mem + p;
+    e[0] = nc1 | 32;
+    e[1] = nc2;
+    putw(e + 2, n1);
+    putw(e + 4, n2);
     return p;
 }
 
@@ -517,8 +528,8 @@ int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$
             need(',');
             toint(climb(1));
             if (t == 157) {
-                if (c_sp() == ',') {
-                    need(',');
+                c_sp();
+                if (c_tok(',')) {
                     toint(climb(1));
                 } else pushint(255);
                 pcall(&rt_mid, -2);
@@ -584,16 +595,12 @@ int primary() {
 int operand() {         /* a primary, or - + NOT and theirs. Each ( and unary op nests through
                            here (climb counts the frames: see there) */
     int k = 1;
-    int c = c_sp();
-    if (c == '-') {         /* binds looser than ^, as MS: -2^2 is -4 */
-        incsi();
+    c_sp();
+    if (c_tok('-')) {       /* binds looser than ^, as MS: -2^2 is -4 */
         tonum(climb(10));
         c_xop(216 /* x NEG */);
-    } else if (c == '+') {
-        incsi();
-        k = climb(10);
-    } else if (c == 142 /* tk NOT */) {    /* of the relation after it, as MS */
-        incsi();
+    } else if (c_tok('+')) k = climb(10);
+    else if (c_tok(142 /* tk NOT */)) {    /* of the relation after it, as MS */
         toint(climb(6));
         c_op1(146 /* PO_COMP */);
         k = 2;
@@ -898,8 +905,8 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
     int a;
     int k;
     int t;
-    if (c_sp() == '"') {
-        c_tok('"');
+    c_sp();
+    if (c_tok('"')) {
         strlit();
         need(';');
     } else {
@@ -946,16 +953,16 @@ int dims() {            /* DIM v(n [, m]) [, ...]: the sizes are numbers, and th
         n1 = number();
         n2 = 0;
         if (n1 < 0 || n1 > 15359) c_fail(2);
-        if (c_sp() == ',') {
-            c_tok(',');
+        c_sp();
+        if (c_tok(',')) {
             c_sp();
             n2 = number() + 1;
             if (n2 < 1 || n2 > 15360) c_fail(2);
         }
         if (!need(')') || err) return 0;
         array(n1 + 1, n2);
-        if (c_sp() != ',') return 0;
-        c_tok(',');
+        c_sp();
+        if (!c_tok(',')) return 0;
     }
     return 0;
 }
@@ -966,8 +973,7 @@ int predim() {          /* every DIM of the program, before a line is compiled: 
     int q;
     int c;
     while (p < ptop && !err) {
-        src = mem + p + 5;
-        si = 0;
+        scan(mem + p + 5);
         q = 0;
         c = src[0];
         while (c && c != 145 /* tk REM */ && !err) {
@@ -1043,10 +1049,9 @@ int stmts() {           /* the statements of src from si, : between them */
 
 int endline() {         /* the IFs' false branches come here */
     for (; nif && !err; nif = nif - 1) {   /* an error may have left the newest link unwritten */
-        char *p;
-        p = mem + ifh;
-        ifh = getw(p);
-        putw(p, addr(cend));
+        int p = ifh;
+        ifh = mw(p);
+        putw(mem + p, addr(cend));
     }
     return 0;
 }
@@ -1074,8 +1079,7 @@ int cline(int p) {      /* compile the line at p */
     }
     cur = n;
     c_xop(206 /* x LN */);
-    src = mem + p + 5;
-    si = 0;
+    scan(mem + p + 5);
     nd = 0;
     ed = 0;
     stmts();
@@ -1208,8 +1212,7 @@ int immediate() {       /* compile the line after the program's code (compiling 
     if (!pend && ptop) {
         compile();
         err = 0;
-        src = ib;     /* compile() read the program's lines */
-        si = 0;
+        scan(ib);     /* compile() read the program's lines */
     }
     cend = pend;
     if (!cend) cend = ptop;
@@ -1303,8 +1306,7 @@ int main() {
                            or trailing (but inside an unclosed string); a REM's text as typed.
                            The length, or -1 for a byte above 127 outside quotes */
             if (n == 0) continue;
-            src = ib;
-            si = 0;
+            scan(ib);
             if (n == -1) report(1, -1);
             else if (c_digit()) {  /* a numbered line: store it (no READY, as MS) */
                 t = number();
