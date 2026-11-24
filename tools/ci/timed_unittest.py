@@ -10,13 +10,18 @@ import unittest
 
 
 class Timed(unittest.TextTestResult):
+    # A test's time runs from the end of the previous test, so the class fixtures (setUpClass, which
+    # boots a shared VICE session for some classes) and the teardowns are counted, not lost between tests.
+    _last = None
+
     def startTest(self, test):
-        self._t0 = time.monotonic()
+        self._t0 = self._last if self._last is not None else time.monotonic()
         super().startTest(test)
 
     def stopTest(self, test):
         super().stopTest(test)
-        sys.stderr.write("\nTIMING %.1f %s\n" % (time.monotonic() - self._t0, test.id()))
+        self._last = time.monotonic()
+        sys.stderr.write("\nTIMING %.1f %s\n" % (self._last - self._t0, test.id()))
         sys.stderr.flush()
 
 
