@@ -14,7 +14,11 @@
    Mini C (tools/cc.py --pcode); built by mk/pvm.mk with src/pc/bas-rt.s; tested by
    tools/test_bas.py and tools/test_bas_rt.py (py65) and tests/test_pvm_machine.py (VICE). An
    opcode is written as its number with its name in a comment, which tools/test_bas.py checks
-   against src/pvm/pvm.inc. */
+   against src/pvm/pvm.inc.
+
+   SIZE (2026-11-24): bas is 9,209 B with BSS, 36 pages, 7 B under the boundary. Any addition must
+   be paid for first, with aggressive and unconventional squish (docs/design/basic.md, the
+   optimization notes); do not just add code. */
 
 /* xops */
 #include "inc/rt.c"
