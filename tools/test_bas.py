@@ -1,6 +1,7 @@
 """bas (src/pc/bas.c), the compiled BASIC, slice L3b (docs/design/basic.md section 5): built from
 the mini C with cc.py --pcode, run under py65 (tools/asim.py) with /lib/pvm. Needs ca65, ld65 and
 py65 (the container image has them)."""
+import struct
 import glob
 import os
 import random
@@ -504,6 +505,33 @@ class Compiled(unittest.TestCase):
             # the arena is a different size and place: the file does not know its addresses
             for brk in (64, 40, 120):
                 self.assertEqual(brun(bx.encode("latin-1"), brk=brk), (want, 0), (prog, brk))
+
+    def test_constants_whose_bytes_look_like_opcodes(self):
+        # an LDK's 4 data bytes are not code: BUILD's walk once read them as LA, CW, JUMP...
+        import random
+        rnd = random.Random(7)
+        prog = "".join("%d PRINT %d.%04d\n" % (10 + i, rnd.randrange(1, 30000), rnd.randrange(1, 10000)) for i in range(150))
+        want, _ = bas(prog + "RUN\n")
+        bx, st = bas(prog + "BUILD\n")
+        self.assertEqual(st, 0)
+        raw = bx.encode("latin-1")
+        self.assertEqual(brun(raw), (want, 0))
+        list(bxfile.walk(bxfile.parse(raw)[3]))          # the reference walk stays in step too
+        self.assertEqual(brun(bas("10 PRINT 1109.0726\nBUILD\n")[0].encode("latin-1")), (" 1109.0726 \n", 0))
+
+    def test_a_file_whose_sizes_do_not_fit_is_refused_untouched(self):
+        bx, _ = bas('10 PRINT 1\nBUILD\n')
+        good = bx.encode("latin-1")
+        for n, v in ((0x7FFF, 2), (2, 0x8001), (0x8001, 0), (0, 4), (0x7000, 0x7000), (60, 0x7FFF)):
+            bad = good[:5] + struct.pack("<HH", n, v) + good[9:] + b"\xee" * 40
+            out, st = brun(bad)
+            self.assertEqual((out, st), ("", 1), (n, v))
+
+    def test_build_fails_when_a_write_fails(self):
+        for k in (1, 2, 3):
+            r = asim.run("bas", [], path=binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
+                         stdin=b'10 PRINT 1\n20 PRINT 2\nBUILD\n', fail_write=k)
+            self.assertEqual(r.exit, 1, k)
 
     def test_an_error_stops_the_run_and_exits_1(self):
         bx, _ = bas('10 PRINT "A"\n20 PRINT 1/0\n30 PRINT "C"\nBUILD\n')

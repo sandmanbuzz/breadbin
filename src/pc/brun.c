@@ -57,7 +57,7 @@ int main() {
     n = getw(h + 5);
     v = getw(h + 7);
     msz = c_grow(120) * 256;
-    if (msz < n + v) {
+    if (n < 1 || v < 0 || n > msz || msz - n < v) {
         write(2, "brun: out of memory\n", 20);
         exit(1);
     }

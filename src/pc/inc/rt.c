@@ -261,6 +261,7 @@ int reloc(int c, int n, int vb, int un) {  /* the n bytes of code at address c, 
         if (b || op == 38 /* PO_LA */ || op == 44 /* PO_CW */) k = 3;
         else if (op == 42 /* PO_CB */ || op == 76 /* PO_BRFLS */ || op == 78 /* PO_BRTRU */ || op == 80 /* PO_BRNCH */) k = 2;
         else if (op == 46 /* PO_CS */) k = p[i + 1] + 2;
+        else if (op == 204 /* x LDK */) k = 5;      /* 4 bytes of constant, not code */
         if (un) b = 0 - b;
         if (b) putw(p + i + 1, w + b + f);
         i = i + k;

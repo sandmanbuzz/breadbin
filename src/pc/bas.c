@@ -795,6 +795,7 @@ int build() {           /* BUILD: the program as a file on the output: "BX", 1, 
                            variables' size, the code, then the line table: per line the offset of its code
                            and its number. The code in the arena is spent */
     int p;
+    int w;
     clearv();
     compile();
     if (err) return report(err, eline);
@@ -805,12 +806,16 @@ int build() {           /* BUILD: the program as a file on the output: "BX", 1, 
     putw(lbuf + 3, rtid());
     putw(lbuf + 5, pend - ptop);
     putw(lbuf + 7, msz - vbot);
-    write(1, lbuf, 9);
-    write(1, mem + ptop, pend - ptop);
+    w = write(1, lbuf, 9) != 9;
+    w = w | (write(1, mem + ptop, pend - ptop) != pend - ptop);
     for (p = 0; p < ptop; p = next(p)) {
         putw(lbuf, getw(mem + p + 3) - ptop);
         putw(lbuf + 2, lineno(p));
-        write(1, lbuf, 4);
+        w = w | (write(1, lbuf, 4) != 4);
+    }
+    if (w) {
+        write(2, "bas: write failed\n", 18);
+        exit(1);
     }
     pend = 0;
     return 0;

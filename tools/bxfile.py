@@ -38,6 +38,8 @@ def walk(code):
             n = 2
         elif op == CS:
             n = 2 + code[i + 1]
+        elif op == 204:         # x LDK: 4 bytes of constant
+            n = 5
         if i + n > len(code):
             raise ValueError("instruction at %d runs past the end" % i)
         if n == 3:
