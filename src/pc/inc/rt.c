@@ -107,14 +107,14 @@ int inheap(int s) {
 }
 
 int sfree(int s) {      /* a temporary used up */
-    if (inheap(s) && getw(nul + s - 2) == -1) putw(nul + s - 2, 0);
+    if (inheap(s) && getw(nul + s - 2) == -1) rt_sw(s - 2, 0);
     return 0;
 }
 
 int salloc(int n) {     /* a temporary of n bytes, 1 to 255: its address */
     int s = htop + 2;
     if (hhi - htop < n + 3) c_throw(2);
-    putw(nul + htop, -1);
+    rt_sw(htop, -1);
     nul[s] = n;
     htop = htop + n + 3;
     return s;
@@ -130,7 +130,7 @@ int sgc() {             /* the live blocks down over the dead ones, each variabl
         n = nul[q + 2] + 3;
         if (b && b != -1) {
             c_mcpy(d, q, n);
-            putw(nul + b, d + 2);
+            rt_sw(b, d + 2);
             d = d + n;
         }
         q = q + n;
@@ -297,10 +297,10 @@ int rt_sset(int c, int s) {     /* the variable at c := the string s: a temporar
             c_mcpy(n + 1, s + 1, nul[s]);
             s = n;
         }
-        putw(nul + s - 2, c);
+        rt_sw(s - 2, c);
     }
-    putw(nul + c, s);
-    if (inheap(o)) putw(nul + o - 2, 0);
+    rt_sw(c, s);
+    if (inheap(o)) rt_sw(o - 2, 0);
     return 0;
 }
 

@@ -92,6 +92,7 @@ int cend;
 int clim;
 int straight;
 int err;
+int deep;
 int ld(int lo, int hi) { v[0] = lo; v[1] = lo >> 8; v[2] = hi; v[3] = hi >> 8; c_ldv(v); return 0; }
 int str(char *p) { int n; n = 0; while (p[n]) n = n + 1; write(1, p, n); return 0; }
 int num(int i) { char b[8]; int n; n = 7; if (i == 0 - 32767 - 1) { write(1, "-32768", 6); return 0; }

@@ -48,6 +48,9 @@ extern int c_more();
 extern int c_binop(int c);
 extern int c_relop(int m); /* void */
 extern int c_vars();
+extern int c_ch();   /* src[si] */
+extern int deeper(); /* void */   /* deep + 2 */
+extern int shallower(); /* void */   /* deep - 2 */
 extern int c_grow(int n);       /* up to n pages from the kernel for mem (bas-rt.s); the pages granted */
 
 char *mem;              /* MEM: the arena, msz bytes of pages the kernel grants at start (c_grow) */
@@ -79,25 +82,7 @@ int nfix;               /* forward GOTOs, in ctl while compiling (a run starts w
 
 /* ---- output ---- */
 
-/* ---- input ---- */
-
-int getline() {         /* the next line of stdin into ib: its length, -1 at the end, -2 too long */
-    il = 0;
-    iov = 0;
-    if (!iread()) return -1;
-    if (iov) return -2;
-    return il;
-}
-
-int normal() {          /* ib in place (c_crunch): keywords to tokens and the rest upper case,
-                           outside quotes; tabs to spaces and runs of them to one, none leading
-                           or trailing (but inside an unclosed string); a REM's text as typed.
-                           Returns the length, or -1 for a byte above 127 outside quotes */
-    return c_crunch(ib, kwt);
-}
-
 /* ---- parsing: c_sp, c_digit, c_letter and c_tok (bas-rt.s) read src[si] ---- */
-
 
 int number() {          /* a line number at si (0 to 63999, unsigned), spaces among its digits
                            and after it skipped, as MS; none or too big is a syntax error */
@@ -105,7 +90,7 @@ int number() {          /* a line number at si (0 to 63999, unsigned), spaces am
     if (!c_digit()) c_fail(1);
     while (c_digit()) {
         if (n > 6399) c_fail(1);
-        n = n * 10 + src[si] - '0';
+        n = n * 10 + c_ch() - '0';
         incsi();
         c_sp();
     }
@@ -304,11 +289,11 @@ int nc1;                /* the name name() parsed: its two characters, flagged f
 int nc2;
 
 int name() {            /* the variable name at si (a letter): two characters count, as MS; vint says its type */
-    nc1 = src[si];
+    nc1 = c_ch();
     nc2 = 0;
     incsi();
     while (c_letter() || c_digit()) {   /* a keyword is a token: it ends the name */
-        if (!nc2) nc2 = src[si];
+        if (!nc2) nc2 = c_ch();
         incsi();
     }
     vint = 0;
@@ -361,7 +346,7 @@ int var() {             /* the variable at si (a letter): its value's address, m
                            pushed instead, and the value returned is 0 (as after an error) */
     int p;
     name();
-    if (src[si] == '(') return elem();
+    if (c_ch() == '(') return elem();
     p = slot(nc1, nc2);
     if (p >= 0) return addr(p + 2);
     p = grab(2 + vsz(nc2));
@@ -431,7 +416,7 @@ int elem() {            /* A(i) or A(i, j): the element's address on the eval st
     m2 = mw(p + 4);
     if (!m2 != !n2) c_fail(14);     /* a different number of subscripts */
     need('(');
-    deep = deep + 2;
+    deeper();
     c_opw(38 /* PO_LA */, addr(p + 6));
     epush(1);
     toint(climb(1));
@@ -448,7 +433,7 @@ int elem() {            /* A(i) or A(i, j): the element's address on the eval st
     iop(134 /* PO_MUL */);
     iop(130 /* PO_ADD */);
     need(')');
-    deep = deep - 2;
+    shallower();
     vint = ty;
     return 0;
 }
@@ -477,9 +462,9 @@ int fn(int f) {       /* a function of one number: f(...) */
         c_fail(1);
         return 1;
     }
-    deep = deep + 2;       /* fn and primary's frames, over the climb the '(' enters */
+    deeper();       /* fn and primary's frames, over the climb the '(' enters */
     tonum(primary());
-    deep = deep - 2;
+    shallower();
     c_xop(f);
     return 1;
 }
@@ -488,7 +473,7 @@ int strlit() {          /* a string literal after its quote: a CS, whose address
     int i = si;
     int n;
     int c;
-    while (src[si] && src[si] != '"') incsi();
+    while (c_ch() && c_ch() != '"') incsi();
     n = si - i;
     c_tok('"');                 /* an unclosed string ends at the end of the line, as MS */
     if (n) {
@@ -512,7 +497,7 @@ int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$
                            159 CHR$, 160 ASC, 161 STR$, 162 VAL): its kind */
     int k = 3;
     need('(');
-    deep = deep + 2;
+    deeper();
     if (t == 161) {
         tonum(climb(1));
         pcall(&rt_str, 1);
@@ -542,7 +527,7 @@ int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$
         }
     }
     need(')');
-    deep = deep - 2;
+    shallower();
     return k;
 }
 
@@ -642,7 +627,7 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
     int k = 1;
     int c;
     int p;
-    deep = deep + 2;    /* every nesting goes through here, a chain of up to 6 per level: its frames
+    deeper();    /* every nesting goes through here, a chain of up to 6 per level: its frames
                            (and operand's and primary's under it) are all the frame stack holds */
     if (deep + nif > 24) c_fail(11);
     else k = operand();
@@ -692,7 +677,7 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
         npush(-1);
         k = 1;
     }
-    deep = deep - 2;
+    shallower();
     return k;
 }
 
@@ -802,7 +787,7 @@ int jump(int t) {       /* JUMP to line t: a line not compiled yet is fixed up w
         c_fail(10);
         return 0;
     }
-    p = addr(getw(mem + p + 3));
+    p = addr(mw(p + 3));
     c_emit(p);
     return c_emit(p >> 8);
 }
@@ -994,7 +979,7 @@ int predim() {          /* every DIM of the program, before a line is compiled: 
                 dims();
                 if (err) eline = mw(p);
             }
-            c = src[si];
+            c = c_ch();
         }
         p = next(p);
     }
@@ -1006,7 +991,7 @@ int stmt() {
     sres();
     if (c_tok(144 /* tk PRINT */)) { prints(); return 0; }
     if (c_tok(145 /* tk REM */)) {
-        while (src[si]) incsi();
+        while (c_ch()) incsi();
         return 0;
     }
     if (c_tok(163 /* tk INPUT */)) { inputs(); return 0; }
@@ -1177,7 +1162,7 @@ int go(int at) {        /* run the code at mem[at]; then report an error, with i
     if (!e) return 0;
     a = c_curip() - (mem - nul);
     if (pend && a > ptop && a <= pend)
-        for (p = 0; p < ptop; p = next(p)) if (getw(mem + p + 3) < a) ln = mw(p);
+        for (p = 0; p < ptop; p = next(p)) if (mw(p + 3) < a) ln = mw(p);
     report(e, ln);
     return 0;
 }
@@ -1308,11 +1293,15 @@ int main() {
         outs(" BYTES FREE\nREADY.\n");
     }
     while (1) {
-        n = getline();
-        if (n == -1) break;
-        if (n == -2) report(3, -1);
+        il = 0;         /* the next line of stdin into ib (iread) */
+        iov = 0;
+        if (!iread()) break;
+        if (iov) report(3, -1);     /* too long */
         else {
-            n = normal();
+            n = c_crunch(ib, kwt);  /* ib in place: keywords to tokens and the rest upper case,
+                           outside quotes; tabs to spaces and runs of them to one, none leading
+                           or trailing (but inside an unclosed string); a REM's text as typed.
+                           The length, or -1 for a byte above 127 outside quotes */
             if (n == 0) continue;
             src = ib;
             si = 0;

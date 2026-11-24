@@ -4,7 +4,7 @@
 ; bas's p-code by mk/pvm.mk (src/pc/NAME-rt.s goes with src/pc/NAME.c).
 .include "inc/rt.s"
 
-.export c_crunch, c_find, c_const, incsi, c_sres, c_more, c_binop, c_relop, c_vars
+.export c_crunch, c_find, c_const, incsi, c_sres, c_more, c_binop, c_relop, c_vars, deeper, shallower, c_ch
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 .export xtab
 
@@ -239,7 +239,7 @@ c_find: lda P_ESTKL,x
 ; src[si] is the parse position (lines are under 256 bytes); mem[cend] the next code byte, below
 ; vbot; straight counts the bytes since Y was last reset (bas.c's room() comment).
 
-.import g_src, g_si, g_mem, g_cend, g_clim, g_straight, g_err
+.import g_src, g_si, g_mem, g_cend, g_clim, g_straight, g_err, g_deep
 
 srcp:   lda g_src               ; ptr = src + si
         clc
@@ -684,6 +684,17 @@ incsi:  inc g_si                ; si + 1 (bas.c's too, as a void native); Z clea
         bne :+
         inc g_si+1
 :       rts
+; c_ch(): src[si].
+c_ch:   jsr srcp
+        lda (ptr),y
+        jmp pushay
+; deeper(), shallower(): bas.c's deep + 2 or - 2 (it stays under 256: climb fails past 24). Void.
+deeper: inc g_deep
+        inc g_deep
+        rts
+shallower: dec g_deep
+        dec g_deep
+        rts
 
 xtab:   .word x_ldv, x_stv, x_ldk, x_ln                 ; C8 CA CC CE
         .word n_add, n_sub, n_mul, n_div                 ; D0 D2 D4 D6
