@@ -19,7 +19,32 @@ start:
         bcs @nt
         ldx #0
         jsr SYS_WAIT
-@nt:    jsr motd
+@nt:    lda #<c80_path      ; /etc/con80 present: the user asked for the 80-column console (src/mod/con80.s).
+        sta r0              ; Loaded before any shell, so that its fixed pages $20-$3F are still free.
+        lda #>c80_path
+        sta r0+1
+        lda #<st
+        sta r1
+        lda #>st
+        sta r1+1
+        jsr SYS_STAT
+        bcs @nc
+        lda #<mod_path
+        sta r0
+        lda #>mod_path
+        sta r0+1
+        lda #<c80_argv
+        sta r1
+        lda #>c80_argv
+        sta r1+1
+        lda #0
+        ldx #1
+        ldy #SP_IGNINT
+        jsr SYS_SPAWN
+        bcs @nc
+        ldx #0
+        jsr SYS_WAIT
+@nc:    jsr motd
         ; with /etc/passwd, users log in; otherwise the shell runs directly
         lda #<pw_path
         sta r0
@@ -107,6 +132,12 @@ sh_av:     .word sh_argv
 theme_path: .byte "/bin/theme", 0
 theme_arg0: .byte "theme", 0
 theme_argv: .word theme_arg0, 0
+c80_path:  .byte "/etc/con80", 0
+mod_path:  .byte "/bin/mod", 0
+c80_argv:  .word mod_arg0, mod_arg1, mod_arg2, 0
+mod_arg0:  .byte "mod", 0
+mod_arg1:  .byte "load", 0
+mod_arg2:  .byte "/lib/km/con80", 0
 login_path: .byte "/bin/login", 0
 login_arg0: .byte "login", 0
 login_argv: .word login_arg0, 0

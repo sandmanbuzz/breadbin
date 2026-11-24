@@ -183,6 +183,14 @@ A 1581 (80 tracks of 40 sectors) holds a c64fs volume to mount on drive 9, 10 or
 
 For normal C64 disk images, use VICE's `c1541`, for example `c1541 -format "mydisk,md" d64 mydisk.d64`.
 
+## Seeking
+
+`SYS_LSEEK` (`include/breadbin.inc`) moves an open file's position: A = fd, X = `SEEK_SET`, `SEEK_CUR` or `SEEK_END`, and a signed 24-bit offset in `r0` and the low byte of `r1`; it returns the new position in the same registers. A position below 0 or at 16 MB or above is EINVAL, and the position is left as it was. What else it does depends on where the file is:
+
+- **c64fs** (the boot disk, `/tmp`, other Breadbin disks): any position up to 16 MB. A read past the end returns 0 bytes; a write past the end fills the gap with zeros (blocks not written stay unallocated holes and read as zeros) and the file grows to the end of the write. A write at 35,840 bytes or beyond (the largest file) is EFBIG. On a directory the position is a byte offset into its 16-byte entries; `SEEK_SET` 0 rewinds it.
+- **The Ultimate's file system** (`mount uci`): any position from 0 to the file's size; past the size is EINVAL, because the Ultimate would extend the file with undefined bytes. `SEEK_END` takes the size; so does every write on an `O_APPEND` descriptor, which always writes at the end. The Ultimate's `FILE INFO` gives the size in the directory, which only a close updates (measured, `docs/hardware-notes.md` H11), so the module adds what the descriptor's own handle has written since it opened. What another descriptor has written to the same file and not yet closed is not counted. On a directory the position counts entries: `SEEK_SET` and `SEEK_CUR` work (0 rewinds), `SEEK_END` is EINVAL.
+- **CBM DOS disks, pipes, the console and `/dev/null`**: ESPIPE (29, "illegal seek"). A CBM DOS file is a chain of sectors read in order.
+
 ## Limits
 
 | Limit | Value |

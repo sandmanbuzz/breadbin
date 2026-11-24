@@ -87,7 +87,7 @@ Costs: "K" = kernel bytes, which are TPA bytes; "P" = pages taken from the pool 
 
 ### STRETCH ("cooler OS")
 
-**[D19] Raster split** (status line in its own colour, or a bitmap top with text below) | all | ~60 B + raster IRQ source discrimination in `irq` (proc.s:231) | 3 days | — | D6 | Interacts with IEC timing: do it after the physical-1541 stall is understood
+**[D19] Raster split** (status line in its own colour, or a bitmap top with text below) | all | ~60 B + raster IRQ source discrimination in `irq` (proc.s:231) | 3 days | — | D6 | Interacts with IEC timing: the physical-1541 stall that once gated this is closed (harness DMA, 2026-11-18); the JiffyDOS windows still need no bad lines or sprites
 
 **[D20] Soft 80 columns** (4×8 font on a hires bitmap) | all | P = 36 (bitmap 8000 + screen 1000 in bank 0), font ~400 B, renderer ~400 B, scroll ~80k cycles (~80 ms) | 1–2 weeks | Needs D3 (programs query cols) | D3, D9 | as a loadable user-space "console server" only, never kernel-resident
 

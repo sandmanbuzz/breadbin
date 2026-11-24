@@ -1,0 +1,10 @@
+(C:$c466) 
+#1 (Trace  exec ed07)  105/$069,  28/$1c
+.C:ed07  EE 64 E6    INC $E664      - A:08 X:00 Y:00 SP:eb ..-....C  1000000
+#2 (Trace  exec a874)  238/$0ee,  29/$1d
+.C:a874  A9 00       LDA #$00       - A:08 X:00 Y:00 SP:eb ..-....C  1098525
+Executing: sw
+Stopwatch:  1098525
+#1 (Trace  exec ed07)  298/$12a,  31/$1f
+.C:ed07  EE 64 E6    INC $E664      - A:08 X:00 Y:00 SP:eb ..-....C  1295575
+(C:$a3f0) 

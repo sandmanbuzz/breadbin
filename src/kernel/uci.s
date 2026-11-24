@@ -1,6 +1,6 @@
 ; Breadbin: the resident part of UCI v1 (the Ultimate's file storage, docs/design/next/uci-v1.md)
 ;
-; The code is the kernel module /lib/km/uci (src/mod/uci.s). What stays here: sixteen `jmp`
+; The code is the kernel module /lib/km/uci (src/mod/uci.s). What stays here: seventeen `jmp`
 ; stubs, the names the bmi sites in file.s/fs.s/exec.s/cbm.s call, which point at cbm_none
 ; (A = ENODEV, carry set) until the module's init points them at its routines; uci_load, which
 ; sys_mount calls for `mount uci`; uci_drop, which unloads the module when no UCI mount is left
@@ -18,7 +18,7 @@
 
 .export uci_namei, uci_iget, uci_read, uci_xread, uci_write, uci_open, uci_create
 .export uci_release, uci_hw, uci_attach, uci_umount, uci_fsinfo, uci_mkdir
-.export uci_rmdir, uci_unlink, uci_rename
+.export uci_rmdir, uci_unlink, uci_rename, uci_size
 .export ucv, uci_sl, uci_load, uci_drop
 
 .segment "BSS"
@@ -44,6 +44,7 @@ uci_mkdir:      jmp cbm_none
 uci_rmdir:      jmp cbm_none
 uci_unlink:     jmp cbm_none
 uci_rename:     jmp cbm_none
+uci_size:       jmp cbm_none    ; (file.s sys_lseek)
 .assert * - ucv = NUV*3, error, "the stubs and uvtab in src/mod/uci.s differ in length"
 
 .segment "RODATA"

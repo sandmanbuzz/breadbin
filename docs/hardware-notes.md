@@ -29,6 +29,7 @@ Findings from running Breadbin on real hardware. Append; do not rewrite history.
 | H8 | Do the VICE-reference tests pass? List each that differs: `test_02`, `test_13`, `test_14`, `test_24`, `test_keyboard`, `test_console`. | The point of the bench. | On Breadbin 10dbf3c: `test_02`, `test_13`, `test_14`, `test_24` and all six `test_console` tests pass once the test races below are fixed. `test_00` fails (H4). `test_keyboard` cannot run (H2). |
 | H9 | Video stream: does `streams/video:start` deliver frames to the test host? Format, port (default 11000), and a way to grab one frame. | A pixel-exact screenshot for the tests. | Not tried yet. |
 | H10 | With a physical 1541 on the bus, does `mount 9 /mnt` work from Breadbin (it uses the KERNAL IEC routines today)? | Baseline before M0-4 replaces them. | Not tried yet. Drive A is device 8; the physical 1581 is at 10 and Software IEC at 11. |
+| H11 | `SYS_LSEEK` on a UCI file (2026-11-23): does `FILE INFO` on a handle open for writing report the size including its own writes before a close? Does a second handle on the same file see them? Does a write-mode `SEEK` past the end extend the file with undefined bytes (FatFs `f_lseek`), as the kernel assumes? If a second handle's size is stale, a descriptor A whose file another descriptor truncated may still seek inside the old size, and its next read or write SEEKs past the real end (that exposure predates `lseek`: any read or write on A does it). | `lseek` refuses positions past the size on UCI and takes the size from `FILE INFO` (`uci_size`, and every `O_APPEND` write); `tools/uci_sim.py` assumes a fresh size on the same handle and models the extension with `$EE` bytes. | **Answered 2026-11-23** (raw UCI, `experiments/iec-stall/uci.py h11`; firmware 1.1.0, RAM disk `/Temp`): `FILE INFO` reads the directory entry. A handle that has written 100 bytes and is still open reports size 0 (date 0), and so does a second handle; the size (and date) appear only after the writer closes. A second handle open for read also reads 0 bytes. A write-mode `SEEK` past the end extends the file: 10 bytes, `SEEK` 50, close, gives 50 bytes; on this RAM disk the gap read as zeros. A truncation is undone: descriptor A open for writing on a 301-byte file, B creates it again (size 0), A writes 1 byte at 200 and closes; the file is 301 bytes again (zeros, the byte at 200), because A's close writes its own size. Consequences: the module keeps the end of what each handle has written (`hs_h`) and takes the larger of that and `FILE INFO`; without it, `ls /bin >> f` on the old build left 2 lines of 56 (each append overwrote the one before) and `lseek` refused positions in a file still being written. Same run on the fixed build: 56 lines, 292 bytes. Two descriptors on one file are not coherent on this platform. |
 
 ## Hardware list (run at milestones, not per story)
 
@@ -764,6 +765,20 @@ Setup: C64 Ultimate firmware 1.1.0, drive A = device 9 (JiffyDOS 1541-II ROM), J
 - Lesson for tests of timed programs: a gated screen read can take 1 to 10 s on hardware, and the game plays on meanwhile, so it may be over when the read returns. Send `q` only to a game still running (`test_31_tetris` does). A failing test must also quit the game (`_leave_game`), or the next test's keys go to it.
 - Config: the harness left drive A on `/Temp/test.d64`; remounted `/Temp/breadbin.d64` afterwards (no trap in the harness; `/v1/drives` before and after).
 - Not run: the full hardware list, JiffyDOS-ROM VICE runs, `tools/ci/run.sh test-smoke`.
+
+### 2026-11-18: the physical-1541 stall is closed (owner)
+
+Everything above about the root-mount stall, the 1581 series, `bus_acptr` and the throwaway `iec-*` branches is history. The cause was the harness's DMA reads halting the CPU mid-IEC-byte; see `docs/design/io-attack-log.md` ("2026-11-18: closed"). The hardware rule that follows: never read memory over REST while the bus is moving, and use the gate.
+
+## con80 (80-column console module) on the Ultimate, 2026-11-20
+
+Image built with `/etc/con80` (`experiments/con80/hw_boot.py`, `hw_type.py`), drive A on bus 9, eyes-on by the owner. Commit 0dc27bd plus the screen-off change.
+
+- **Boot:** login at 80 columns with a blinking cursor; column 0 legible with a black border and background; no colour or matrix artefacts seen.
+- **Mode switch:** before the change, an inverse `@` flickered for about 300-500 ms while `c80_init` built the matrix and cleared the bitmap with the VIC still in text mode. With `$D011` set to `$0B` (screen off) around `c80_init` the transition is a clean blank; confirmed by eye.
+- **Scroll (`ls /bin`, full screen):** about 2 s at 1 MHz (visibly slower than 40 columns, the cost of the 4-byte font unpack; acceptable, comparable to period soft-80 software); at 48 MHz (`U64 Specific Settings` / `CPU Speed`, Turbo Registers mode) the owner calls it excellent, milliseconds.
+- Config note: the `CPU Speed` values are space-padded (`" 1"`, `"48"`, `"64"`); an unpadded `1` is refused, so a restore trap that uses it silently leaves the speed up.
+- Not yet run on hardware: editor, Ctrl-C, unload/reload (needs a boot-time load; a running shell blocks the claim).
 
 ### 2026-11-19, `/lib/km/d81` against the physical 1581 (JiffyDOS 6.0 1581, bus 10) (cloud session)
 

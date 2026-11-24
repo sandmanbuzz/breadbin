@@ -180,6 +180,86 @@ class TestImage(unittest.TestCase):
         self.assertEqual(M.block_to_ts(376), (19, 0))
 
 
+class TestPlacement(unittest.TestCase):
+    """build(): directories and indirect blocks near the inode table, file data in runs."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        t = self.tmp.name
+        root = os.path.join(t, "root")
+        os.makedirs(os.path.join(root, "bin"))
+        os.makedirs(os.path.join(root, "lib"))
+        for i in range(60):                               # a /bin of four directory blocks
+            with open(os.path.join(root, "bin", f"c{i:02}"), "wb") as f:
+                f.write(bytes([i]) * (256 * (1 + i % 5)))
+        with open(os.path.join(root, "bin", "sh"), "wb") as f:
+            f.write(os.urandom(256 * 20))                 # needs the indirect block
+        with open(os.path.join(t, "boot.prg"), "wb") as f:
+            f.write(bytes(300))
+        self.out = os.path.join(t, "x.d64")
+        self.root = root
+        M.build(self.out, os.path.join(t, "boot.prg"), root, ["null:0"])
+        self.fs = M.FS(M.load(self.out))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def blocks(self, path):
+        ino = self.fs.read_inode(self.fs.lookup(path))
+        return [self.fs.bmap(ino, i) for i in range((ino["size"] + 255) // 256)], ino
+
+    def test_contents_survive(self):
+        for name in ("sh", "c07", "c59"):
+            with open(os.path.join(self.root, "bin", name), "rb") as f:
+                self.assertEqual(self.fs.read_file(self.fs.lookup("/bin/" + name)), f.read())
+
+    def test_directories_and_indirect_are_near_the_inode_table(self):
+        centre = M.block_to_ts(self.fs.istart)[0]
+        for path in ("/", "/bin", "/lib"):
+            bl, _ = self.blocks(path)
+            for b in bl:
+                self.assertLessEqual(abs(M.block_to_ts(b)[0] - centre), 4, path)
+        _, ino = self.blocks("/bin/sh")
+        self.assertLessEqual(abs(M.block_to_ts(ino["indirect"])[0] - centre), 4)
+
+    def test_hot_file_is_first_in_its_directory(self):
+        names = [n for n, _ in self.fs.dir_entries(self.fs.lookup("/bin"))]
+        self.assertEqual(names[2], b"sh")                 # after . and ..
+
+    def test_a_files_blocks_run_consecutively_within_a_track(self):
+        bl, _ = self.blocks("/bin/sh")
+        for a, b in zip(bl, bl[1:]):
+            ta, sa = M.block_to_ts(a)
+            tb, sb = M.block_to_ts(b)
+            if ta == tb:
+                self.assertEqual(sb, sa + 1)
+            else:                                         # a new track: the nearest one with room
+                self.assertLessEqual(abs(tb - ta), 2)
+
+    def test_no_block_used_twice(self):
+        seen = {}
+        def walk(n, path):
+            ino = self.fs.read_inode(n)
+            nb = (ino["size"] + 255) // 256
+            owned = [self.fs.bmap(ino, i) for i in range(nb)] + ([ino["indirect"]] if ino["indirect"] else [])
+            for b in owned:
+                self.assertNotIn(b, seen, path)
+                seen[b] = path
+                self.assertTrue(self.fs.is_used(b), path)
+            if ino["type"] == M.T_DIR:
+                for name, c in self.fs.dir_entries(n):
+                    if name not in (b".", b".."):
+                        walk(c, path + "/" + name.decode())
+        walk(M.ROOT_INO, "")
+
+    def test_deterministic(self):
+        t = self.tmp.name
+        out2 = os.path.join(t, "y.d64")
+        M.build(out2, os.path.join(t, "boot.prg"), self.root, ["null:0"])
+        with open(self.out, "rb") as a, open(out2, "rb") as b:
+            self.assertEqual(a.read(), b.read())
+
+
 class TestD81(unittest.TestCase):
     """`mkimage.py d81`: a c64fs volume for a 1581 (mounted with /lib/km/d81)."""
 

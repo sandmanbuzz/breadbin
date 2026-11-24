@@ -60,7 +60,7 @@ Budget arithmetic (ESTIMATE, from the figures above; 14 B above BSS untouched in
 
 - **Full job control (1.1-1.7 KB):** at least 3 pool pages over the room today. Revisit after NBUF and the CP2 shell-BSS branch (`feat/cp2-sh-bss`, held, `wip.md:37`).
 - **Write-back (500-700 B):** needs a decision on data-loss policy; on an Ultimate UCI mount the cache does not apply. `wip.md:25` shows even write-through to a mounted image is not confirmed on the U2 path.
-- **Fast read (330 B), fast boot:** a Classic-tier win; the owner's Ultimate-first frame deprioritises it. Not proven on the JiffyDOS drive; the physical-1541 stall is mitigated, not root-caused (`CLAUDE.md`).
+- **Fast read (330 B), fast boot:** a Classic-tier win; the owner's Ultimate-first frame deprioritises it. Not proven on the JiffyDOS drive. The physical-1541 stall is closed (harness DMA, `docs/design/io-attack-log.md`).
 - **S5, M0-6:** no user value alone. Kernel line editor (~1,000 B) duplicates the shell version.
 - **Compiler on device:** 25-32 pages while running (against 154) for an example of scale; wait for S12b.
 
@@ -91,7 +91,7 @@ Budget arithmetic (ESTIMATE, from the figures above; 14 B above BSS untouched in
 - [ ] CX version byte not bumped in CP3 (the spec) against bumped (`checkpoints.md:10` row says bumped). I used the spec; it is later and cites the hater finding.
 - [ ] SYSINFO key 0: 3 B minimal, or with `tier` and `kver`?
 - [ ] "sched skips save/restore" stays in CP3's exit criteria or moves out?
-- [ ] Slots 24, 30, 31 stay ENOSYS holes for `brk`, LSEEK, `sync`.
+- [ ] Slots 24, 30, 31 stay ENOSYS holes for `brk`, LSEEK, `sync`. (LSEEK landed at slot 32 before CP3, 2026-11-23: `sys_return` left the page to make room. CP3 can renumber it or leave it there.)
 - [ ] Page room at $CF00: 14 B free, 3-byte records (`cp3-spec.md:30,46`) against "about 29 B, 6-byte entry" (`s12-brk.md:18,48`). I used the spec (newer, cites jtab.s lines); both say about 4 more calls.
 
 ## 5. Compared with upstream

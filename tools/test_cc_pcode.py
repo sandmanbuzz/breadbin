@@ -514,6 +514,7 @@ class L3b(unittest.TestCase):
         self.assertEqual((r.out, r.exit), (want, status), src)
         return r
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_bit_operations_and_shifts_against_a_model(self):
         vals = [-32768, -32767, -256, -255, -2, -1, 0, 1, 2, 5, 255, 256, 4660, 32767]
         ops = {"&": lambda a, b: a & b, "|": lambda a, b: a | b, "^": lambda a, b: a ^ b}
@@ -529,18 +530,21 @@ class L3b(unittest.TestCase):
                 lines.append("if ((%s >> %d) != %s) return 4;" % (lit(a), n, lit(a >> n)))   # arithmetic
         self.check("int main() {\n%s\nputs(\"Y\"); return 0; }" % "\n".join(lines))
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_precedence_is_c_precedence(self):
         # * over + over << over < over == over & over ^ over | over &&
         self.check('int main() { if ((1 + 2 << 1) == 6) if ((1 << 2 < 5) == 1) if ((3 & 1 == 1) == 1)'
                    ' if ((6 ^ 3 & 1) == 7) if ((1 | 6 ^ 3) == 5) if ((1 | 2 && 0) == 0) if ((~0 & 7) == 7)'
                    ' if ((2 * 3 << 1) == 12) if (-1 >> 4 == -1) puts("Y"); return 0; }')
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_bit_operations_in_conditions_and_with_variables(self):
         self.check("int main() { int a = 12; char c = 255; int n = 0;\n"
                    "  if (a & 3) return 1; if (!(a & 4)) return 2; while (a) { a = a >> 1; n = n + 1; }\n"
                    "  if (n != 4) return 3; if ((c << 8 >> 8) != -1) return 4; if ((c ^ 15) != 240) return 5;\n"
                    '  puts("Y"); return 0; }')
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_pointer_difference(self):
         self.check('char s[10]; int w[6];\n'
                    'int main() { char *p = s; char *q = &s[7]; int *a = w; int *b = &w[5]; char *z = 0;\n'
@@ -549,6 +553,7 @@ class L3b(unittest.TestCase):
                    '  if (p - z == 0) return 6; if ((p + 3) - z != (p - z) + 3) return 7;\n'
                    '  puts("Y"); return 0; }')
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_icall_runs_a_function_by_its_address(self):
         self.check('int h() { puts("H"); return 7; }\n'
                    'int main() { char *p = &h; if (icall(p) != 7) return 1; return icall(&h) + 30; }',
@@ -560,6 +565,7 @@ class L3b(unittest.TestCase):
             cc_pcode.compile_pcode("extern int nat();\nint main() { return icall(&nat); }")
         self.assertIn("icall of the native nat", str(cm.exception))
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_icall_runs_code_built_at_run_time(self):
         # what RUN does: bytecode built in a buffer and run by icall: CALL h; CB 5; ADD; RET
         # (PO_CALL $54, PO_CB $2A, PO_ADD $82, PO_RET $5C)
@@ -570,6 +576,7 @@ class L3b(unittest.TestCase):
                    ' buf[6] = 92;\n'
                    '  return icall(buf); }', b"H", 12)
 
+    @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_isatty_is_one_or_zero(self):
         src = "int main() { return isatty(0) * 10 + isatty(1) * 2 + isatty(7) + 40; }"
         self.check(src, b"", 52, tty=True)

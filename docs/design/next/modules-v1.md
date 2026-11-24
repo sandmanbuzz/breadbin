@@ -14,7 +14,7 @@ Status: agreed between the kernel session (loader side: `exec.s`, `mem.s`, `blk.
 | 0 | 3 | `jmp init` |
 | 3 | 3 | `jmp fini` |
 | 6 | 2 | kernel API hash (little endian) |
-| 8 | 1 | class byte (low nibble: 0 test/generic, 1 filesystem, 2 char device, 3 block driver, 4 IRQ hook; only 0 is used by v1; high nibble: name id for `mod ls`, 1 cbm, 2 uci, 4 d81, 0 none) |
+| 8 | 1 | class byte (low nibble: 0 test/generic, 1 filesystem, 2 char device, 3 block driver, 4 IRQ hook; only 0 is used by v1; high nibble: name id for `mod ls`, 1 cbm, 2 uci, 3 fast, 4 d81, 5 con80, 0 none) |
 
 ## Calls
 

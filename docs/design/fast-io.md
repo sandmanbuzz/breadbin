@@ -339,3 +339,156 @@ For the drive without a JiffyDOS ROM. A kernel module, so it costs the kernel no
 - **Clean room is process-only, and accepted.** The sketch author read the LGPL open-roms JiffyDOS routines (`jiffydos-cleanroom.md`); the implementing session saw only the sketch and cbmbus_doc and says so in `iec.s`. The separation is by process, not provable from the repo. The owner has accepted that under the licence policy. Any later doubt about the JiffyDOS routines is settled by rewriting them from cbmbus_doc and a bus trace by someone who has seen neither.
 - **Sprites.** A sprite on at the start of a session makes `jif_first` stay on the standard protocol for that session (follow-up commit after the landing). A sprite turned on mid-session, a RESTORE (NMI) in a byte window, or Ultimate DMA mid-byte can still shift a byte on the JiffyDOS path, which carries no checksum. Known, accepted risk; only `fast.km` checks its blocks.
 - **fast.km fallbacks on hardware: open thread.** On the Ultimate's emulated 1541-II with the JiffyDOS ROM (c64fs, drive 8), one `wc /bin/as` carried 45 blocks and fell back on 3 (`ft_ng` 142 to 187, `ft_nf` 6 to 9), against 0 fallbacks in 607 under VICE (stock and JiffyDOS ROMs). Reads were still correct and faster (16 to 17.5 s against 21.4 s). The cause is unknown (emulation timing, or a real margin problem: the receive margin is about 2 cycles). If a fallback count above zero shows up again, on hardware or in a test, pull on this thread first: capture which of the failure rule's causes fired (no answer, job error, checksum, timeout) before changing anything. fast.km does not engage on a CBM DOS mount (the real drive 9 in this run), by design; it was never exercised on the physical drive (needs a writable c64fs disk).
+
+## 18. The TFR v0.8 image: what it teaches (2026-11-20)
+
+### 18.1 Source and licence record
+
+- **What:** a 32 KB cartridge image whose banner reads "THE FINAL REPLAY V0.8" (four 8 KB banks, each at `$8000`), sha256 `f194fad1098e47442b61a937b3b432de6f5e0aed4a7fb3648857eef88243ebbe`. Supplied by the owner, who attributes it to **Oxyron**: a ground-up clean-room implementation of Final Replay / Retro Replay I/O routines, released in a community super-ROM. The image itself carries no credit, licence or provenance text; the attribution is the owner's.
+- **Basis:** the owner classes it under the **demoscene standard** (no licence stated; open use by custom; the polite return is a greeting). That is the "stated intent or evident reuse" case of the licence policy in `CLAUDE.md`. Anything adapted from it names Oxyron in the file header and points here. **Greetings to Oxyron.**
+- **Kept out of the repo:** the image and any disassembly of it. This section records findings, not code.
+
+### 18.2 What is in it (read from a disassembly; roles marked "believed" are not confirmed)
+
+- **Three stages.** (1) A few `M-W`/`M-E` commands put a small stub in the drive. (2) The stub is a **generic RAM uploader at `$0300`**: wait for the host, then repeat { receive address low, address high; if the high byte has bit 7 set, clear it and jump to the address; else receive 128 bytes into it } at the fast 2-bit rate. The host side sends every byte as four writes to `$DD00` with no per-pair handshake. (3) The large drive routines arrive through (2).
+- **Receive primitive (drive).** One byte is four steps of "wait DATA/CLK edge, sample `$1800`, shift in"; the host's mirror is four back-to-back reads of `$DD00`, two bits each, with fixed `nop` spacing and interrupts off.
+- **Reader routine.** Does not use the DOS job queue for the data: it finds the header with a ROM routine, then reads the whole raw GCR data block from VIA2 (`$1C01`, byte-ready on the V flag, 256 bytes into the sector buffer and the rest into the stack page), and sends it from the drive after two further ROM calls (roles believed to be GCR conversion and the job-completion path). It works through eight 5-bit groups per five bytes and **sends them through two 24-entry lookup tables**, so the bit pattern for `$1800` is a table fetch per step rather than shifts. A per-sector table at `$0624` marks what has been read.
+- **Writer routine.** Real: sets VIA2 to write mode (`$1C0C`, `$1C03`), writes sync (`$FF`) and data through `$1C01` under the same V-flag byte-ready wait. Next to it is a **head-step and track-write routine** (settle timer loops on `$1805`, density bits, a long `$55` run) whose purpose is not identified; it is the likely track format or test pattern and is out of scope until read further.
+- **Not the loader:** the `M-R`/`M-W`/`M-E` strings belong to the disk monitor, and bank 2 and 3 go through the KERNAL.
+
+### 18.3 What it means for us
+
+| Our state | What TFR does differently | Worth building? |
+|---|---|---|
+| `fast.km` runs DOS jobs per block, one `M-E` per block (17.2) | Reads GCR straight from VIA2, no job queue per block; table-driven sender | **Yes, as an experiment:** a drive routine that reads the next wanted sector as it passes, with `fast.km`'s checksum and fallback rule kept. Expect more than the 1.65x of 17.2, and more risk |
+| Upload by `M-W` in 32-byte chunks | Generic fast uploader (address, 128-byte pages, execute flag) | **Maybe, later:** only helps if the drive code grows; today's upload is small and once per mount |
+| `fast.km` refuses the physical 1541 at the buffer probe (`docs/wip.md`) | Does not rely on the DOS buffer map; takes memory by fixed address | **Yes, in the experiment:** it removes the probe |
+| Writes go through the DOS job queue and verify | Direct GCR write | **Not first.** Direct writes can destroy a disk; only with a read-back verify, on a scratch disk, after the read path is proven |
+
+### 18.4 Order proposed
+
+1. Document the protocol and timing from the disassembly in our own words (the host windows in cycles, the drive loop cycle counts), and check them against `tools/test_fast_timing.py` style host checks.
+2. New drive routine for GCR reads, written in our ca65 for the existing `fast.km` framing, tested under VICE (stock and JiffyDOS drive ROMs) and then on the physical 1541 under the `ultimate`/bench locks.
+3. Fast uploader and direct writes only if step 2 shows the gain.
+
+Not run: nothing here was executed on a drive; the cycle figures and the roles marked "believed" above are hypotheses until step 1 and 2.
+
+### 18.5 Where a `fast.km` block's time goes (measured 2026-11-20, VICE, stock 1541 ROM)
+
+Method: a throwaway patch to `ft_read` stamped the kernel's `ticks` (100 per second here, calibrated against the emulated cycle counter) at six points and summed the differences per phase; read back after `wc` of a 12-block file with the module loaded. 44 blocks were carried by that command (the file, its inode and indirect block, and the command's own binary). Real speed, host VICE; warp mode changes the cycle count and is not usable for timing. Resolution is 10 ms per stamp, so read each figure as plus or minus about 10 ms; two runs agree within 15 ms.
+
+| per block carried | ms (blocks of the file 1 apart / 5 apart) |
+|---|---|
+| probe (`ft_ready`) | 0 / 0 |
+| `M-E` sent, drive code started, handshake | 24 / 23 |
+| **job wait (drive reads the sector)** | **226 / 209** |
+| status byte | 0 / 0 |
+| 256 bytes and checksum | 57 / 56 |
+| total inside `ft_read` | 306 / 288 |
+
+- **The job wait is about 70% of a block**, and about a full revolution (200 ms) on average. Sequential blocks are physical neighbours (the kernel maps block n to consecutive sectors), so the sector after the one just read has passed under the head by the time the next request arrives.
+- The 5-apart file barely helped because only 12 of the 44 blocks were the strided file; the rest were sequential misses. An earlier stride sweep (1 to 13) gave 346 to 522 ms per block for the whole command and had the same flaw. Do not quote it as a floor.
+- **Consequence for the plan:** the transfer (57 ms) and the command (24 ms) are small beside the wait. The first lever is therefore **read-ahead**: have the drive start the job for the next block into the spare buffer while the current one crosses the bus, so a sequential block pays the transfer, not the revolution. A direct-GCR reader (18.2) matters second: it lets the drive catch the next header at once instead of waiting for the job queue's next pass, which decides whether read-ahead gets close to the transfer time or stays near one revolution per block. A faster bus helps last.
+- Not measured: writes (verify doubles the job time), the JiffyDOS drive ROM, the physical 1541, and the host's own time outside `ft_read` (about 50 ms per block by difference).
+
+### 18.6 Steady state, and what read-ahead must be (measured 2026-11-20)
+
+The per-block series for `wc /bin/as` (62 blocks, same stamps, per block job wait and full cycle in 10 ms ticks) corrects 18.5: the average there (about 210 ms of job wait) was inflated by blocks that needed a seek (job waits of 400 to 740 ms). Where blocks run consecutively, which is most of them:
+
+- job wait 140 to 150 ms; full cycle 240 to 250 ms. The host chain (command, transfer, the host's own work) is about 100 ms, so each block is **locked to one revolution plus about 45 ms**: the request arrives after the next sector has passed.
+- Consequence: reading **one** block ahead through the job queue only moves the wait (about 217 ms a block, an 11% gain). A real gain needs **two or more sectors read in one pass** (jobs posted into drive buffers 2 and 3 together, so the controller does them back to back), then served from the drive's buffers with no job wait. The floor is the host chain, about 100 ms a block (2.4 times today), then the transfer (57 ms) and the command (24 ms).
+- The drive cannot read and send at once (the job queue runs in the drive's interrupt, and the transfer needs interrupts off), so the sectors have to be read first, then sent. If the job queue does not run two jobs back to back inside one pass, a direct-GCR reader (18.2) is what lets the drive take consecutive sectors without the queue's latency. That is the first thing to test.
+
+### 18.7 Which path wins on a 1541 (decision rule, owner 2026-11-20)
+
+The aim is the fastest path for anything we touch. If the drive-code path with batch reads beats JiffyDOS on 1541s, 1541s stop using the JiffyDOS path and it stays for non-1541 drives only. That is to be decided by measurement: the same operation on the same build, a JiffyDOS-ROM drive with the JiffyDOS kernel path against `fast.km`, both under VICE at real speed (the JiffyDOS ROMs are outside the repo, `BREADBIN_CI_JIFFY`). The earlier figures (`wc /bin/as` 20.7 s JiffyDOS against 28.3 s `fast.km` today) come from different sessions and drive ROMs and do not settle it. Non-1541 drives (1571, 1581) keep the JiffyDOS path where the drive has it and the standard path otherwise; a 1581 drive-code path would be bespoke work, since the TFR image has nothing for it.
+
+### 18.8 The job queue does not chain (measured 2026-11-20)
+
+Experiment: with the 18.6 stamps, the drive code posted extra read jobs in buffer slots 3 (and 4) next to the requested sector in slot 2, and waited for all of them before sending. `wc /bin/as`, VICE at real speed, stock 1541 ROM, steady-state job wait per command:
+
+| jobs posted | job wait |
+|---|---|
+| 1 (as shipped) | 145 ms |
+| 2: n, n+1 | 265 ms |
+| 3: n, n+2, n+4 | 380 ms |
+
+Each extra job costs about 115 ms (about half a revolution) whatever sector it targets: the DOS does not start the next job in time for even the next-but-one sector, so a batch through the stock job queue gives about 227 ms a block against 245 today (about 8%), and slot 4 is the BAM buffer, which a batch would have to treat as dirty. **Batching through the job queue is dead.** What is left is reading the sectors ourselves from the raw GCR stream (18.2), where consecutive sectors follow each other 10 ms apart: a pass reads two or three, then the drive sends them. Raw GCR is 325 bytes a sector, so the free buffers (2, 3 and 4, 768 bytes) hold two raw sectors, decoded while sending.
+
+### 18.9 A raw GCR reader works, and chains sectors (measured 2026-11-20)
+
+Experiment (drive code only, host unchanged, reverted): after the normal DOS read job, with interrupts off, the drive code waits for sync, captures the next sector header (10 raw bytes) and the first 256 raw bytes of its data block, then the same again for the sector after it. VICE, stock 1541 ROM, `wc /bin/passwd`; `fast.km` carried all 42 blocks, no fallbacks. Decoded from the dumps and compared with the disk image:
+
+- header A = track 12 sector 0, header B = track 12 sector 1, checksums and disk id right; both data blocks carry marker `07` and their first 203 bytes match the image. **Two consecutive sectors come in one pass**, which the job queue could not do (18.8).
+- **The DOS job lags.** The first header caught after a job completes was the job's sector plus 4 on a 21-sector track (job sector 10, header 14), about 3 ms into our wait: the DOS decodes the block and reports on its own schedule, so three or four sectors go by after the data has been read. A reader that rides behind a DOS job misses the next sector. The raw reader has to read the wanted sector itself and use the DOS only to seek.
+- **Sync alignment is a trap.** The only deterministic sequence is the DOS's own (`$F556`): `bit $1c00` until sync, then at once `lda $1c01 : clv`, then `bvc`, `clv`, `lda $1c01` per byte; any store between the sync and that first read (or waiting for the sync to end) moved the first captured byte by one in some syncs and not others. Do bookkeeping after the `clv`. The byte loop (about 19 cycles a byte) is under the 26-cycle byte time of the fastest zone.
+- **The stack page is not ours.** The DOS keeps its overflow buffer at `$01BB`, but `rts` back into the DOS needs the frames above the stack pointer, so a reader that returns cannot use it (TFR does not return). The 69 overflow bytes a sector needs have to go elsewhere (buffers 3 and 4 give room for two raw sectors).
+- **Room.** The blob is exactly full at `$0500` with the write path removed; a raw reader plus a write path will not fit in two buffers. The kernel's `#0`/`#1` reservation, the data buffer and the BAM page (`$0700`, which the DOS rewrites on any initialize) all need a plan.
+
+Not shown yet: the full 325-byte capture and decode of all 256 bytes, selecting a wanted sector by header, seeking, reading a track change, error handling, the JiffyDOS drive ROM, the physical 1541, hardware timing, and speed (this run measured correctness, not time).
+
+### 18.10 Single-block prefetch is dead; the unit is a pass of two sectors (measured 2026-11-20)
+
+Experiment (`src/mod/fast.s`, red: writes removed, drive code in two parts at `$0300` and `$0650`, raw blocks decoded on the host, not shippable): after the drive has sent a block it captures the next one raw (header found by its sector, 325 bytes, kept in the `#` buffer) so the host's next request can be served from it. Two things the measurement settled:
+
+- **c64fs data blocks carry no track/sector link** (the filesystem finds blocks through the inode's list), so the drive cannot read the next block from the block it holds. The host guesses by stride (the next block as far past this one as this one is past the last, same track only) and passes the sector in the `M-E` command.
+- **The prefetch never completes.** `wc /bin/as` and `wc /bin/passwd`, host VICE at real speed, stock 1541 ROM: 48 prefetch attempts, 0 blocks served from one, 0 header timeouts. The host's next command (ATN) arrives before the wanted header has gone round: the sector after the one just read has already passed while the previous block crossed the bus (57 ms), and the next pass is a revolution (200 ms) away, longer than the host chain (about 100 ms). Times were 20.6 s and 29.2 s against 19.6 s and 27.3 s without it (the longer command, no hits).
+
+So a read that starts only after the current block has been sent cannot hide the revolution (the same lock as 18.6). The raw reader has to take the next sector **in the same pass** as the wanted one (18.9 showed that works), then send both. Estimate per pair: command 24 ms, about half a revolution to the first header, 20 ms to capture two, then two transfers of about 72 ms (325 raw bytes) and about 26 ms host decode each: about 170 ms a block against 245 ms today, a 30% gain, and 3 sectors a pass would do better.
+
+Room is the constraint: two raw sectors are 650 bytes of buffer, leaving about 630 bytes of the 1280 for code, with a write path out of the question in that budget. The drive code can shrink: the host can send the header codes (no `d_enc` and table on the drive), and only the first block of a track needs the DOS job.
+
+Run: `wc /bin/passwd`, `wc /bin/as` with the experimental module, host VICE real speed. Not run: a two-sector pass, writes, JiffyDOS drive ROM, 1541-II, hardware, `make test-host`, smoke, suite.
+
+### 18.11 The two-sector pass works; strides 1 to 8 (measured 2026-11-20)
+
+`src/mod/fast.s` (red: no write path, drive code in two parts at `$0300` and `$078A`, raw buffers at `$0500` and `$0645`): for a request the host passes the wanted sector, the GCR codes of a guessed second sector (same track, the previous stride) and a mode (0 DOS job, 1 raw for the wanted sector, 2 raw for both). The drive captures the wanted sector, then the guess in the same pass, sends the first, and holds the second for one request. A later request that matches the held block is served with no head work. The host decodes the 325 raw bytes (checksum, marker, no bad codes) and falls back to the standard path on any failure.
+
+Bug worth keeping: the host decode indexes with X, and the nibble helper `tax`es; the first version hung `mod ls` after `mod load`. Save and restore X around the helper.
+
+Results, host VICE at real speed, stock 1541 ROM, ms per block ((N=20 file minus one block file) / 19):
+
+| stride | standard | old fast.km (df634aa) | two-sector pass |
+|---|---|---|---|
+| 1 | 924 | 459 | 350 |
+| 2 | 862 | 458 | 411 |
+| 3 | 816 | - | 354 |
+| 4 | 868 | 306 | 405 |
+| 5 | 919 | - | 405 |
+| 6 | 921 | - | 403 |
+| 8 | 917 | - | 455 |
+
+`wc /bin/passwd` 19.5 s, `wc /bin/as` 25.3 s, 0 fallbacks, 23 of 49 blocks served from the held sector.
+
+Reading it: the gain is 24% at stride 1 and 10% at stride 2 against the old module, but stride 4 is 32% worse, because the old module's cycle happened to land on the revolution there (306 ms). Results depend on how the pair cycle lines up with the 200 ms revolution, not on a smooth cost per stride: 3 is as good as 1, 2/4/5/6 sit at about 405, 8 is worst. Two cheap levers follow: the allocator's stride/interleave, and a hint policy that picks the sector the head reaches first. The host chain outside the drive (about 100 to 120 ms) and the host decode (about 26 ms) are still unprofiled in detail, and 325 raw bytes cost about 15 ms more than 256.
+
+Open: staleness of the held block (any write, disk swap or fallback must drop it), the debug counters `d_nh`/`d_nm`, reserving buffers 3/4 and the BAM page, the write path (does not fit this budget), the head-to-head against JiffyDOS on 1541, and the owner's decision rule.
+
+Run: `wc /bin/passwd`, `wc /bin/as`, stride bench N=20 at strides 1, 2, 3, 4, 5, 6, 8, host VICE real speed, stock ROMs. Not run: JiffyDOS drive ROM, 1541-II, hardware, writes, `make test-host`, smoke, suite, the hater gate.
+
+### 18.12 Seek-then-raw after a track change: slower, reverted
+
+The vprof table (87bd4ed) puts DOS-job reads (mode 0, after every track change) at about 600 ms each. Try: the host marks the first request on a new track `$81`; the drive runs a job `$B0` (seek) on the DOS, then captures the sector raw. Result, `wc /bin/as` cold, 49 blocks, host VICE at real speed, stock ROMs: 440.7 ms per block baseline vs 456.4 with the seek, 21.6 s vs 22.4 s. No gain: the 1541's `$B0` job seeks and then reads a header to check the track (it is not a bare step), so the DOS path's cost is mostly the seek-and-verify and the spin-up, not the sector read. Reverted. A real saving needs the drive code to step the head itself (the stepper at `$1C00`, bits 0-1, with the DOS's own settle time), which is a bigger unit. Run: baseline and variant under tools/vprof.py. Not run: JiffyDOS drive, 1541-II, hardware, other files.
+
+### 18.13 Faster host decode: no gain, reverted
+
+Rewrote `hdec` (nibble tables for both halves, no per-nibble call, the group decoded in place at a stride of five over the GCR bytes it consumed, then a packing copy). Decode plus copy measured 31 ms per block (vprof, `fast:hdec` to `fast:ft_good`); the first estimate of 47 ms for the old one was from the retracted tick stamps and was not re-measured, so the saving is unknown but at most that. End to end, ms per block, old vs new: `wc /bin/passwd` 562.6 vs 561.1, `wc /bin/sh` 485.8 vs 485.2, `wc /bin/as` about 441 vs 454 (alignment noise). Nothing: the host decodes while the drive waits for the next sector, so the cycle is set by the revolution and the drive's job, not by the host's work between requests. The same reason explains 18.11 (stride matters only through alignment). Reverted: more code and risk for no latency. Lever left on the host side: none that shortens the critical path except the command send (about 54 ms, before the drive can start the pass) and the host-to-drive handshake. Run: three files, old vs new, tools/vprof.py, host VICE at real speed, stock ROMs. Not run: JiffyDOS drive, hardware, tests.test_fast on the new decode (the A/B decoded correctly, `wc` counts matched).
+
+### 18.14 Image layout: metadata near the inode table, hot files first
+
+The shipped image was already stride 1 for file data (first-fit), so the cost was elsewhere: directories and indirect blocks were allocated wherever was free when the tree was filled (`/bin` in four blocks on tracks 4, 9, 13 and 16; `/` on track 3) while the inodes sit on track 19, so a cold lookup thrashed the head across the disk. `tools/mkimage.py` (1541 images only) now reserves a meta zone nearest the inode table for the directories and indirect blocks of the tree (`plan_layout`; the root directory is moved into it), fills file data outward from that track one block after another (a new track: the nearest one with room), and creates `HOT` files (init, login, sh, fast, cbm, ls, cat) first, so they sit near the centre and early in their directory. Deterministic; a `.d81` and other geometries keep first-fit.
+
+ms per block and wall seconds for the whole command, host VICE at real speed, stock ROMs, `fast.km` loaded, old vs new layout (same build otherwise): `wc /bin/as` 441.1 / 24.3 s vs 431.6 / 24.3 s (no gain: three track crossings in its own data and the far-flung directory entries of a late-alphabet name); `wc /bin/sh` 499.1 / 23.6 s vs 456.2 / 20.5 s (-13%); `wc /bin/passwd` 564.3 / 19.0 s vs 489.2 / 17.3 s (-9%). Not run: the standard (non-fast) path, JiffyDOS drive, hardware, boot-time totals, the other files. Open: a hot-file list from real use, sector-level skew between the lookup chain's blocks, `/bin/as` (a second pass on where it crosses tracks).
+
+### 18.15 The write path is back, as an overlay; a torn spare byte broke raw reads of written sectors
+
+**Room.** The resident drive code (buffers 0 and 1, `$0300-$04FF`) is exactly full with the raw reader, and the write path (about 120 bytes: `d_wr`, `d_recv`, `d_rtab`) does not fit beside two raw sectors in the 1,280 bytes. A write needs only the data buffer, so the write code is an **overlay at `$0650`** in the second raw sector's room (`blob3`, 192 bytes padded, to `$0710`). The host puts it up with the same M-W loop the first time a block is written to a drive (`upov`) and keeps a per-drive flag (`ovl`). A mode 2 pass (guessed second sector) would wipe it, so a write sets `ft_wq` = 8 and `hint` stays at mode 1 for the next eight reads; a mode 2 request clears the flag, and the next write puts the overlay up again. The write protocol is the old one (drive DATA low and CLK released, 256 bytes and a checksum, the DOS write job and a verify job, status). Resident cost: 5 bytes of dispatch; the drive code is still exactly `$200`.
+
+**Staleness.** The drive drops the held sector on any write (`d_wr` clears `d_kt`). A write that goes the standard way (bus failure before the drive code ran) sets `ft_inval`; the next fast read then sends one throwaway request first (any request drops the held sector).
+
+**The bug it exposed.** With writes back, `tests.test_fast` carried 630 blocks but three to five blocks per read fell back, deterministically, on files written at run time (by the fast path or by the standard path: not specific to our write). The raw block, captured before decoding, had exactly one bad GCR code, the very last quintet: the DOS write job's turn-off tears the end of the second spare byte. `hdec` refused any bad code and also folded the two spare bytes into the block checksum. It now requires whole codes up to the last group and leaves the spare bytes out of the sum (the data and the checksum byte are still checked; the marker as before).
+
+Run: `tests.test_fast` (634 blocks carried, 0 fallen back, copies exact after `cp`, `rm`, `cp`), `make test-host` (786), `tools/test_fast_timing.py` (reads the overlay's labels), smoke; control reads of a standard-path-written file (0 fallen back after the fix, 3 before). Not run: JiffyDOS drive ROM, 1541-II, hardware, the full suite, timing of writes (next), the hater gate.
+## Novaterm 80-column font (src/mod/con80.font)
+
+808 bytes (101 glyphs), reordered by `tools/soft80_render.py` from `misc/font80.novaterm` in Novaterm 9.6's `novaterm-source.tgz` (zimmers.net, `pub/cbm/c64/comm/Novaterm/`); the input is not in the repo. Author: Nick Rossi (Novaterm's author). Evidence: the owner's assertion of 2026-11-20 that the author released the source free and that the C64OS author includes NovaText from it; the tarball has no licence text. Dating (owner, 2026-11-20): the release is undated, estimated around 2000 from secondhand records; the zip is stamped 2013-08-17, its members run 1995 to 2000-04-08, and the stripped build outputs share 2000-02-24 12:35, so the public release is on or shortly after 2000-02-24. `misc/font80.novaterm` is dated 1995-11-05. Credit and greetings to the Novaterm scene are in the module header (`src/mod/con80.s`).

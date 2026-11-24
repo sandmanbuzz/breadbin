@@ -1044,6 +1044,8 @@ class Pipes(unittest.TestCase):
         for _ in range(5):
             self.v.run("cat /etc/help >> /home/big")
         self.assertEqual(self.v.run("tail -1 /home/big").strip(), "run/stop interrupts a command")
+        # the file is read from 2 KB before its end (SYS_LSEEK), the pipe all through: same lines
+        self.assertEqual(self.v.run("tail -9 /home/big"), self.v.run("cat /home/big | tail -9"))
 
     def test_sort_lines(self):
         self.v.run("echo pear > /home/so")

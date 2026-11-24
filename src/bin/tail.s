@@ -1,7 +1,9 @@
 ; Ported from upstream Breadbin (https://github.com/kpatr1981/breadbin, MIT; Copyright 2026 Konstantinos Patronas),
-; commit 04f3a47 (feat: tee, tail and sort). Adapted: none; the program is taken as upstream wrote it.
+; commit 04f3a47 (feat: tee, tail and sort), and the seek from 3c346f8 (feat: tail reads only the last 2 KB
+; of a file). Adapted: the seek is our SYS_LSEEK (a signed offset from the end, whence in X).
 ; tail [-n] [file]: the last n (10) lines. Keeps the last 2 KB of the input
-; in a ring, so lines further back than that are gone.
+; in a ring, so lines further back than that are gone. A file is read from
+; 2 KB before its end; a pipe, or a file the seek refuses, all the way through.
 .include "../../include/breadbin.inc"
 .import argn, open_or_die, getc, set_input, parse_dec, eprint
 .importzp lval
@@ -56,6 +58,16 @@ first = $2e
         bcs @in
         ldy #O_RDONLY
         jsr open_or_die
+        pha                 ; a file over 2 KB: read only its last 2 KB
+        ldx #<-RING         ; (the seek fails on a smaller one: read it all)
+        stx r0
+        ldx #>-RING
+        stx r0+1
+        ldx #$ff            ; r1 lo: the offset is -RING
+        stx r1
+        ldx #SEEK_END
+        jsr SYS_LSEEK
+        pla
         jmp @go
 @in:    lda #0
 @go:    jsr set_input

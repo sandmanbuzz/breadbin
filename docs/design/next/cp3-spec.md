@@ -7,7 +7,7 @@ Base: `main` (45eacff size ledger). V = read at the cited line on main; U = unve
 ## 1. Scope and non-goals
 
 In: SYS_CTL (slot 23) absorbing ISATTY, CONMODE, CACHE, DISKIO; SYS_SYSINFO (slot 20) absorbing MEMINFO; user BRK-opcode and RESTORE kill. The CX version byte is NOT bumped in CP3 (see below).
-Not in: CX v2 trailer/delta relocs (CP4), tagged allocator / `brk` / `memtop` (CP5), the descriptor byte and EFAULT (cx2 commit 3), `LSEEK`, `O_NONBLOCK/NREAD`, SIGINT catch, buffered stdout, spawn r2 stderr, shared library.
+Not in: CX v2 trailer/delta relocs (CP4), tagged allocator / `brk` / `memtop` (CP5), the descriptor byte and EFAULT (cx2 commit 3), `LSEEK` (landed separately at slot 32, 2026-11-23), `O_NONBLOCK/NREAD`, SIGINT catch, buffered stdout, spawn r2 stderr, shared library.
 Couplings in cx2-abi2.md:
 - It ties `KABI` to the CX v2 trailer (`abi` byte, §1.2). CP3 does not need that. A stale v1 binary does not need a version bump to be refused: the syscalls it uses are removed from `breadbin.inc` and the table (a program calling slot 24 gets ENOSYS). The version bump is left to CP4 with the CX v2 trailer (the hater found that bumping the header byte to 2 now would collide with cx2's trailer ending `"CX",2`, and would turn five host tests red: `asim.py:45`, `uci_sim.py:569`, `test_as.py:32`, `test_mkimage.py:123`, `test_modules.py:35`). The version check is at `exec.s:183-185` (`cmp #1`); `exec.s:139-147` is the `dev_type` test.
 - It says "EXEC" takes a freed slot (§0.4, §2.3). Already done: exec is `SP_EXEC` in SPAWN (`include/breadbin.inc:62`, V). No EXEC slot needed.
@@ -74,7 +74,7 @@ RESTORE: NMI handler becomes `inc nmi_req; rti` (4 B, no register saved). The IR
 Failure modes:
 - RESTORE: same target set as RUN/STOP: non-BG, non-IGNINT. (BRK differs: see above.) The shell (IGNINT) survives; an idle shell at its prompt makes RESTORE a no-op; a `&` job needs `kill`.
 - A foreground process that ignores signals cannot exist (no catch; SIGINT catch comes later and RESTORE stays uncatchable on purpose).
-- A process stuck inside a kernel wait that never reaches `check_signal` (the open physical-1541 stall) is not freed: same as RUN/STOP today.
+- A process stuck inside a kernel wait that never reaches `check_signal` (formerly the physical-1541 stall, closed 2026-11-18: it was harness DMA; the case is still real for any wedged bus) is not freed: same as RUN/STOP today.
 - Pipeline: every non-BG member dies; `proc_exit` closes the pipe ends, so no orphan. Raw console: `con_release` (`proc.s:350`) restores cooked; screen is not repainted.
 - init (pid 1) BRK or RESTORE-kill: `proc_exit` panics "init" (V), as today for any pid-1 death. Ultimate freeze button is an NMI too (U): it would kill the foreground; flag in docs.
 

@@ -17,6 +17,8 @@ OLD = {
     "EMFILE": "too many open files", "EFBIG": "file too large", "ENOSPC": "no space left on device",
     "EPIPE": "broken pipe", "ENAMETOOLONG": "file name too long", "ENOTEMPTY": "directory not empty",
 }
+# Messages added since, by name.
+ADDED = {"ESPIPE": "illegal seek"}
 BUILTIN = {"EIO", "ENOENT", "ENODEV"}          # print without the disk
 
 
@@ -45,12 +47,12 @@ def file_lines():
 class TestErrors(unittest.TestCase):
     def test_every_message_is_the_one_users_saw_before(self):
         num = errnos()
-        by_num = {num[n]: n for n in OLD}
+        by_num = {num[n]: n for n in {**OLD, **ADDED}}
         got = dict(builtins())
         for n, text in file_lines():
             self.assertNotIn(by_num[n], got, "%s is both built in and in the file" % by_num[n])
             got[by_num[n]] = text
-        self.assertEqual(got, OLD)
+        self.assertEqual(got, {**OLD, **ADDED})
 
     def test_the_built_in_set_is_the_three_that_must_work_without_a_disk(self):
         self.assertEqual(set(builtins()), BUILTIN)
