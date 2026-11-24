@@ -141,8 +141,8 @@ prove the whole path with one tiny program end to end before widening anything.
     build with the full arena **did not load** (`sh: bas: out of memory`); 15,872 did. Fitting
     16,384 took a 768-byte frame stack (a `/* fstack N */` directive in the source, read by
     `cc_pcode`), 32 forward-GOTO fixups, a 192-byte GOSUB/FOR stack and 64-byte I/O buffers. It
-    fits by about 500 bytes: the 16 KB gate is met, barely, and L3d (strings) will not fit
-    without one of the options in §6.
+    fits by about 500 bytes: the 16 KB gate was met, barely; L3d's strings landed in the
+    runtime and the compiler's own bytes, see §6.2.
 - **L3d. Strings and arrays:**
   - string variables and a string heap with garbage collection;
   - `LEFT$`, `MID$`, `RIGHT$`, `LEN`, `CHR$`, `ASC`, `STR$`, `VAL`;
@@ -313,6 +313,28 @@ Rejected: dropping T and decompiling `LIST` from code (loses REM text and layout
 *Order:* 1 and 2 first (they also fix compile speed), measured against the fixture; then 3. The
 banner stays `BYTES FREE` = arena minus text until the code is dense enough that it is honest to
 within about 10 %.
+
+### 6.2 Strings (L3d, S1-S2)
+
+- **Representation.** A string expression is kind 3 on the eval stack: a pointer to the length
+  byte of a heap block `[backptr(2), len, text]`; 0 is the empty string. `A$` variables are
+  4-byte cells (kind 2 with both name bytes' high bits set). A literal points into the code
+  (CS) and is copied when assigned.
+- **Heap.** Between the immediate-line area (768 B after the code, `heapinit`) and the variables,
+  which grow down from the top. `rt_sres(n)` at the start of every statement is the only
+  collection point (a reserve of up to 6 temporaries), so a statement never moves blocks it holds.
+  Allocation is a bump; `sgc()` slides live blocks down and rewrites each owner cell through the
+  backptr (the owning cell, -1 temporary, 0 dead). Assignment (`rt_sset`) takes ownership of a
+  temporary and copies anything else, so literals in immediate-line code are never aliased.
+- **Limits.** `var()` refuses with OUT OF MEMORY when `vbot - size` falls below the heap top;
+  `clim` (the emitter's code limit, replacing `g_vbot`) keeps compiled code out of the heap, so
+  an overflow is an error, not corruption. Strings are at most 255 (STRING TOO LONG).
+- **Accepted divergences from MS BASIC.** `VAL` truncates past four decimals and has no
+  exponent; type errors (`X$=1`) are raised at compile time; the temporary reserve is capped;
+  the immediate-line area is fixed.
+- **Files.** The new `rt_` functions sit inside the `rt_prs`..`report` block and are in the
+  `valued` list, so `rtid` changes and old `.bx` files are refused; layouts of `bas` and `brun`
+  stay identical (host test).
 
 ## 7. Open questions
 
