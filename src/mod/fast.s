@@ -36,6 +36,8 @@
 ;   write: drive DATA low and CLK released; host CLK low; host sends 256 bytes and the
 ;          checksum; drive runs the job (the write and a verify), CLK low and DATA
 ;          released ("done"); host DATA low; drive sends status
+; The write code is an overlay at $0650 (second raw sector's room), uploaded by the host on
+; the first write to a drive and dropped when a mode 2 read wants the room (docs/design/fast-io.md 18.15).
 ; ATN at any point makes the drive code leave (that is how the fallback gets through).
 ;
 ; Limits, on purpose: a drive that is switched off and on while mounted has lost the
@@ -52,6 +54,9 @@ A_DAT   = $20
 
 DRV     = $0300         ; where the drive code runs (buffers 0 and 1)
 DBUF    = $0500         ; buffer 2, the kernel's own "#" buffer: the sector
+D2      = $078a         ; the rest of the drive code
+OV      = $0650         ; the write path, an overlay in the second raw sector's room
+RB2     = DBUF + 325    ; the second raw sector of a pass (to $078A: the rest of buffer 3 and 4, and the BAM's)
 PB      = $1800         ; the drive's serial port (VIA 1 port B)
 OP_RD   = $80           ; the job codes
 OP_WR   = $90
@@ -76,8 +81,23 @@ wmask:  .res 1
 wn:     .res 1
 mrb:    .res 2          ; M-R answer
 up:     .res 2          ; upload: drive address
+up2:    .res 1
+rawbuf: .res 325        ; a block as the drive read it off the disk
+g_t:    .res 5
+g_o:    .res 4
+g_c:    .res 1
+g_e:    .res 1
+g_cs:   .res 1
+g_h:    .res 1
+g_x:    .res 1
+ft_pt:  .res 1          ; the last block's track and sector (for hint)
+ft_ps:  .res 1
+ft_s1:  .res 1          ; the stride of the last request on this track
 ft_nf:  .res 1          ; blocks that fell back to the standard path (tests/test_fast.py reads both)
 ft_ng:  .res 2          ; blocks carried
+ovl:    .res 4          ; per drive: the write overlay is in the drive (a mode 2 pass wipes it)
+ft_wq:  .res 1          ; reads left (after a write) that take no second sector: the overlay lives
+ft_inval: .res 1        ; a write went the standard way: the drive may hold a stale sector
 
 .segment "CODE"
 ; init is refused unless the kernel is loading the module (as cbm.km), and when the call
@@ -158,6 +178,7 @@ ft_close:
         tay
         lda #0
         sta state,y
+        sta ovl,y
         pla
         jmp iec_ch_close
 
@@ -236,8 +257,14 @@ ft_start:
         sta cmdbuf+3
         lda #>d_go
         sta cmdbuf+4
-        sta cmdbuf+8            ; a last byte that is not a CR: the DOS drops a trailing one
-        lda #9
+        jsr tcodes              ; cmdbuf+8, 9: the track as the disk spells it
+        lda sct
+        jsr senc                ; cmdbuf+10, 11: the sector, and byte 3 of its header
+        stx cmdbuf+10
+        ora cmdbuf+8
+        sta cmdbuf+11
+        jsr hint                ; cmdbuf+12-14: the pass: how to read, and the guess for the next sector
+        lda #15
         sta cmdlen
         jsr cmd_send
         bcs @bus
@@ -263,6 +290,131 @@ ft_start:
         clc
         rts
 @bus:   sec
+        rts
+
+; hint: a stride predictor over pairs. The drive reads two sectors a pass, so a file is laid out
+; in pairs and the guess for the block after this one is this sector plus the stride the request
+; before this one had (modulo the track): the second of a pair is next to the first, the first of
+; the next pair is a pitch away, and a uniform stride predicts itself. c64fs blocks carry no link,
+; so the disk cannot say. Only a guess on the same track counts; the drive takes it while the
+; host is busy and the next request is served from it if it was right.
+hint:   lda #0
+        sta cmdbuf+14           ; 0: the DOS reads it (the head may be elsewhere)
+        lda ft_wq
+        beq :+
+        dec ft_wq               ; (a guessed sector would wipe the write overlay)
+:
+        lda ft_pt
+        cmp trk
+        bne @new
+        inc cmdbuf+14           ; 1: the head is on this track: read the sector raw
+        jsr h_spt
+        sta g_h
+        lda sct
+        sec
+        sbc ft_ps
+        bcs @p
+        adc g_h                 ; carry clear
+@p:     sta g_x                 ; this request's stride
+        lda ft_s1
+        beq @upd                ; no stride yet
+        clc
+        adc sct
+        cmp g_h
+        bcc @ok
+        sbc g_h
+@ok:    cmp sct
+        beq @upd
+        ldx ft_wq
+        bne @upd                ; writes are about: stay at mode 1
+        pha
+        jsr senc
+        stx cmdbuf+12
+        ora cmdbuf+8
+        sta cmdbuf+13
+        pla
+        inc cmdbuf+14           ; 2: and the guessed one in the same pass
+        ldx ft_i
+        lda #0
+        sta ovl,x               ; (the second sector goes where the write code is)
+@upd:   lda g_x
+        sta ft_s1
+        jmp @st
+@new:   lda #0
+        sta ft_s1
+@st:    lda trk
+        sta ft_pt
+        lda sct
+        sta ft_ps
+        rts
+
+; senc: A = a sector; X = the low nibble of the header's byte 2 for it, A = the high six bits
+; of byte 3 (the GCR codes of its two digits, run together).
+senc:   pha
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        tax
+        lda g_et,x
+        sta g_c
+        pla
+        and #$0f
+        tax
+        lda g_et,x
+        asl a
+        asl a
+        sta g_e
+        lda g_c
+        lsr a
+        tax
+        lda #0
+        ror a
+        ora g_e
+        rts
+
+; h_spt: A = the sectors on track trk (1541)
+h_spt:  lda #21
+        ldy trk
+        cpy #18
+        bcc @r
+        lda #19
+        cpy #25
+        bcc @r
+        lda #18
+        cpy #31
+        bcc @r
+        lda #17
+@r:     rts
+
+; tcodes: cmdbuf+8, 9 from trk. c6, c7 = the GCR codes of its two digits; T3 = c6>>3,
+; T4 = c6<<5 | c7 (the header's last two bytes).
+tcodes: lda trk
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        tax
+        lda g_et,x
+        sta g_c                 ; c6
+        lda trk
+        and #$0f
+        tax
+        lda g_et,x
+        sta g_e                 ; c7
+        lda g_c
+        lsr a
+        lsr a
+        lsr a
+        sta cmdbuf+8
+        lda g_c
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        ora g_e
+        sta cmdbuf+9
         rts
 
 ; mhead: "M-" and A into cmdbuf
@@ -316,14 +468,21 @@ cksum:  pha
         rts
 
 ; ft_read: in place of iec_read (cur_drv, rq_dev, rq_lo/hi, bp as there)
-ft_read: jsr ft_ready
+ft_read: lda ft_inval           ; a write went the standard way: a sector the drive holds may be
+        beq ft_read1            ; stale. Any request drops it: take one and throw the answer away.
+        lda #0
+        sta ft_inval
+        jsr ft_read1
+ft_read1: jsr ft_ready
         bcs @std
         lda #OP_RD
         jsr ft_start
         bcs @std
         jsr w_clk               ; the job is done when the drive lets go of CLK
         bcs @bad
-        jsr iec_in_byte         ; its result
+        jsr iec_in_byte         ; its result: 1 a block, 2 a block as it is on the disk
+        cmp #2
+        beq @raw
         cmp #1
         bne @bad
         ldy #0
@@ -344,12 +503,233 @@ ft_read: jsr ft_ready
         jmp ft_good
 @bad:   jsr ft_fail
 @std:   jmp iec_read
+@raw:   ldy #0
+@r:     jsr iec_in_byte
+        sta rawbuf,y
+        jsr cksum
+        lda ST
+        and #$02
+        bne @rb
+        iny
+        bne @r
+@s:     jsr iec_in_byte
+        sta rawbuf+256,y
+        jsr cksum
+        lda ST
+        and #$02
+        bne @rb
+        iny
+        cpy #69
+        bne @s
+        jsr iec_in_byte
+        cmp ft_ck
+        bne @rb
+        lda ST
+        and #$02
+        bne @rb
+        jsr hdec
+        cmp #1
+        bne @rb
+        ldy #0
+@c:     lda rawbuf+1,y
+        sta (bp),y
+        iny
+        bne @c
+        jmp ft_good
+@rb:    jmp @bad
+
+; hdec: the 325 bytes in rawbuf, as GCR, become the block's 260 bytes in place (the marker, the
+; 256 data bytes from rawbuf+1, the checksum). A = 1 if every code was good, the marker is 7 and
+; the checksum holds, else 0.
+.macro hi_into dest
+        jsr g_nib
+        asl a
+        asl a
+        asl a
+        asl a
+        sta dest
+.endmacro
+.macro lo_into dest
+        jsr g_nib
+        ora dest
+        sta dest
+.endmacro
+.macro getg base
+        lda base,x
+        sta g_t
+        lda base+1,x
+        sta g_t+1
+        lda base+2,x
+        sta g_t+2
+        lda base+3,x
+        sta g_t+3
+        lda base+4,x
+        sta g_t+4
+.endmacro
+.macro putg base
+        lda g_o
+        sta base,y
+        eor g_cs
+        sta g_cs
+        lda g_o+1
+        sta base+1,y
+        eor g_cs
+        sta g_cs
+        lda g_o+2
+        sta base+2,y
+        eor g_cs
+        sta g_cs
+        lda g_o+3
+        sta base+3,y
+        eor g_cs
+        sta g_cs
+.endmacro
+hdec:   lda #0
+        sta g_e
+        sta g_cs
+        tax
+        tay
+@g1:    getg rawbuf
+        stx g_x                 ; (g_nib uses X)
+        jsr g_g
+        ldx g_x
+        putg rawbuf
+        iny
+        iny
+        iny
+        iny
+        txa
+        clc
+        adc #5
+        tax
+        bcc @g1                 ; 52 groups: X wraps after the one that reads rawbuf+255..259
+@g2:    getg rawbuf+256
+        stx g_x
+        jsr g_g
+        ldx g_x
+        putg rawbuf
+        tya
+        clc
+        adc #4
+        tay
+        txa
+        clc
+        adc #5
+        tax
+        tya
+        bne @g2                 ; 12 more: Y wraps to 0
+        lda g_e
+        bne @bad                ; (the last group's two spare bytes may be torn by the write that
+        getg rawbuf+256         ; made the sector: the data and the checksum have to be whole,
+        stx g_x                 ; and the checksum says so)
+        jsr g_g
+        ldx g_x
+        putg rawbuf+256
+        lda g_cs                ; (the two spare bytes are not part of the sum)
+        eor rawbuf+258
+        eor rawbuf+259
+        sta g_cs
+        lda rawbuf
+        cmp #7
+        bne @bad
+        lda g_cs
+        cmp #7
+        bne @bad
+        lda #1
+        rts
+@bad:   lda #0
+        rts
+
+; g_nib: A = a 5-bit code. Returns the nibble; g_e is set if it was not a code. Uses X.
+g_nib:  tax
+        lda g_dt,x
+        cmp #16
+        bcc @r
+        sta g_e
+@r:     rts
+
+; g_g: the five GCR bytes in g_t decode to the four bytes in g_o.
+g_g:    lda g_t
+        lsr a
+        lsr a
+        lsr a
+        hi_into g_o             ; c0
+        lda g_t+1
+        asl a
+        rol a
+        rol a
+        and #$03
+        sta g_c
+        lda g_t
+        asl a
+        asl a
+        and #$1c
+        ora g_c
+        lo_into g_o             ; c1
+        lda g_t+1
+        lsr a
+        and #$1f
+        hi_into g_o+1           ; c2
+        lda g_t+1
+        asl a
+        asl a
+        asl a
+        asl a
+        and #$10
+        sta g_c
+        lda g_t+2
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        ora g_c
+        lo_into g_o+1           ; c3
+        lda g_t+3
+        asl a
+        lda g_t+2
+        rol a
+        and #$1f
+        hi_into g_o+2           ; c4
+        lda g_t+3
+        lsr a
+        lsr a
+        and #$1f
+        lo_into g_o+2           ; c5
+        lda g_t+4
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta g_c
+        lda g_t+3
+        asl a
+        asl a
+        asl a
+        and #$18
+        ora g_c
+        hi_into g_o+3           ; c6
+        lda g_t+4
+        and #$1f
+        lo_into g_o+3           ; c7
+        rts
+
+; GCR: the 5-bit code of each nibble, and the nibble of each code ($ff: not a code)
+g_et:   .byte $0a,$0b,$12,$13,$0e,$0f,$16,$17,$09,$19,$1a,$1b,$0d,$1d,$1e,$15
+g_dt:   .byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$08,$00,$01,$ff,$0c,$04,$05,$ff,$ff,$02,$03,$ff,$0f,$06,$07,$ff,$09,$0a,$0b,$ff,$0d,$0e,$ff
 
 ; ft_write: in place of iec_write
 ft_write:
         jsr ft_ready
         bcs @std
-        lda #OP_WR
+        lda #8
+        sta ft_wq
+        ldx ft_i
+        lda ovl,x
+        bne @have
+        jsr upov
+        bcs @std
+@have:  lda #OP_WR
         jsr ft_start
         bcs @std
         jsr w_clk               ; the drive holds DATA and has let go of CLK: it listens
@@ -378,9 +758,14 @@ ft_write:
         lda ST
         and #$02
         bne @bad
+        lda #0
+        sta ft_pt               ; the head is elsewhere now
+        sta ft_s1
         jmp ft_good
 @bad:   jsr ft_fail
-@std:   jmp iec_write
+@std:   lda #1
+        sta ft_inval
+        jmp iec_write
 
 ; txb: send A to the drive code. Y is preserved; carry set if it was not taken.
 txb:    sty sv_y
@@ -414,6 +799,8 @@ install:
         ldx ft_i
         lda #1
         sta state,x
+        lda #0
+        sta ovl,x
 @out:   lda sv_p4
         sta p4
         lda sv_p4+1
@@ -461,12 +848,14 @@ probe:  ldx #$fe                ; a 1541? Its ROM ends in the IRQ vector $FE67. 
 upload: lda #'0'
         ldx #4
         jsr reserve
-        bcs @cl
-        lda #'1'
+        bcc :+
+        jmp up_cl
+:       lda #'1'
         ldx #5
         jsr reserve
-        bcs @cl
-        lda #<blob
+        bcc :+
+        jmp up_cl
+:       lda #<blob
         sta p4
         lda #>blob
         sta p4+1
@@ -476,7 +865,9 @@ upload: lda #'0'
         sta up+1
         lda #BLOBLEN / CHUNK
         sta ft_n
-@ch:    lda #'W'
+        lda #0
+        sta up2
+up_ch:    lda #'W'
         jsr mhead
         lda up
         sta cmdbuf+3
@@ -492,7 +883,7 @@ upload: lda #'0'
         lda #CHUNK+6
         sta cmdlen
         jsr cmd_send
-        bcs @cl
+        bcs up_cl
         clc
         lda p4
         adc #CHUNK
@@ -506,13 +897,62 @@ upload: lda #'0'
         bcc @u
         inc up+1
 @u:     dec ft_n
-        bne @ch
-        jsr cmd_status          ; the drive took every command
-        bcs @cl
+        bne up_ch
+        lda up2
+        bne up_done
+        inc up2
+        lda #<blob2
+        sta p4
+        lda #>blob2
+        sta p4+1
+        lda #<D2
+        sta up
+        lda #>D2
+        sta up+1
+        lda #BLOB2LEN / CHUNK
+        sta ft_n
+        jmp up_ch
+up_done:  jsr cmd_status          ; the drive took every command
+        bcs up_cl
         rts
-@cl:    lda cur_drv
+up_cl:    lda cur_drv
         jsr unreserve
         sec
+        rts
+
+; upov: put the write path up (the buffers are ours already). Carry set if the bus failed: the
+; drive is left alone from then on.
+upov:   lda p4
+        sta sv_p4
+        lda p4+1
+        sta sv_p4+1
+        lda #<blob3
+        sta p4
+        lda #>blob3
+        sta p4+1
+        lda #<OV
+        sta up
+        lda #>OV
+        sta up+1
+        lda #BLOB3LEN / CHUNK
+        sta ft_n
+        lda #1                  ; (nothing after this part)
+        sta up2
+        jsr up_ch
+        php
+        lda sv_p4
+        sta p4
+        lda sv_p4+1
+        sta p4+1
+        plp
+        bcc @ok
+        jsr ft_dead
+        sec
+        rts
+@ok:    ldx ft_i
+        lda #1
+        sta ovl,x
+        clc
         rts
 
 ; reserve: A = buffer digit, X = secondary. Open "#n" there and see that the drive agreed.
@@ -671,6 +1111,290 @@ d_send_end:
         bmi d_quit2
         rts
 
+d_quit2:
+        jmp d_quit
+
+; d_stab: for a nibble, what to put on the port for its bits 0 and 1 (CLK, DATA); shifted
+; left once it is bits 2 and 3. A 0 bit pulls the line (port bits 3 and 1).
+d_stab:
+.repeat 16, n
+        .byte ((~n & 1) << 3) | ((~n & 4) << 0) | ((~n & 2) << 0) | ((~n & 8) >> 3)
+.endrepeat
+.assert >d_sw = >d_send_end, error, "fast.s: the timed part of d_send crosses a page"
+
+
+; d_go: the entry (M-E). The command: op, track, sector, T3 T4 (the track as the header spells
+; it), e2 e3 (the sector), e2 e3 of the sector to take in the same pass, and how: 0 the DOS reads
+; it into DBUF, 1 raw, 2 raw and the second sector too. A raw block goes out as it is on the disk
+; (status 2, 325 bytes); the second one waits in RB2 for the next request.
+d_go:   sei
+        tsx
+        stx d_sp
+        lda PB                  ; the device number jumpers read back in bits 5 and 6
+        and #$60
+        ora #$01
+        sta d_exps              ; the port as send waits: host DATA low, nothing else
+        lda #$08
+        sta PB                  ; running: CLK low
+@s:     lda PB                  ; the host pulls DATA: seen
+        bmi d_quit2
+        lsr a
+        bcc @s
+        lda $0206               ; track and sector from the command
+        sta $0a
+        lda $0207
+        sta $0b
+        ldy #0
+        sty d_ck
+        lda $0205
+        cmp #OP_RD
+        beq @rd
+        cmp #OP_WR
+        bne d_quit2
+        jmp d_wr
+@rd:
+        lda d_kt                ; the sector kept from the last pass, if it is the one asked for
+        sty d_kt                ; (it is good for one request)
+        cmp $0a
+        bne @cap
+        lda d_k2
+        cmp $020a
+        bne @cap
+        lda d_k3
+        cmp $020b
+        bne @cap
+        inc d_nh
+        lda #<RB2
+        ldx #>RB2
+        jsr d_setp
+        lda #2
+        bne @go
+@cap:   lda #<DBUF
+        ldx #>DBUF
+        jsr d_setp
+        lda $020e
+        beq @job
+        lda $020a
+        sta d_e2
+        lda $020b
+        sta d_e3
+        jsr d_cap
+        bcs @job
+        lda $020e
+        cmp #2
+        bne @raw
+        lda #<RB2
+        ldx #>RB2
+        jsr d_setp
+        lda $020c
+        sta d_e2
+        lda $020d
+        sta d_e3
+        jsr d_cap
+        bcs @none
+        lda $0a
+        sta d_kt
+        lda $020c
+        sta d_k2
+        lda $020d
+        sta d_k3
+        jmp @raw
+@none:  inc d_nm
+@raw:   lda #<DBUF
+        ldx #>DBUF
+        jsr d_setp
+        lda #2
+        bne @go
+@job:   lda #OP_RD
+        jsr d_job
+@go:    sta d_st
+        ldy #0
+        jsr d_send
+        lda d_st
+        cmp #1
+        beq d_lp
+        cmp #2
+        beq d_lp
+        jmp d_quit
+d_lp:
+d_l1:   lda DBUF,y
+        jsr d_cksum
+        jsr d_send
+        iny
+        bne d_l1
+        lda d_st
+        cmp #2
+        bne d_ck2
+d_l2:   lda DBUF+256,y
+        jsr d_cksum
+        jsr d_send
+        iny
+        cpy #69
+        bne d_l2
+d_ck2:  lda d_ck
+        jsr d_send
+d_quit: ldx d_sp
+        txs
+        lda #0
+        sta PB
+        cli
+        rts                     ; back into the DOS
+
+
+; d_job: A = job code for buffer 2. Returns its result (1 = good). The disk controller
+; runs in the drive's interrupt.
+d_job:  sta $02
+        cli
+@w:     bit PB
+        bmi d_quit
+        lda $02
+        bmi @w
+        sei
+d_rts:  rts
+
+; d_cap: take the block whose header holds d_e2/d_e3 and the track's T3/T4, raw (325 bytes), to
+; where d_setp said. Carry set if it did not come by in two revolutions.
+d_cap:  lda #48
+        sta d_try
+@h:     jsr d_sync
+        bcs @f
+        ldy #0
+@hb:    bvc @hb
+        clv
+        lda $1c01
+        sta d_hd,y
+        iny
+        cpy #5
+        bne @hb
+        lda d_hd
+        cmp #$52
+        bne @n
+        lda d_hd+2
+        and #$0f
+        cmp d_e2
+        bne @n
+        lda d_hd+3
+        cmp d_e3
+        bne @n
+        lda d_hd+4
+        cmp $0209
+        beq @hit
+@n:     dec d_try
+        bne @h
+@f:     sec
+        rts
+@hit:   jsr d_sync
+        bcs @f
+        ldy #0
+d_d1:   bvc d_d1
+        clv
+        lda $1c01
+d_c1:   sta DBUF,y
+        iny
+        bne d_d1
+d_d2:   bvc d_d2
+        clv
+        lda $1c01
+d_c2:   sta DBUF+256,y
+        iny
+        cpy #69
+        bne d_d2
+        clc
+        rts
+
+
+d_st:   .res 1
+d_kt:   .res 1          ; the track, and the header bytes, of the sector kept in RB2 (0: none)
+d_k2:   .res 1
+d_k3:   .res 1
+d_e2:   .res 1
+d_e3:   .res 1
+d_try:  .res 1
+d_hd:   .res 5
+d_nh:   .res 1          ; (counters) sectors served from RB2, passes whose second sector missed
+d_nm:   .res 1
+d_sp:   .res 1
+d_ck:   .res 1
+d_exps: .res 1
+
+        .res (CHUNK - ((* - DRV) .mod CHUNK)) .mod CHUNK, 0
+d_end:
+.reloc
+BLOBLEN = d_end - DRV
+.assert BLOBLEN <= $200, error, "fast.s: the drive code outgrew two buffers"
+
+; ---------------------------------------------------------------------------------------
+; The rest of the drive code, above the two raw sectors (D2, the end of the BAM buffer)
+.segment "RODATA"
+blob2:
+.org D2
+.macro atn
+        bit PB
+        bpl :+
+        jmp d_quit
+:
+.endmacro
+
+; d_setp: A, X = lo, hi of where the raw sector goes (and is sent from)
+d_setp: sta d_c1+1
+        sta d_l1+1
+        sta d_c2+1
+        sta d_l2+1
+        stx d_c1+2
+        stx d_l1+2
+        inx
+        stx d_c2+2
+        stx d_l2+2
+        rts
+
+; d_cksum: as cksum above
+d_cksum:
+        pha
+        lda d_ck
+        asl a
+        adc #0
+        sta d_ck
+        pla
+        pha
+        clc
+        adc d_ck
+        sta d_ck
+        pla
+        rts
+
+; d_sync: wait for sync and read the first byte as the DOS does ($F556). Carry set: none in
+; about 0.35 s. ATN leaves.
+d_sync: lda #$ee
+        sta $1c0c               ; read mode, byte-ready to V
+        ldx #0
+        ldy #$70
+@l:     bit $1c00
+        bpl @ok
+        dex
+        bne @l
+        atn
+        dey
+        bne @l
+        sec
+        rts
+@ok:    lda $1c01
+        clv
+        clc
+        rts
+
+        .res (CHUNK - ((* - D2) .mod CHUNK)) .mod CHUNK, 0
+d_end2:
+.reloc
+BLOB2LEN = d_end2 - D2
+.assert BLOB2LEN <= 96, error, "fast.s: the second drive blob outgrew its room"
+
+; ---------------------------------------------------------------------------------------
+; The write path, put in the drive when the first block is written (an overlay: it lives in the
+; second raw sector's room, so a pass that takes a guessed sector (mode 2) wipes it, and the host,
+; which knows when it sent one, puts it up again). A write needs only DBUF.
+.segment "RODATA"
+blob3:
+.org OV
 ; d_recv: returns the byte in A. Uses A, X. A line is low for a 1.
 ; The host has CLK low and we have DATA low; we release DATA when ready, the host
 ; releases CLK ("go") and writes the pairs at its cycles 11, 24, 35, 48 and "more" at 61.
@@ -699,78 +1423,27 @@ d_rw:   cmp PB                  ; go?                               cycle 0
         stx PB                  ; taken: DATA low                   RK5
 d_recv_end:
         bit PB
-        bmi d_quit2
+        bmi d_oq
         rts
-d_quit2:
-        jmp d_quit
 
-; d_stab: for a nibble, what to put on the port for its bits 0 and 1 (CLK, DATA); shifted
-; left once it is bits 2 and 3. A 0 bit pulls the line (port bits 3 and 1).
-d_stab:
-.repeat 16, n
-        .byte ((~n & 1) << 3) | ((~n & 4) << 0) | ((~n & 2) << 0) | ((~n & 8) >> 3)
-.endrepeat
 ; d_rtab: the high nibble from the first two reads (bit 3: 4, bit 2: 6, bit 1: 5, bit 0: 7)
 d_rtab:
 .repeat 16, n
         .byte ((n & 8) << 1) | ((n & 4) << 4) | ((n & 2) << 4) | ((n & 1) << 7)
 .endrepeat
-.assert >d_stab = >(d_stab + 15), error, "fast.s: d_stab crosses a page"
 .assert >d_rtab = >(d_rtab + 15), error, "fast.s: d_rtab crosses a page"
-.assert >d_sw = >d_send_end, error, "fast.s: the timed part of d_send crosses a page"
+
 .assert >d_rw = >d_recv_end, error, "fast.s: the timed part of d_recv crosses a page"
 
-; d_go: the entry (M-E)
-d_go:   sei
-        tsx
-        stx d_sp
-        lda PB                  ; the device number jumpers read back in bits 5 and 6
-        and #$60
-        ora #$01
-        sta d_exps              ; the port as send waits: host DATA low, nothing else
+; ---- write: the block comes into DBUF (the held sector in RB2 is dropped: the disk changes)
+d_wr:   sty d_kt
+        lda d_exps
         eor #$05
-        sta d_expr              ; and as recv waits: host CLK low, nothing else
-        lda #$08
-        sta PB                  ; running: CLK low
-@s:     lda PB                  ; the host pulls DATA: seen
-        bmi d_quit
-        lsr a
-        bcc @s
-        lda $0206               ; track and sector from the command
-        sta $0a
-        lda $0207
-        sta $0b
-        ldy #0
-        sty d_ck
-        lda $0205
-        cmp #OP_WR
-        beq d_wr
-        ; ---- read
-        jsr d_job
-        pha
-        jsr d_send
-        pla
-        cmp #1
-        bne d_quit
-@l:     lda DBUF,y
-        jsr d_cksum
-        jsr d_send
-        iny
-        bne @l
-        lda d_ck
-        jsr d_send
-d_quit: ldx d_sp
-        txs
-        lda #0
-        sta PB
-        cli
-        rts                     ; back into the DOS
-
-        ; ---- write
-d_wr:   lda #$02
+        sta d_expr              ; as recv waits: host CLK low, nothing else
+        lda #$02
         sta PB                  ; listening: DATA low, CLK released
 @c:     lda PB                  ; the host pulls CLK
-        bmi d_quit
+        bmi d_oq
         and #$04
         beq @c
 @l:     jsr d_recv
@@ -796,46 +1469,19 @@ d_wr:   lda #$02
         sta PB                  ; done: CLK low, DATA released
         jsr d_rts               ; (time for DATA to rise before we look at it)
 @d:     lda PB                  ; the host pulls DATA
-        bmi d_quit
+        bmi d_oq
         lsr a
         bcc @d
         pla
         jsr d_send
         jmp d_quit
 
-; d_job: A = job code for buffer 2. Returns its result (1 = good). The disk controller
-; runs in the drive's interrupt.
-d_job:  sta $02
-        cli
-@w:     bit PB
-        bmi d_quit
-        lda $02
-        bmi @w
-        sei
-d_rts:  rts
-
-; d_cksum: as cksum above
-d_cksum:
-        pha
-        lda d_ck
-        asl a
-        adc #0
-        sta d_ck
-        pla
-        pha
-        clc
-        adc d_ck
-        sta d_ck
-        pla
-        rts
-
-d_sp:   .res 1
-d_ck:   .res 1
-d_exps: .res 1
 d_expr: .res 1
+d_oq:   jmp d_quit
 
-        .res (CHUNK - ((* - DRV) .mod CHUNK)) .mod CHUNK, 0
-d_end:
+        .res (CHUNK - ((* - OV) .mod CHUNK)) .mod CHUNK, 0
+d_end3:
 .reloc
-BLOBLEN = d_end - DRV
-.assert BLOBLEN <= $200, error, "fast.s: the drive code outgrew two buffers"
+BLOB3LEN = d_end3 - OV
+.assert OV + BLOB3LEN <= D2, error, "fast.s: the write overlay outgrew its room"
+.assert OV >= RB2, error, "fast.s: the write overlay overlaps the first raw sector"
