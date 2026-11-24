@@ -10,9 +10,10 @@ from ultimatetest import UltimateTarget
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--wait", type=float, default=150)
+ap.add_argument("--image", help="boot this .d64 (default: an image built from build/ with /etc/con80)")
 a = ap.parse_args()
 with tempfile.TemporaryDirectory() as tmp:
-    v = UltimateTarget(image_with_marker(tmp))
+    v = UltimateTarget(a.image or image_with_marker(tmp))
     t0, got = time.time(), None
     while time.time() - t0 < a.wait:
         time.sleep(2)
