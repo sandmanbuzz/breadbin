@@ -51,10 +51,10 @@ def brun_binary():
     return _built["brun"]
 
 
-def brun(bx, brk=64, name="/p.bx"):
+def brun(bx, brk=64, name="/p.bx", stdin=b""):
     """The compiled file bx (bytes) run by brun: (output as str, exit status)."""
     r = asim.run("brun", [name], path=brun_binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
-                 files={name: bx}, brk=brk)
+                 files={name: bx}, brk=brk, stdin=stdin)
     return r.out.decode("latin-1"), r.exit
 
 
@@ -80,9 +80,16 @@ class Bas(unittest.TestCase):
     def test_the_arena_is_what_the_kernel_grants(self):
         # BYTES FREE follows the pages BRK gives: 64 is 16,384 bytes, 80 is 20,480, and a pool
         # too small for 4096 bytes is refused with a message on stderr, not a crash
-        for pages, text in ((64, "16384"), (80, "20480"), (120, "30720"), (200, "30720"), (16, "4096")):
+        for pages, text in ((64, "16384"), (80, "20480"), (16, "4096")):
             out, status = bas("", tty=True, brk=pages)
             self.assertEqual((out, status), (text + " BYTES FREE\nREADY.\n", 0), pages)
+        # with room to spare the arena is what the pool leaves after the image (the pool is 155 pages, the VM's library 8
+        # and the system 27): a floor, so that a new feature that costs the arena its pages is noticed
+        for pages in (120, 200):
+            out, status = bas("", tty=True, brk=pages)
+            free = int(out.split()[0])
+            self.assertEqual((free % 256, status), (0, 0))
+            self.assertTrue(28000 <= free <= 30720, free)
         r = asim.run("bas", [], path=binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
                      stdin=b"", tty=True, brk=15)
         self.assertEqual((r.out, r.err, r.exit), (b"", b"bas: out of memory\n", 1))
@@ -139,7 +146,7 @@ class Bas(unittest.TestCase):
 
     def test_token_numbers_match_the_table(self):
         text = cc.read_source(SRC)
-        table = re.search(r'char kwt\[\] = "([A-Z|]+)";', text).group(1).split("|")[:-1]
+        table = re.search(r'char kwt\[\] = "([A-Z|$]+)";', text).group(1).split("|")[:-1]
         uses = re.findall(r"(\d+) /\* tk ([A-Z]+) \*/", text)
         self.assertGreater(len(uses), 25)
         for n, name in uses:
@@ -176,7 +183,7 @@ class Bas(unittest.TestCase):
         self.assertEqual(self.out('40000 GOTO 10\nRUN\n'), "?UNDEF'D STATEMENT ERROR IN 40000\n")
 
     def test_bad_commands(self):
-        for line in ("LIST X", "LIST 10-20-30", "NEW 5", "RUN X", "FOO", "LISTX", "PRINT 5)", "X$=1"):
+        for line in ("LIST X", "LIST 10-20-30", "NEW 5", "RUN X", "FOO", "LISTX", "PRINT 5)"):
             self.assertEqual(self.out(line + "\n"), "?SYNTAX ERROR\n", line)
 
     def test_ready_only_on_a_terminal(self):
@@ -367,7 +374,7 @@ class Language(unittest.TestCase):
                          " 1 \n 1 \n 5 \n 0 \n")
         # a name ends where a keyword starts (as MS: FORM is FOR M)
         self.assertEqual(self.out("10 FORM=1TO2:PRINT M;:NEXT\n20 IFX=0THENPRINT\"Z\"\nRUN\n"), " 1  2 Z\n")
-        self.assertEqual(self.out("X$=1\n"), "?SYNTAX ERROR\n")
+        self.assertEqual(self.out("X$=1\n"), "?TYPE MISMATCH ERROR\n")
 
     def test_goto_and_if(self):
         out = self.out('10 GOTO 30\n20 PRINT "NO"\n30 PRINT "YES":IF 1 THEN 50\n40 PRINT "NO"\n'
@@ -485,6 +492,167 @@ class Language(unittest.TestCase):
 
     def test_bytes_free(self):
         self.assertEqual(self.out("", tty=True), FREE + "READY.\n")
+
+
+@unittest.skipUnless(test_pvm.HAVE_TOOLS, "needs ca65, ld65 and py65")
+class Strings(unittest.TestCase):
+    """L3d: string variables, literals, +, comparison and PRINT; the heap and its collector
+    (docs/design/basic.md 6.2)."""
+    def out(self, text, **kw):
+        out, status = bas(text, limit=kw.pop("limit", 200_000_000), **kw)
+        self.assertEqual(status, 0, out)
+        return out
+
+    def test_assign_join_compare_print(self):
+        self.assertEqual(self.out('10 A$="HELLO":B$=A$+" WORLD"\n20 PRINT B$;"!"\n'
+                                  '30 PRINT A$=B$;A$<B$;B$<A$;A$<>A$;"A"<"B";"AB">"A";""="";A$>=""\nRUN\n'),
+                         "HELLO WORLD!\n 0 -1  0  0 -1 -1 -1 -1 \n")
+        # variables outlive the run, as numbers do; A$ and A and A% are three variables
+        self.assertEqual(self.out('A$="X":A=5:A%=6\nPRINT A$;A;A%\nB$=A$+A$+A$:PRINT B$\n'), "X 5  6 \nXXX\n")
+        self.assertEqual(self.out('A$="Q":A$=A$+A$:A$=A$+A$:PRINT A$:A$="":PRINT A$;"|"\nB$=A$:PRINT B$;"|"\n'), "QQQQ\n|\n|\n")
+
+    def test_type_mismatches(self):
+        for line in ("A$=1", "A=\"X\"", "A=A$", "PRINT \"A\"+1", "PRINT 1+\"A\"", "PRINT -A$", "IF A$ THEN PRINT 1",
+                     "PRINT A$*2", "PRINT A$<1", "A%=A$", "PRINT \"A\"-\"B\""):
+            self.assertEqual(self.out(line + "\n"), "?TYPE MISMATCH ERROR\n", line)
+
+    def test_too_long(self):
+        self.assertEqual(self.out('10 A$="0123456789ABCDEF"\n20 FOR I=1 TO 5:A$=A$+A$:NEXT\nRUN\n'), "?STRING TOO LONG ERROR IN 20\n")
+
+    def test_the_collector_moves_blocks_and_variables_follow(self):
+        # a small arena (brk 20: 5 KB) and a loop that makes far more garbage than it holds
+        prog = ('10 A$="KEEP":B$="ME TOO"\n20 FOR I=1 TO 300\n30 C$=B$+A$+B$:D$=A$+C$:NEXT\n'
+                '40 PRINT A$;"|";B$;"|";C$;"|";D$\nRUN\nPRINT C$=B$+A$+B$;D$=A$+C$\n')
+        self.assertEqual(self.out(prog, brk=20), "KEEP|ME TOO|ME TOOKEEPME TOO|KEEPME TOOKEEPME TOO\n-1 -1 \n")
+
+    def test_out_of_memory_is_an_error_not_a_crash(self):
+        out = self.out('10 A$="01234567":A$=A$+A$:A$=A$+A$:A$=A$+A$:A$=A$+A$\n'
+                       '20 B$=A$:C$=A$:D$=A$:E$=A$:F$=A$:G$=A$:H$=A$:I$=A$:J$=A$:K$=A$:L$=A$:M$=A$:N$=A$:O$=A$:P$=A$:Q$=A$\n'
+                       '30 R$=A$:S$=A$:T$=A$:U$=A$:V$=A$:W$=A$:X$=A$:Y$=A$:Z$=A$\nRUN\nPRINT A$;"|"\n', brk=17)
+        self.assertTrue(out.startswith("?OUT OF MEMORY ERROR IN 30"), out)
+        self.assertTrue(out.endswith("01234567" * 16 + "|\n"), out)       # and the heap is intact after it
+
+    def test_functions(self):
+        self.assertEqual(self.out('10 A$="HELLO WORLD"\n20 PRINT LEFT$(A$,5);"|";RIGHT$(A$,5);"|";MID$(A$,7);"|";MID$(A$,3,4);"|";'
+                                  'LEN(A$);ASC(A$);CHR$(65)+CHR$(66)\n'
+                                  '30 PRINT STR$(5);STR$(-3.25);"|";VAL("12.3456");VAL(" -7");VAL("x");VAL(STR$(42))+VAL("+1.5")\n'
+                                  '40 PRINT LEFT$(A$,0);"|";MID$(A$,20);"|";RIGHT$(A$,99);"|";LEN("");"|";LEFT$(A$,99)\nRUN\n'),
+                         "HELLO|WORLD|WORLD|LLO | 11  72 AB\n 5-3.25| 12.3456 -7  0  43.5 \n||HELLO WORLD| 0 |HELLO WORLD\n")
+        # they nest, take expressions, and make the temporaries the collector must not move mid-statement
+        self.assertEqual(self.out('A$="ABCDEF"\nPRINT LEFT$(MID$(A$,2,4)+RIGHT$(A$,2),LEN(A$)-1);"|";LEN(STR$(VAL(MID$("X12",2))*2))\n'
+                                  'B$=CHR$(ASC("A")+1)+LEFT$(A$,1):PRINT B$;ASC(B$)\n'), "BCDEE| 3 \nBA 66 \n")
+        for line, err in (('PRINT LEN(1)', "TYPE MISMATCH"), ('PRINT ASC("")', "ILLEGAL QUANTITY"), ('PRINT CHR$(256)', "ILLEGAL QUANTITY"),
+                          ('PRINT CHR$(-1)', "ILLEGAL QUANTITY"), ('PRINT MID$("A",0)', "ILLEGAL QUANTITY"), ('PRINT LEFT$("A",-1)', "ILLEGAL QUANTITY"),
+                          ('PRINT RIGHT$("A",-1)', "ILLEGAL QUANTITY"), ('PRINT LEFT$("A")', "SYNTAX"), ('PRINT LEFT$"A",1)', "SYNTAX"),
+                          ('PRINT VAL(1)', "TYPE MISMATCH"), ('PRINT STR$("A")', "TYPE MISMATCH"), ('PRINT LEN("A"', "SYNTAX"),
+                          ('PRINT MID$("A",1,1,1)', "SYNTAX"), ('A=LEFT$("A",1)', "TYPE MISMATCH"), ('A$=LEN("A")', "TYPE MISMATCH")):
+            self.assertEqual(self.out(line + "\n"), "?%s ERROR\n" % err, line)
+
+    def test_an_immediate_line_after_a_run_has_room_below_the_heap(self):
+        # the heap starts 768 bytes after the program's code; a line may not run into it (clim stops the emitter)
+        prog = '10 A$="KEEP":B$=A$+A$:C$=B$+B$\nRUN\n'
+        for line in ('PRINT ' + '+'.join(['A$'] * 38) + '\n',
+                     'D$=' + '+'.join(['LEFT$(C$,1)'] * 7) + ':PRINT D$\n',
+                     'PRINT ' + ';'.join(['"AB"'] * 20) + '\n',
+                     'X=' + '+'.join(['1.5'] * 28) + ':PRINT X\n'):
+            self.assertLess(len(line), 125, line)
+            out = self.out(prog + line + 'PRINT C$;B$;A$\n')
+            self.assertTrue(out.endswith("KEEPKEEPKEEPKEEPKEEPKEEPKEEP\n"), (line, out))
+            self.assertNotIn("ERROR", out)
+
+    def test_input(self):
+        prog = ('10 INPUT "NAME";A$,B,C%\n20 PRINT A$;"|";B;C%\n30 INPUT D$\n40 PRINT "[";D$;"]"\n'
+                '50 INPUT X:PRINT X\n')
+        cases = (
+            # fields, a quoted string, spaces round a number; "??" for a short line; ?EXTRA IGNORED
+            ("BOB, 12 ,3\nHI\n7\n", "NAME? BOB| 12  3 \n? [HI]\n?  7 \n"),
+            ('"A,B",1.25,2\n\n-.5\n', "NAME? A,B| 1.25  2 \n? []\n? -.5 \n"),
+            ("X,1\n,,\n", "NAME? ???EXTRA IGNORED\nX| 1  0 \n? \nBREAK IN 30\n"),
+            ("A\n1\n2\nQ\n3\n", "NAME? ????A| 1  2 \n? [Q]\n?  3 \n"),
+            ("A,1,2,3\nB\n9\n", "NAME? ?EXTRA IGNORED\nA| 1  2 \n? [B]\n?  9 \n"),
+        )
+        for inp, want in cases:
+            out, st = bas(prog + "RUN\n" + inp)
+            self.assertEqual(out, want, inp)
+        # a bad number asks again from the start, the prompt not repeated; the end of the input is BREAK
+        out, _ = bas('10 INPUT "P";A,B$:PRINT A;B$\nRUN\nX,Y\n1x,Z\n2,OK\n')
+        self.assertEqual(out, "P? ?REDO FROM START\n? ?REDO FROM START\n?  2 OK\n")
+        out, _ = bas("10 INPUT A$:PRINT A$\nRUN\n")
+        self.assertEqual(out, "? \nBREAK IN 10\n")
+        # the same from a built file, with the heap collected in between
+        want, _ = bas(prog + "RUN\nBOB, 12 ,3\nHI\n7\n")
+        bx, _ = bas(prog + "BUILD\n")
+        got, st = brun(bx.encode("latin-1"), stdin=b"BOB, 12 ,3\nHI\n7\n")
+        self.assertEqual((got, st), (want, 0))
+
+    def test_compiled_file_matches_run(self):
+        prog = ('10 A$="AB":B$=A$+"CD"\n20 FOR I=1 TO 40:C$=B$+A$:B$=C$:IF I>3 THEN B$="Z"+A$\n30 NEXT\n'
+                '40 PRINT B$;"|";C$;A$<B$;"X"="X"\n')
+        want, _ = bas(prog + "RUN\n")
+        bx, st = bas(prog + "BUILD\n")
+        self.assertEqual(st, 0)
+        for brk in (64, 24, 120):
+            self.assertEqual(brun(bx.encode("latin-1"), brk=brk), (want, 0), brk)
+
+
+@unittest.skipUnless(test_pvm.HAVE_TOOLS, "needs ca65, ld65 and py65")
+class Arrays(unittest.TestCase):
+    """DIM and arrays of numbers, integers and strings (docs/design/basic.md 6.2)."""
+
+    def test_the_three_kinds_and_two_dimensions(self):
+        prog = ('10 DIM A(5),B%(3),C$(2),D(2,3)\n20 FOR I=0 TO 5:A(I)=I*1.5:NEXT\n'
+                '30 B%(2)=7:C$(1)="HI":C$(2)=C$(1)+"!":D(1,2)=4.25:D(2,3)=A(5)\n'
+                '40 PRINT A(3);B%(2);C$(2);D(1,2);D(2,3);D(0,0);D(2,1)\n'
+                '50 X(3)=2:PRINT X(3);X(4):Y$(10)="Z":PRINT Y$(10);LEN(Y$(9))\n')
+        self.assertEqual(bas(prog + "RUN\n")[0], " 4.5  7 HI! 4.25  7.5  0  0 \n 2  0 \nZ 0 \n")
+
+    def test_subscripts_are_expressions_and_nest(self):
+        out, _ = bas('10 DIM A(3),B%(3),D(2,3):FOR I=0 TO 3:A(I)=I:B%(I)=3-I:NEXT\n'
+                     '20 FOR I=0 TO 2:FOR J=0 TO 3:D(I,J)=I*10+J:NEXT:NEXT\n'
+                     '30 PRINT A(B%(1));B%(A(1)+1);A(A(2)/2);D(1,2);D(2,1);D(2,3)\nRUN\n')
+        self.assertEqual(out, " 2  1  1  12  21  23 \n")
+
+    def test_errors(self):
+        for prog, err in (("10 A(-1)=1", "BAD SUBSCRIPT"), ("10 PRINT A(11)", "BAD SUBSCRIPT"),
+                          ("10 DIM A(2,2):PRINT A(1)", "BAD SUBSCRIPT"), ("10 DIM A(1):PRINT A(1,1)", "BAD SUBSCRIPT"),
+                          ("10 DIM A(2):DIM A(3)", "REDIM'D ARRAY"), ("10 DIM A(2):A(1)=A$(1)", "TYPE MISMATCH"),
+                          ("10 DIM A(32000)", "OUT OF MEMORY"),
+                          ("10 DIM A(12500)", "OUT OF MEMORY"), ("10 DIM A(99,124)", "OUT OF MEMORY"), ("10 DIM A(2),B(3):A(3)=1", "BAD SUBSCRIPT"),
+                          ("10 DIM A(X)", "SYNTAX")):
+            self.assertEqual(bas(prog + "\nRUN\n")[0], "?%s ERROR IN 10\n" % err, prog)
+        # a DIM that never runs before a use is still a DIM: a subroutine at the end makes the array the code above uses
+        self.assertEqual(bas("10 GOSUB 100:PRINT Q(7)\n20 END\n100 DIM Q(8):Q(7)=9:RETURN\nRUN\n")[0], " 9 \n")
+        self.assertEqual(bas("DIM A(3):A(2)=5\nPRINT A(2)\n")[0], " 5 \n")      # and in immediate mode
+
+    def test_string_elements_follow_the_collector(self):
+        prog = ('10 DIM C$(19)\n20 FOR R=1 TO 12:FOR I=0 TO 19\n'
+                '30 C$(I)=LEFT$("ABCDEFGHIJKLMNOPQRSTUVWXYZ",5+(I+R)/2)+STR$(R)\n'
+                '40 NEXT:NEXT\n50 FOR I=0 TO 19:IF C$(I)<>LEFT$("ABCDEFGHIJKLMNOPQRSTUVWXYZ",5+(I+12)/2)+" 12" THEN PRINT "BAD";I\n'
+                '60 NEXT:PRINT "OK";C$(0);C$(19)\n')
+        out, _ = bas(prog + "RUN\n", brk=20)
+        self.assertEqual(out, "OKABCDEFGHIJK 12ABCDEFGHIJKLMNOPQRST 12\n")
+
+    def test_input_into_elements(self):
+        out, _ = bas('10 DIM Z$(3):INPUT Z$(2),Q(1),W%(0)\n30 PRINT Z$(2);Q(1);W%(0)\nRUN\nHEY,4.5,3\n')
+        self.assertEqual(out, "? HEY 4.5  3 \n")
+
+    def test_input_past_the_buffer_is_an_error(self):
+        # the fields so far plus ?? commas must not run off ib: LINE TOO LONG, never a silent cut or a smash
+        out, _ = bas('10 INPUT A$,B$\n20 PRINT LEN(A$);LEN(B$)\nRUN\n' + "X" * 100 + "\n" + "Y" * 40 + "\n")
+        self.assertEqual(out, "? ??\n?LINE TOO LONG ERROR IN 10\n")
+        out, _ = bas('10 INPUT A$,B$,C$,D$,E$,F$,G$\nRUN\n' + "X" * 124 + "\n" * 8)
+        self.assertTrue(out.endswith("?LINE TOO LONG ERROR IN 10\n"), out)
+        out, _ = bas('10 INPUT A$,B$\n20 PRINT LEN(A$);LEN(B$)\nRUN\n' + "X" * 100 + "\n" + "Y" * 5 + "\n")
+        self.assertEqual(out, "? ?? 100  5 \n")
+
+    def test_built_file_matches_run(self):
+        prog = ('10 DIM A(40),B%(9,2),C$(9)\n20 FOR I=0 TO 40:A(I)=I/4:NEXT\n'
+                '30 FOR I=0 TO 9:B%(I,2)=I*I:C$(I)=STR$(A(I*4))+"!":NEXT\n40 PRINT A(33);B%(9,2);C$(9);C$(0)\n')
+        want, _ = bas(prog + "RUN\n")
+        bx, st = bas(prog + "BUILD\n")
+        self.assertEqual(st, 0)
+        for brk in (64, 24):
+            self.assertEqual(brun(bx.encode("latin-1"), brk=brk), (want, 0), brk)
 
 
 @unittest.skipUnless(test_pvm.HAVE_TOOLS, "needs ca65, ld65 and py65")

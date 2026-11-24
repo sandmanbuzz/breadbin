@@ -141,8 +141,8 @@ prove the whole path with one tiny program end to end before widening anything.
     build with the full arena **did not load** (`sh: bas: out of memory`); 15,872 did. Fitting
     16,384 took a 768-byte frame stack (a `/* fstack N */` directive in the source, read by
     `cc_pcode`), 32 forward-GOTO fixups, a 192-byte GOSUB/FOR stack and 64-byte I/O buffers. It
-    fits by about 500 bytes: the 16 KB gate is met, barely, and L3d (strings) will not fit
-    without one of the options in §6.
+    fits by about 500 bytes: the 16 KB gate was met, barely; L3d's strings landed in the
+    runtime and the compiler's own bytes, see §6.2.
 - **L3d. Strings and arrays:**
   - string variables and a string heap with garbage collection;
   - `LEFT$`, `MID$`, `RIGHT$`, `LEN`, `CHR$`, `ASC`, `STR$`, `VAL`;
@@ -313,6 +313,51 @@ Rejected: dropping T and decompiling `LIST` from code (loses REM text and layout
 *Order:* 1 and 2 first (they also fix compile speed), measured against the fixture; then 3. The
 banner stays `BYTES FREE` = arena minus text until the code is dense enough that it is honest to
 within about 10 %.
+
+### 6.2 Strings (L3d, S1-S2)
+
+- **Representation.** A string expression is kind 3 on the eval stack: a pointer to the length
+  byte of a heap block `[backptr(2), len, text]`; 0 is the empty string. `A$` variables are
+  4-byte cells (kind 2 with both name bytes' high bits set). A literal points into the code
+  (CS) and is copied when assigned.
+- **Heap.** Between the immediate-line area (768 B after the code, `heapinit`) and the variables,
+  which grow down from the top. `rt_sres(n)` at the start of every statement is the only
+  collection point (a reserve of up to 6 temporaries), so a statement never moves blocks it holds.
+  Allocation is a bump; `sgc()` slides live blocks down and rewrites each owner cell through the
+  backptr (the owning cell, -1 temporary, 0 dead). Assignment (`rt_sset`) takes ownership of a
+  temporary and copies anything else, so literals in immediate-line code are never aliased.
+- **Limits.** `var()` refuses with OUT OF MEMORY when `vbot - size` falls below the heap top;
+  `clim` (the emitter's code limit, replacing `g_vbot`) keeps compiled code out of the heap, so
+  an overflow is an error, not corruption. Strings are at most 255 (STRING TOO LONG).
+- **Accepted divergences from MS BASIC.** `VAL` truncates past four decimals and has no
+  exponent; type errors (`X$=1`) are raised at compile time; the temporary reserve is capped;
+  the immediate-line area is fixed.
+- **Files.** The new `rt_` functions sit inside the `rt_prs`..`report` block and are in the
+  `valued` list, so `rtid` changes and old `.bx` files are refused; layouts of `bas` and `brun`
+  stay identical (host test).
+
+### 6.3 INPUT and arrays (L3d, S3-S4)
+
+- **INPUT.** `rt_inp(prompt, mask | n * 128)` reads one line into `ib` and fills `n` variables
+  (`inputs()` prescans the list, with paren depth, to build the numeric mask). A short line
+  prompts again with `??`; a bad number prints `?REDO FROM START` and rereads the whole line; extra
+  fields print `?EXTRA IGNORED`; an empty numeric field is 0. End of input is error 9 (BREAK), so a
+  piped program ends instead of looping. Fields come from `rt_ifld()` as temporaries; numbers
+  then go through `rt_val`. Elements of arrays are valid targets (`eassign`).
+- **Arrays.** Table entry `[c1|32, c2, n1(2), n2(2)]` and the elements after it (4 bytes for
+  numbers, 2 for int and string); `n2` is 0 for one dimension; the element is `(i * n2 + j)`.
+  Each subscript is checked by `rt_sub(i, n)` (BAD SUBSCRIPT, error 14); string elements are
+  owned cells like `A$` and follow the collector. `DIM` sizes are **constants**: arrays are
+  allocated at compile time (`predim()` scans every line first, so a DIM in a late subroutine is
+  seen). Implicit arrays are 0..10 (11 x 11 for two subscripts). A second, different DIM is
+  REDIM'D ARRAY (15); a DIM that runs again is a no-op. `DIM A(N)` with a variable is a SYNTAX
+  error for now (a runtime DIM is a decision for later: it needs the heap and variable table to
+  grow together).
+- **Cost.** `bas` 12,881 -> 15,983 B across strings, INPUT and arrays; the arena at the shell
+  fell about 1.8 KB, below the 16 KB the compiler started with (size pass owed; see the status
+  line at L3d). `c_mcpy` (rt.s) is the one native byte copy and fill: `scopy`, `move` and the
+  zeroing in `grab` use it instead of p-code loops (a `DIM A(1000)` is then a few thousand
+  cycles, not hundreds of thousands).
 
 ## 7. Open questions
 

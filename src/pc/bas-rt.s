@@ -4,7 +4,7 @@
 ; bas's p-code by mk/pvm.mk (src/pc/NAME-rt.s goes with src/pc/NAME.c).
 .include "inc/rt.s"
 
-.export c_crunch, c_find, c_const
+.export c_crunch, c_find, c_const, incsi, c_sres, c_more, c_binop, c_relop, c_vars, deeper, shallower, c_ch
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 .export xtab
 
@@ -20,6 +20,7 @@ ltok:   .res 1
 
 T_PRINT = 144                   ; bas.c's kwt: 128 + the place of PRINT and REM there
 T_REM   = 145
+T_DIM   = 164
 
 ; c_crunch(buf, kwt): normalise the line at buf (NUL-ended, under 256 bytes) in place, as
 ; bas.c's comment on it says. kwt is the keyword table: "NAME|NAME|...|", token 128 + place.
@@ -238,7 +239,7 @@ c_find: lda P_ESTKL,x
 ; src[si] is the parse position (lines are under 256 bytes); mem[cend] the next code byte, below
 ; vbot; straight counts the bytes since Y was last reset (bas.c's room() comment).
 
-.import g_src, g_si, g_mem, g_cend, g_vbot, g_straight, g_err
+.import g_src, g_si, g_mem, g_cend, g_clim, g_straight, g_err, g_deep
 
 srcp:   lda g_src               ; ptr = src + si
         clc
@@ -331,13 +332,13 @@ c_ult:  ldy #0
         sta P_ESTKH,x
         rts
 
-; emitb: mem[cend++] = A, straight + 1; at vbot, err = OUT OF MEMORY (unless one came first)
+; emitb: mem[cend++] = A, straight + 1; at clim, err = OUT OF MEMORY (unless one came first)
 ; and nothing is written. X is kept.
 emitb:  pha
         lda g_cend
-        cmp g_vbot
+        cmp g_clim
         lda g_cend+1
-        sbc g_vbot+1
+        sbc g_clim+1
         bcc :+
         pla
         lda g_err
@@ -544,10 +545,156 @@ maca:   jsr setb8
 :       ldx sx
         rts
 
-incsi:  inc g_si                ; si + 1; Z clear after (si is never 0 then)
+; c_sres(): before a statement with strings in it, the room rt_sres makes for the temporaries
+; it can make: one for each $, string function (a token from 155) and +, to 6; 0 for none (no $
+; or function), and for a REM or a DIM. bas.c's sres puts it in the code: a GC moves blocks, so
+; it runs only there, where nothing is on the stacks. The statement ends at a : outside quotes.
+c_sres: stx sx
+        jsr srcp                ; Y = 0
+        ldx #0                  ; the count
+        sty t0                  ; not 0 once a $ or a function is seen
+        lda (ptr),y
+        cmp #T_REM
+        beq @z
+        cmp #T_DIM
+        beq @z
+        dey
+@l:     iny
+        lda (ptr),y
+        beq @e
+        cmp #'"'
+        bne @nq
+@q:     iny                     ; a string: to its closing quote
+        lda (ptr),y
+        beq @e
+        cmp #'"'
+        bne @q
+        beq @l
+@nq:    cmp #':'
+        beq @e
+        cmp #'+'
+        beq @n
+        cmp #'$'
+        beq :+
+        cmp #155
+        bcc @l
+:       sta t0
+@n:     inx
+        bne @l                  ; (a line is under 256 bytes)
+@e:     lda t0
+        beq @z
+        txa
+        cmp #7
+        bcc :+
+        lda #6
+        .byte $2C               ; BIT abs: skip the LDA #0
+@z:     lda #0
+:       ldx sx
+        ldy #0
+        jmp pushay
+
+; c_more(): does the parenthesis at si hold a comma of its own (1 or 0): an array's second subscript.
+c_more: jsr srcp                ; Y = 0
+        sty t0                  ; the depth
+        dey
+@l:     iny
+        lda (ptr),y
+        beq @n
+        cmp #'('
+        bne :+
+        inc t0
+:       cmp #')'
+        bne :+
+        dec t0
+        beq @n                  ; its closing one
+:       cmp #','
+        bne @l
+        lda t0
+        cmp #1
+        bne @l
+        .byte $2C               ; BIT abs: skip the LDA #0 (A is 1)
+@n:     lda #0
+        ldy #0
+        jmp pushay
+
+; c_vars(): INPUT's count of variables from si: 1 + the commas outside parentheses, to a : or the end.
+c_vars: stx sx
+        jsr srcp                ; Y = 0
+        sty t0                  ; the depth
+        ldx #1
+        dey
+@l:     iny
+        lda (ptr),y
+        beq @e
+        cmp #':'
+        beq @e
+        cmp #'('
+        bne :+
+        inc t0
+:       cmp #')'
+        bne :+
+        dec t0
+:       cmp #','
+        bne @l
+        lda t0
+        bne @l
+        inx
+        bne @l                  ; (a line is under 256 bytes)
+@e:     txa
+        ldx sx
+        ldy #0
+        jmp pushay
+
+; c_binop(c): the precedence of the binary operator c, for bas.c's climb; 0 for none.
+c_binop: lda P_ESTKL,x
+        ldy #10
+@l:     cmp bops-1,y
+        beq @f
+        dey
+        bne @l
+@f:     lda bprec-1,y           ; (Y 0: the 0 before bprec)
+        ldy #0
+        jmp stay
+; c_relop(m): the VM's compare of n_cmp's -1, 0 or 1 with 0 for the relation m (cmpops' bits: < 1,
+; = 2, > 4): ISLT, ISEQ, ISGT or ISNE, -1 when true. No ISLE/ISGE: <= and >= are the other compare,
+; then COMP. Void.
+c_relop: lda #1
+        jsr roomb
+        ldy P_ESTKL,x
+        lda rops-1,y
+        jsr emitb
+        lda P_ESTKL,x
+        inx
+        cmp #3
+        beq :+
+        cmp #6
+        bne @r
+:       lda #1
+        jsr roomb
+        lda #PO_COMP
+        jmp emitb
+@r:     rts
+rops:   .byte PO_ISLT, PO_ISEQ, PO_ISGT, PO_ISGT, PO_ISNE, PO_ISLT   ; (7 is an error already)
+
+bops:   .byte '^', '*', '/', '+', '-', '<', '=', '>', 129, 143  ; 129 tk AND, 143 tk OR
+        .byte 0
+bprec:  .byte 10, 8, 8, 7, 7, 6, 6, 6, 4, 3
+
+incsi:  inc g_si                ; si + 1 (bas.c's too, as a void native); Z clear after (si is never 0 then)
         bne :+
         inc g_si+1
 :       rts
+; c_ch(): src[si].
+c_ch:   jsr srcp
+        lda (ptr),y
+        jmp pushay
+; deeper(), shallower(): bas.c's deep + 2 or - 2 (it stays under 256: climb fails past 24). Void.
+deeper: inc g_deep
+        inc g_deep
+        rts
+shallower: dec g_deep
+        dec g_deep
+        rts
 
 xtab:   .word x_ldv, x_stv, x_ldk, x_ln                 ; C8 CA CC CE
         .word n_add, n_sub, n_mul, n_div                 ; D0 D2 D4 D6

@@ -29,7 +29,7 @@
 .export n_fromi, n_toi, n_cmp, n_tst
 .export rt_mark, rt_go, rt_ln, rt_end
 .export c_ldv, c_stv, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_fmt
-.export c_grow, c_throw, c_err, c_curip
+.export c_grow, c_mcpy, c_throw, c_err, c_curip
 
 NDEPTH  = 16
 ESTKSZ  = P_ESTKL - P_ESTKH + 11 ; both halves, contiguous
@@ -637,6 +637,39 @@ c_grow: lda P_ESTKL,x
         sta P_ESTKL,x
         lda #0
         sta P_ESTKH,x
+        rts
+
+; c_mcpy(d, s, n): n bytes from s up to d, ascending, a byte at a time (so d = s + 1 fills with mem[s]).
+; Pops the three; no result.
+c_mcpy: lda P_ESTKL+2,x
+        sta ptr
+        lda P_ESTKH+2,x
+        sta ptr+1
+        lda P_ESTKL+1,x
+        sta t0
+        lda P_ESTKH+1,x
+        sta t0+1
+        ldy #0
+@l:     lda P_ESTKL,x
+        ora P_ESTKH,x
+        beq @d
+        lda (t0),y
+        sta (ptr),y
+        inc t0
+        bne :+
+        inc t0+1
+:       inc ptr
+        bne :+
+        inc ptr+1
+:       lda P_ESTKL,x
+        bne :+
+        dec P_ESTKH,x
+:       dec P_ESTKL,x
+        bne @l                  ; (a count of 256 or more: the high byte may still be set)
+        beq @l
+@d:     inx
+        inx
+        inx
         rts
 
 ; ---- XOPs (pvm.md, "XOP"): bas's own one-byte opcodes, $C8 + 2 * the index in xtab ----

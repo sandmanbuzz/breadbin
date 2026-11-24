@@ -17,7 +17,7 @@ PCPROGS := $(patsubst src/pc/%.c,%,$(wildcard src/pc/*.c))
 PCBIN   := $(patsubst %,$(BUILD)/root/bin/%,$(PCPROGS))
 $(if $(filter $(PROGS),$(PCPROGS)),$(error src/pc and src/bin both make $(filter $(PROGS),$(PCPROGS))))
 
-$(BUILD)/pc/%.s: src/pc/%.c tools/cc.py tools/cc_pcode.py
+$(BUILD)/pc/%.s: src/pc/%.c $(wildcard src/pc/inc/*.c) tools/cc.py tools/cc_pcode.py
 	@mkdir -p $(dir $@)
 	python3 tools/cc.py --pcode $< > $@.tmp
 	mv $@.tmp $@
