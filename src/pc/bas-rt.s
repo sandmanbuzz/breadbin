@@ -2,7 +2,7 @@
 ; the line store and the scanner and code emitter. The number core and the control transfers
 ; the compiled code calls are in rt.s, included first (the runner has them too). Linked beside
 ; bas's p-code by mk/pvm.mk (src/pc/NAME-rt.s goes with src/pc/NAME.c).
-.include "rt.s"
+.include "inc/rt.s"
 
 .export c_crunch, c_find
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw

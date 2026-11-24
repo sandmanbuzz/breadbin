@@ -1,6 +1,6 @@
 ; brun-rt.s - the runner's natives: rt.s alone, with an xtab whose compiler slots are no-ops (a
 ; compiled file calls only the number and control routines).
-.include "rt.s"
+.include "inc/rt.s"
 
 .export xtab
 

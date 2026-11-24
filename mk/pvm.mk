@@ -23,7 +23,7 @@ $(BUILD)/pc/%.s: src/pc/%.c tools/cc.py tools/cc_pcode.py
 	mv $@.tmp $@
 
 # A program's native routines (its `extern`s), if it has any: src/pc/NAME-rt.s.
-$(BUILD)/pc/%-rt.o: src/pc/%-rt.s src/pc/rt.s src/pvm/pvm.inc include/breadbin.inc
+$(BUILD)/pc/%-rt.o: src/pc/%-rt.s src/pc/inc/rt.s src/pvm/pvm.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
 	ca65 -I include -I src/pvm -o $@ $<
 

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 import asim
+import cc
 import bxfile
 import pvmlink
 import test_bas_rt
@@ -30,8 +31,8 @@ def BIG(n):
 def binary():
     if "path" not in _built:
         _built["dir"] = tempfile.TemporaryDirectory(prefix="bas-")
-        with open(SRC) as f, open(RT) as g:
-            _built["path"] = test_cc_pcode.build(f.read(), _built["dir"].name, natives=g.read())
+        with open(RT) as g:
+            _built["path"] = test_cc_pcode.build(cc.read_source(SRC), _built["dir"].name, natives=g.read())
     return _built["path"]
 
 
@@ -110,8 +111,7 @@ class Bas(unittest.TestCase):
                          "A\xc1\n?SYNTAX ERROR\n10 REM \xc1\n")
 
     def test_token_numbers_match_the_table(self):
-        with open(SRC) as f:
-            text = f.read()
+        text = cc.read_source(SRC)
         table = re.search(r'char kwt\[\] = "([A-Z|]+)";', text).group(1).split("|")[:-1]
         uses = re.findall(r"(\d+) /\* tk ([A-Z]+) \*/", text)
         self.assertGreater(len(uses), 25)
@@ -206,7 +206,7 @@ class Bas(unittest.TestCase):
     def test_opcode_numbers_agree_with_the_vm(self):
         inc = open(os.path.join(ROOT, "src", "pvm", "pvm.inc")).read()
         ops = {m.group(1): int(m.group(2), 16) for m in re.finditer(r"^(PO_\w+)\s*=\s*\$([0-9A-F]+)", inc, re.M)}
-        src = open(SRC).read()
+        src = cc.read_source(SRC)
         used = re.findall(r"(\d+) /\* (PO_\w+)( \d+)? \*/", src)
         self.assertGreaterEqual(len(used), 6)
         for num, name, arg in used:
