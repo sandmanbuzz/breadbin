@@ -91,7 +91,7 @@ Budget arithmetic (ESTIMATE, from the figures above; 14 B above BSS untouched in
 - [ ] CX version byte not bumped in CP3 (the spec) against bumped (`checkpoints.md:10` row says bumped). I used the spec; it is later and cites the hater finding.
 - [ ] SYSINFO key 0: 3 B minimal, or with `tier` and `kver`?
 - [ ] "sched skips save/restore" stays in CP3's exit criteria or moves out?
-- [ ] Slots 24, 30, 31 stay ENOSYS holes for `brk`, LSEEK, `sync`.
+- [ ] Slots 24, 30, 31 stay ENOSYS holes for `brk`, LSEEK, `sync`. (LSEEK landed at slot 32 before CP3, 2026-11-23: `sys_return` left the page to make room. CP3 can renumber it or leave it there.)
 - [ ] Page room at $CF00: 14 B free, 3-byte records (`cp3-spec.md:30,46`) against "about 29 B, 6-byte entry" (`s12-brk.md:18,48`). I used the spec (newer, cites jtab.s lines); both say about 4 more calls.
 
 ## 5. Compared with upstream

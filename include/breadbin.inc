@@ -40,6 +40,8 @@ SYS_UMOUNT   = SYS_BASE + 3*28
 SYS_MNTINFO  = SYS_BASE + 3*29
 SYS_DISKIO   = SYS_BASE + 3*30
 SYS_CACHE    = SYS_BASE + 3*31
+SYS_LSEEK    = SYS_BASE + 3*32   ; A = fd, X = whence, r0 + r1 lo = offset (24 bits, signed)
+                                 ; -> r0 + r1 lo = the new position (r1 hi kept)
 
 ; argument registers (zero page, saved per process)
 r0 = $02
@@ -63,6 +65,11 @@ O_APPEND = $40
 SP_BG     = $01
 SP_IGNINT = $02
 SP_EXEC   = $80         ; replace the caller's image in its own process slot (A and X ignored)
+
+; lseek whence (X)
+SEEK_SET = 0            ; from the start
+SEEK_CUR = 1            ; from the current position
+SEEK_END = 2            ; from the end
 
 ; wait flags (X)
 W_NOHANG = $01
@@ -93,6 +100,7 @@ EINVAL  = 22
 EMFILE  = 24
 EFBIG   = 27
 ENOSPC  = 28
+ESPIPE  = 29            ; lseek on a pipe, the console or a CBM DOS file
 EPIPE   = 32
 ENAMETOOLONG = 36
 ENOTEMPTY = 39

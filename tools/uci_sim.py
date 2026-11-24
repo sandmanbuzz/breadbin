@@ -33,7 +33,7 @@ CTL, CMD, DAT, STS = 0xDF1C, 0xDF1D, 0xDF1E, 0xDF1F
 
 ERRNO = {1: "EPERM", 2: "ENOENT", 5: "EIO", 8: "ENOEXEC", 9: "EBADF", 12: "ENOMEM", 16: "EBUSY", 17: "EEXIST",
          18: "EXDEV", 19: "ENODEV", 20: "ENOTDIR", 21: "EISDIR", 22: "EINVAL", 24: "EMFILE",
-         27: "EFBIG", 28: "ENOSPC", 36: "ENAMETOOLONG", 39: "ENOTEMPTY"}
+         27: "EFBIG", 28: "ENOSPC", 29: "ESPIPE", 36: "ENAMETOOLONG", 39: "ENOTEMPTY"}
 
 OK = b"00,OK"
 
@@ -64,6 +64,9 @@ class FakeUCI:
         self.log = []           # (target, command, argument bytes)
         self.leaks = 0          # OPEN on a target that still had a file open (leaks a handle)
         self.writes_while_busy = 0
+        self.extends = 0        # write-mode SEEKs past the end (FatFs fills the gap with junk)
+        self.dirsize = {}       # FILE INFO reads the directory entry: the size at the last close of a
+        #                         writer (measured, H11), not what an open handle has written since
         self.force = {}         # command byte -> status text answered instead (error cases)
 
     # ---- registers
@@ -164,6 +167,9 @@ class FakeUCI:
             yield b"", self._open(t, arg[0], arg[1:].decode("latin1")), True
         elif op == 0x03:                                # CLOSE FILE
             if t.file:
+                if t.file[2]:
+                    t.file[0].flush()
+                    self.dirsize[t.file[3]] = os.fstat(t.file[0].fileno()).st_size
                 t.file[0].close()
                 t.file = None
                 yield b"", OK, True
@@ -198,8 +204,14 @@ class FakeUCI:
                 yield b"", b"85,NO FILE OPEN", True
                 return
             pos = int.from_bytes(arg[:4], "little")
+            t.file[0].flush()
+            size = os.fstat(t.file[0].fileno()).st_size
             if not t.file[2]:
-                pos = min(pos, os.fstat(t.file[0].fileno()).st_size)
+                pos = min(pos, size)
+            elif pos > size:                            # FatFs f_lseek in write mode extends the
+                t.file[0].seek(size)                    # file, and the gap is not zeroed: model it
+                t.file[0].write(b"\xEE" * (pos - size))  # with a junk byte a test would notice
+                self.extends += 1
             t.file[0].seek(pos)
             yield b"", OK, True
         elif op == 0x07:                                # FILE INFO
@@ -207,7 +219,7 @@ class FakeUCI:
                 yield b"", b"85,NO FILE OPEN", True
                 return
             t.file[0].flush()
-            size = os.fstat(t.file[0].fileno()).st_size
+            size = self.dirsize[t.file[3]]
             yield self._info(size, os.path.basename(t.file[3]), 0x20), OK, True
         elif op == 0x08:                                # FILE STAT: measured to fail always
             yield b"", b"82,FILE NOT FOUND", True
@@ -225,6 +237,7 @@ class FakeUCI:
                 yield b"", b"ACCESS DENIED", True       # FatFs file lock
             else:
                 os.unlink(h)
+                self.dirsize.pop(h, None)
                 yield b"", OK, True
         elif op == 0x0A:                                # RENAME old $00 new
             old, new = name.split("\0", 1)
@@ -240,6 +253,8 @@ class FakeUCI:
                 yield b"", b"ACCESS DENIED", True
             else:
                 os.rename(ho, hn)
+                if ho in self.dirsize:
+                    self.dirsize[hn] = self.dirsize.pop(ho)
                 yield b"", OK, True
         elif op == 0x11:                                # CHANGE DIR
             p, h = self.host(t, name)
@@ -307,6 +322,8 @@ class FakeUCI:
             return b"FILE DOESN'T EXIST"
         if always or not exists:
             open(h, "wb").close()
+            self.dirsize[h] = 0
+        self.dirsize.setdefault(h, os.path.getsize(h))
         t.file = [open(h, "r+b"), bool(rd), bool(wr), h]
         return OK
 

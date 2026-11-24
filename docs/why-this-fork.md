@@ -60,7 +60,7 @@ Tracked in `docs/design/upstream-survey.md`, whose status table is dated 2026-11
 
 - **Shell:** `2>` (stderr redirection; it needs a per-process error descriptor in the kernel). `$?`, `&&` and `||` are done here.
 - **REU swap:** programs that are not running wait in the REU when memory runs out (`3ad7236`). We do not have it; GeoRAM support is also upstream-only.
-- **Userland:** `htop`, `who`, `talk` and `mail` for several terminals, a serial terminal on `/dev/ttyS0`, `fsck` in 18 pages, `sync`, `SYS_SEEK`, `tail` reading the last 2 KB, and games (chess, tetris). None is ported or planned yet; each would be judged by its kernel and pool cost.
+- **Userland:** `htop`, `who`, `talk` and `mail` for several terminals, a serial terminal on `/dev/ttyS0`, `fsck` in 18 pages, `sync`, and games (chess, tetris). None is ported or planned yet (`SYS_SEEK` and `tail` reading the last 2 KB now have equivalents here: `SYS_LSEEK`, with SEEK_CUR too, on c64fs and UCI); each would be judged by its kernel and pool cost.
 - **Drive robustness:** a drive that was reset or stops answering gives an error and keeps working (`6aca717`, `2374af2`). Our IO release (`9d1b949`) bounds the bus waits and retries failed transfers; the two have not been compared line by line.
 - **`edit` fixes:** several (`1cd090b`, `b84924a`, `683a525`, `1224179`). One equivalent of the flicker fix (`0575584`) has landed here; the others have not been compared.
 
