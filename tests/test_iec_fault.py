@@ -127,6 +127,11 @@ class Mon(Vice):
                 self.buf += d.decode(errors="replace")
                 self.cv.notify_all()
 
+    def mem(self, start, end):
+        # this class's _cmd is prompt-matched and breakpoint-aware, not the plain
+        # sentinel-terminated one that Vice.mem's m command relies on
+        return self._mem_save(start, end)
+
     def _raw(self, c, wait=0.15, timeout=8):
         with self.cv:
             start = len(self.buf)

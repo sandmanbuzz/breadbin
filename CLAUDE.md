@@ -12,14 +12,15 @@ make size             # bytes per kernel module and the headroom; quote it in co
 tools/ci/run.sh test-smoke      # boot, echo, pipe, Ctrl-C: about 2 minutes
 tools/ci/run.sh test-only T="tests.test_system.Boot.test_24_editor"
 tools/ci/run.sh test-keyboard   # real keystrokes (xdotool); also test-console; docs/ci.md
-BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test   # the whole suite, every VICE slot (podman; about 47 minutes)
+tools/ci/sharded.sh             # the whole suite, six containers at once (podman; 136 tests in about 24 minutes)
+# Serial `run.sh test` holds every slot for about two hours and is refused without --serial-because "<why>".
 ```
 
-The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. VICE runs only in the container (`tools/ci/run.sh`; host VICE is being retired). Run targeted tests per change and the full suite at milestones (63 VICE tests in 2,804 s on the runner, exclusive; the older 55-test, 2,511 s figure on 4778b1a was another tree and host). `run.sh` takes a `vice` slot itself (a pool, `docs/process.md`); a run whose timing you will quote takes every slot (`BREADBIN_CI_EXCLUSIVE=1`). Hardware runs go under `tools/with-lock -r ultimate`.
+The VICE tests need C64 and 1541 ROMs, which are not in the repo: run `tools/setup-vice-roms.sh` once. VICE runs only in the container (`tools/ci/run.sh`; host VICE is being retired). Run targeted tests per change and the full suite at milestones (136 tests in 1,439 s sharded on 6158182, `docs/ci.md`; the serial 63-test run took 2,804 s, so serial is now about two hours). `run.sh` takes a `vice` slot itself (a pool, `docs/process.md`); a run whose timing you will quote takes every slot (`BREADBIN_CI_EXCLUSIVE=1`). Hardware runs go under `tools/with-lock -r ultimate`.
 
 ## Test policy
 
-Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 47 minutes under VICE in a container, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
+Targeted tests inside a story, the full regression at milestones. Tests are slow (the full suite is about 24 minutes sharded under VICE in a container, and hardware runs are slower), and a long-lived context is cheaper than a restarted one, so:
 
 - **During a story:** `make test-host`, the targeted tests for what you changed (the table in `docs/testing.md`), and `tools/ci/run.sh test-smoke` before committing. No full suite.
 - **At a milestone** (the end of an M group, or any change to the interrupt path, the bus, the memory map or the linker layout): the full suite with stock ROMs, the disk and bus tests again with the JiffyDOS ROMs (`BREADBIN_CI_JIFFY=<dir>`, see `docs/testing.md`; not yet proven in the container), and a hardware run of the list in `docs/hardware-notes.md`.
