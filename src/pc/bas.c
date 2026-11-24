@@ -42,6 +42,7 @@ extern int c_ncall(char *f); /* xop 244 void */
 extern int c_xop(int b); /* xop 254 void */
 extern int c_xopw(int b, int w); /* void */
 extern int c_fail(int e); /* xop 252 void */   /* err = e, unless one came first */
+extern int incsi(); /* void */   /* si + 1 */
 extern int c_grow(int n);       /* up to n pages from the kernel for mem (bas-rt.s); the pages granted */
 
 char *mem;              /* MEM: the arena, msz bytes of pages the kernel grants at start (c_grow) */
@@ -68,10 +69,8 @@ int vint;               /* the last variable parsed is an integer (A%) */
 int ifh;                /* this line's IFs: where the newest one's JUMP address goes; each holds the
                            place of the one before (a chain through the code), nif of them */
 int nif;
-int *inul;              /* 0, for fx */
-int *fx;                /* forward GOTOs, in ctl while compiling (a run starts with it empty): where
-                           the address goes (fx[0-31]), the target (fx[32-63]), the line (fx[64-95]) */
-int nfix;
+int nfix;               /* forward GOTOs, in ctl while compiling (a run starts with it empty): 6 bytes
+                           each, where the address goes, the target and the line, nfix of them to 32 */
 
 /* ---- output ---- */
 
@@ -102,7 +101,7 @@ int number() {          /* a line number at si (0 to 63999, unsigned), spaces am
     while (c_digit()) {
         if (n > 6399) c_fail(1);
         n = n * 10 + src[si] - '0';
-        si = si + 1;
+        incsi();
         c_sp();
     }
     if (c_ult(63999, n)) c_fail(1);
@@ -298,22 +297,17 @@ int nc2;
 int name() {            /* the variable name at si (a letter): two characters count, as MS; vint says its type */
     nc1 = src[si];
     nc2 = 0;
-    si = si + 1;
+    incsi();
     while (c_letter() || c_digit()) {   /* a keyword is a token: it ends the name */
         if (!nc2) nc2 = src[si];
-        si = si + 1;
+        incsi();
     }
     vint = 0;
-    if (src[si] == '%') {
-        si = si + 1;
-        vint = 1;
-        nc2 = nc2 | 128;
-    } else if (src[si] == '$') {
-        si = si + 1;
+    if (c_tok('$')) {
         vint = 2;
         nc1 = nc1 | 128;
-        nc2 = nc2 | 128;
-    }
+    } else if (c_tok('%')) vint = 1;
+    if (vint) nc2 = nc2 | 128;
     return 0;
 }
 
@@ -496,7 +490,7 @@ int strlit() {          /* a string literal after its quote: a CS, whose address
     int i = si;
     int n;
     int c;
-    while (src[si] && src[si] != '"') si = si + 1;
+    while (src[si] && src[si] != '"') incsi();
     n = si - i;
     c_tok('"');                 /* an unclosed string ends at the end of the line, as MS */
     if (n) {
@@ -615,14 +609,14 @@ int operand() {         /* a primary, or - + NOT and theirs. Each ( and unary op
     int k = 1;
     int c = c_sp();
     if (c == '-') {         /* binds looser than ^, as MS: -2^2 is -4 */
-        si = si + 1;
+        incsi();
         tonum(climb(10));
         c_xop(216 /* x NEG */);
     } else if (c == '+') {
-        si = si + 1;
+        incsi();
         k = climb(10);
     } else if (c == 142 /* tk NOT */) {    /* of the relation after it, as MS */
-        si = si + 1;
+        incsi();
         toint(climb(6));
         c_op1(146 /* PO_COMP */);
         k = 2;
@@ -651,7 +645,7 @@ int cmpops(int c) {     /* the relation's characters from si: < = > as bits 1, 2
         if (!b) break;
         if (m & b) c_fail(1);
         m = m | b;
-        si = si + 1;
+        incsi();
         c = c_sp();
     }
     if (m == 7) c_fail(1);
@@ -691,7 +685,7 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
             k = epush(-1);
             continue;
         }
-        si = si + 1;
+        incsi();
         if (p <= 4) {
             toint(k);
             toint(climb(p + 1));
@@ -799,6 +793,7 @@ int prints() {          /* PRINT: strings and numbers; ; between them, or after 
 
 int jump(int t) {       /* JUMP to line t: a line not compiled yet is fixed up when it is */
     int p;
+    char *q;
     c_room(3);
     c_emit(196 /* PO_JUMP */);
     straight = 0;
@@ -807,9 +802,10 @@ int jump(int t) {       /* JUMP to line t: a line not compiled yet is fixed up w
             c_fail(2);
             return 0;
         }
-        fx[nfix] = cend;
-        fx[32 + nfix] = t;
-        fx[64 + nfix] = cur;
+        q = ctl + nfix * 6;
+        putw(q, cend);
+        putw(q + 2, t);
+        putw(q + 4, cur);
         nfix = nfix + 1;
         c_emit(0);
         return c_emit(0);
@@ -1029,7 +1025,7 @@ int predim() {          /* every DIM of the program, before a line is compiled: 
         c = src[0];
         while (c && c != 145 /* tk REM */ && !err) {
             if (c == '"') q = 1 - q;
-            si = si + 1;
+            incsi();
             if (c == 164 /* tk DIM */ && !q) {
                 nd = 0;
                 ed = 0;
@@ -1048,7 +1044,7 @@ int stmt() {
     sres();
     if (c_tok(144 /* tk PRINT */)) return prints();
     if (c_tok(145 /* tk REM */)) {
-        while (src[si]) si = si + 1;
+        while (src[si]) incsi();
         return 0;
     }
     if (c_tok(163 /* tk INPUT */)) return inputs();
@@ -1111,21 +1107,23 @@ int endline() {         /* the IFs' false branches come here */
 int cline(int p) {      /* compile the line at p */
     int n = mw(p);
     int i = 0;
+    char *q;
+    int t;
     putw(mem + p + 3, cend);
     while (i < nfix) {  /* the GOTOs waiting for this line, or for one that is not there */
-        if (fx[32 + i] == n) putw(mem + fx[i], addr(cend));
-        else if (c_ult(fx[32 + i], n)) {
+        q = ctl + i * 6;
+        t = getw(q + 2);
+        if (t == n) putw(mem + getw(q), addr(cend));
+        else if (c_ult(t, n)) {
             c_fail(10);
-            eline = fx[64 + i];
+            eline = getw(q + 4);
             return 0;
         } else {
             i = i + 1;
             continue;
         }
         nfix = nfix - 1;
-        fx[i] = fx[nfix];
-        fx[32 + i] = fx[32 + nfix];
-        fx[64 + i] = fx[64 + nfix];
+        c_mcpy(q - nul, ctl + nfix * 6 - nul, 6);
     }
     cur = n;
     c_xop(206 /* x LN */);
@@ -1155,7 +1153,7 @@ int compile() {         /* the program into code from ptop: pend, or err and eli
     finish();
     if (nfix && !err) {
         c_fail(10);
-        eline = fx[64];
+        eline = getw(ctl + 4);
     }
     if (!err) pend = cend;
     return 0;
@@ -1321,7 +1319,6 @@ int command() {         /* a line without a number */
 
 int main() {
     int tty = isatty(0);
-    fx = inul + ((ctl + 1 - nul) >> 1);   /* ctl, or its next byte if the address is odd: a word view */
     int n;
     int t;
     msz = c_grow(120) * 256;    /* as many pages as are free, to 30,720 bytes: ints stay positive */

@@ -473,21 +473,31 @@ int iline() {           /* INPUT's next line, or BREAK at the end of the input *
     return 0;
 }
 
+int ic() {              /* the byte of ib at ii */
+    return ib[ii];
+}
+
+int iskip(int c) {      /* ii on to the byte c or the end */
+    while (ic() && ic() != c) ii = ii + 1;
+    return 0;
+}
+
 int ifield() {          /* the next field of ib from ii, as MS: leading spaces dropped, "quoted" as it is,
                            else up to the comma without the trailing spaces. 0 when ii is past the end */
     int e;
+    int q;
     if (ii > il) return 0;
-    while (ib[ii] == ' ') ii = ii + 1;
+    while (ic() == ' ') ii = ii + 1;
+    q = ic() == '"';
+    ii = ii + q;            /* past the quote */
     fs = ii;
-    if (ib[ii] == '"') {
-        fs = ii + 1;
-        ii = fs;
-        while (ib[ii] && ib[ii] != '"') ii = ii + 1;
+    if (q) {
+        iskip('"');
         fl = ii - fs;
-        if (ib[ii]) ii = ii + 1;
-        while (ib[ii] && ib[ii] != ',') ii = ii + 1;
-    } else {
-        while (ib[ii] && ib[ii] != ',') ii = ii + 1;
+        if (ic()) ii = ii + 1;
+    }
+    iskip(',');
+    if (!q) {
         e = ii;
         while (e > fs && ib[e - 1] == ' ') e = e - 1;
         fl = e - fs;
@@ -496,23 +506,21 @@ int ifield() {          /* the next field of ib from ii, as MS: leading spaces d
     return 1;
 }
 
-int inum(int s, int n) {        /* ib[s, s+n) is a number as rt_val reads it (or empty, which is 0) */
-    int i = s;
+int inum(int s, int n) {        /* ib[s, s+n) is a number as rt_val reads it (or empty, which is 0): a sign,
+                                   then digits and one point */
     int e = s + n;
     int d = 0;
-    if (i < e && (ib[i] == '+' || ib[i] == '-')) i = i + 1;
-    while (i < e && ib[i] >= '0' && ib[i] <= '9') {
-        i = i + 1;
-        d = 1;
+    int p = 0;
+    int c;
+    if (n && (ib[s] == '+' || ib[s] == '-')) s = s + 1;
+    while (s < e) {
+        c = ib[s];
+        if (c == '.' && !p) p = 1;
+        else if (c >= '0' && c <= '9') d = 1;
+        else return 0;
+        s = s + 1;
     }
-    if (i < e && ib[i] == '.') {
-        i = i + 1;
-        while (i < e && ib[i] >= '0' && ib[i] <= '9') {
-            i = i + 1;
-            d = 1;
-        }
-    }
-    return i == e && (d || !n);
+    return d || !n;
 }
 
 int rt_inp(int s, int m) {      /* INPUT: the prompt s (0: none), then n = m / 128 variables, m & 127 bit k set
@@ -603,17 +611,11 @@ int reloc(int c, int n, int vb, int un) {  /* the n bytes of code at address c, 
         w = getw(p + i + 1);
         if (op == 38 /* PO_LA */ && w) {
             b = c;
-            if (un) {
-                if (w - c >= n) {
-                    b = vb;
-                    f = 1 << 15;
-                }
-            } else if (w < 0) {
-                b = vb;
-                f = 1 << 15;
-            }
+            if (un) f = w - c >= n;
+            else f = w < 0;
         }
-        if (op == 106 /* PO_LAW */ || op == 122 /* PO_SAW */ || op == 200 /* x LDV */ || op == 202 /* x STV */) {
+        if (op == 106 /* PO_LAW */ || op == 122 /* PO_SAW */ || op == 200 /* x LDV */ || op == 202 /* x STV */) f = 1;
+        if (f) {
             b = vb;
             f = 1 << 15;
         }
@@ -621,7 +623,7 @@ int reloc(int c, int n, int vb, int un) {  /* the n bytes of code at address c, 
         if (op == 84 /* PO_CALL */) b = &rt_prs - nul;
         if (op == 196 /* PO_JUMP */) b = c;
         if (b || op == 38 /* PO_LA */ || op == 44 /* PO_CW */) k = 3;
-        else if (op == 42 /* PO_CB */ || op == 76 /* PO_BRFLS */ || op == 78 /* PO_BRTRU */ || op == 80 /* PO_BRNCH */) k = 2;
+        else if (op == 42 /* PO_CB */ || (op > 75 && op < 81) /* BRFLS, BRTRU, BRNCH */) k = 2;
         else if (op == 46 /* PO_CS */) k = p[i + 1] + 2;
         else if (op == 204 /* x LDK */) k = 5;      /* 4 bytes of constant, not code */
         if (un) b = 0 - b;

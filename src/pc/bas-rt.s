@@ -4,7 +4,7 @@
 ; bas's p-code by mk/pvm.mk (src/pc/NAME-rt.s goes with src/pc/NAME.c).
 .include "inc/rt.s"
 
-.export c_crunch, c_find, c_const
+.export c_crunch, c_find, c_const, incsi
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 .export xtab
 
@@ -544,7 +544,7 @@ maca:   jsr setb8
 :       ldx sx
         rts
 
-incsi:  inc g_si                ; si + 1; Z clear after (si is never 0 then)
+incsi:  inc g_si                ; si + 1 (bas.c's too, as a void native); Z clear after (si is never 0 then)
         bne :+
         inc g_si+1
 :       rts
