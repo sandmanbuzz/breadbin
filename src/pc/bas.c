@@ -791,8 +791,10 @@ int compile() {         /* the program into code from ptop: pend, or err and eli
    of a variable: the offset from the variables' start, with bit 15 set), or the runtime (CALL
    and NCAL: the offset from the first routine of its kind). The runner turns them back, so it need not share bas's layout. */
 
-int build() {           /* BUILD: the program as a file on the output: "BX", 1, the code's length, the
-                           variables' size, then the code. The code in the arena is spent */
+int build() {           /* BUILD: the program as a file on the output: "BX", 1, rtid, the code's length, the
+                           variables' size, the code, then the line table: per line the offset of its code
+                           and its number. The code in the arena is spent */
+    int p;
     clearv();
     compile();
     if (err) return report(err, eline);
@@ -800,10 +802,16 @@ int build() {           /* BUILD: the program as a file on the output: "BX", 1, 
     lbuf[0] = 'B';
     lbuf[1] = 'X';
     lbuf[2] = 1;
-    putw(lbuf + 3, pend - ptop);
-    putw(lbuf + 5, msz - vbot);
-    write(1, lbuf, 7);
+    putw(lbuf + 3, rtid());
+    putw(lbuf + 5, pend - ptop);
+    putw(lbuf + 7, msz - vbot);
+    write(1, lbuf, 9);
     write(1, mem + ptop, pend - ptop);
+    for (p = 0; p < ptop; p = next(p)) {
+        putw(lbuf, getw(mem + p + 3) - ptop);
+        putw(lbuf + 2, lineno(p));
+        write(1, lbuf, 4);
+    }
     pend = 0;
     return 0;
 }

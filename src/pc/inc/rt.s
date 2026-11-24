@@ -27,7 +27,7 @@
 
 .export n_ldv, n_stv, n_add, n_sub, n_mul, n_div, n_neg, n_abs, n_int, n_sgn
 .export n_fromi, n_toi, n_cmp, n_tst
-.export rt_mark, rt_go, rt_ln
+.export rt_mark, rt_go, rt_ln, rt_end
 .export c_ldv, c_stv, c_add, c_sub, c_mul, c_div, c_int, c_fromi, c_toi, c_cmp, c_fmt
 .export c_grow, c_throw, c_err, c_curip
 
@@ -678,3 +678,4 @@ x_ln:   lda P_IPY               ; XLN: rt_ln, with the op after this one as the 
         adc #0
         sta curip+1
 x_nop:  rts
+rt_end:                         ; the end of these natives: only its address is used (rtid in inc/rt.c)

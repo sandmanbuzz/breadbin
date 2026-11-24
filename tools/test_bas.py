@@ -453,9 +453,12 @@ class Language(unittest.TestCase):
     def test_build_writes_code_with_no_addresses(self):
         # every class of word operand, in one program: a FOR/NEXT (LA of the body and of the variable, and a
         # NEXT with none), GOSUB/RETURN, GOTO, an IF, an integer and a number variable, PRINT, ^
-        n, v, code = self.build('10 FOR I=1 TO 3:A%=A%+1:B=B+I^2\n20 PRINT I;"X";:IF I>2 THEN 40\n30 NEXT:GOSUB 50\n'
+        rid, n, v, code, lines = self.build('10 FOR I=1 TO 3:A%=A%+1:B=B+I^2\n20 PRINT I;"X";:IF I>2 THEN 40\n30 NEXT:GOSUB 50\n'
                                 '40 GOTO 60\n50 RETURN\n60 NEXT I\nBUILD\n')
         self.assertEqual(n, len(code))
+        self.assertEqual([ln for _, ln in lines], [10, 20, 30, 40, 50, 60])
+        offs = [o for o, _ in lines]
+        self.assertTrue(offs == sorted(set(offs)) and offs[0] < offs[1] and offs[-1] < n, offs)
         self.assertEqual(v, 6 + 6 + 4)                  # I and B: a number's 4 bytes and the name; A%: an int's 2
         classes = {}
         for at, op, cls, w in bxfile.walk(code):
@@ -470,8 +473,8 @@ class Language(unittest.TestCase):
         self.assertEqual(len(set(classes["var"])), 3)               # I, A%, B
 
     def test_build_of_an_empty_program_and_of_an_error(self):
-        n, v, code = self.build("BUILD\n")
-        self.assertEqual((v, list(bxfile.walk(code))[0][2:]), (0, ("ncall", 0)))   # the prologue's rt_mark
+        rid, n, v, code, lines = self.build("BUILD\n")
+        self.assertEqual((v, lines, list(bxfile.walk(code))[0][2:]), (0, [], ("ncall", 0)))   # the prologue's rt_mark
         out, status = bas("10 PRINT\n20 GOTO 99\nBUILD\n")
         self.assertEqual((out, status), ("?UNDEF'D STATEMENT ERROR IN 20\n", 0))      # no file, a message
 
@@ -504,14 +507,22 @@ class Compiled(unittest.TestCase):
 
     def test_an_error_stops_the_run_and_exits_1(self):
         bx, _ = bas('10 PRINT "A"\n20 PRINT 1/0\n30 PRINT "C"\nBUILD\n')
-        self.assertEqual(brun(bx.encode("latin-1")), ("A\n?DIVISION BY ZERO ERROR\n", 1))
+        self.assertEqual(brun(bx.encode("latin-1")), ("A\n?DIVISION BY ZERO ERROR IN 20\n", 1))
 
     def test_a_file_that_is_not_one_is_refused(self):
         bx, _ = bas('10 PRINT 1\nBUILD\n')
         bad = bx.encode("latin-1")
-        for data in (b"", b"BX", b"XX" + bad[2:], b"BX\x02" + bad[3:]):
+        other = bad[:3] + bytes([bad[3] ^ 1]) + bad[4:]        # another runtime layout
+        for data in (b"", b"BX", b"XX" + bad[2:], b"BX\x02" + bad[3:], other, bad[:20]):
             out, st = brun(data)
             self.assertEqual((out, st), ("", 1), data[:4])
+
+    def test_the_line_of_an_error_is_found_from_the_table(self):
+        prog = '10 PRINT "A"\n20 X=1\n25 REM\n30 GOSUB 100\n40 PRINT "NO"\n100 FOR I=1 TO 2:PRINT I:NEXT\n110 Y=1/0\n'
+        want, _ = bas(prog + "RUN\n")
+        bx, _ = bas(prog + "BUILD\n")
+        self.assertEqual(brun(bx.encode("latin-1")), (want, 1))
+        self.assertTrue(want.endswith("?DIVISION BY ZERO ERROR IN 110\n"), want)
 
     def test_the_runtime_has_the_same_layout_in_both(self):
         # a file names the natives by offsets from rt_mark and the runtime's bytecode by offsets from rt_prs

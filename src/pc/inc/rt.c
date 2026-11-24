@@ -10,6 +10,7 @@
 extern int rt_mark();   /* rt.s, for the compiled code: these take their arguments from the */
 extern int rt_go();     /* eval stack and the number stack as the comments there say; the */
 extern int rt_ln();     /* compiler only takes their addresses */
+extern int rt_end();    /* the end of rt.s: only its address */
 extern int c_ldv(char *p); /* xop 240 void */      /* bas-rt.s, for the mini C: one result each */
 extern int c_stv(char *p); /* xop 246 void */
 extern int c_add(); /* void */
@@ -265,4 +266,9 @@ int reloc(int c, int n, int vb, int un) {  /* the n bytes of code at address c, 
         i = i + k;
     }
     return 0;
+}
+
+int rtid() {            /* what a compiled file must agree with: the sizes of the two runtime blocks its
+                           offsets are in (rt.s's natives and the bytecode from rt_prs to report) */
+    return (&rt_end - nul - (&rt_mark - nul)) * 3 + (&report - nul - (&rt_prs - nul));
 }

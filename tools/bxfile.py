@@ -1,5 +1,6 @@
-"""The compiled BASIC file (BUILD, docs/design/basic.md section 6.1): "BX", 1, the code's length
-(2), the variables' size (2), then the code. The code holds no addresses: this walk is the format,
+"""The compiled BASIC file (BUILD, docs/design/basic.md section 6.1): "BX", 1, rtid (2), the code's
+length (2), the variables' size (2), the code, then the line table: per line the offset of its code
+from the code's start (2) and its number (2). The code holds no addresses: this walk is the format,
 the one bas.c's unreloc() writes and the runner's loader undoes. Every word operand is one of
   code   an offset from the code's start (JUMP, and an LA of a return or loop address)
   var    an offset from the variables' start with bit 15 set (LAW SAW LDV STV, and an LA of a variable)
@@ -14,13 +15,14 @@ CLASS = {NCAL: "ncall", CALL: "call", LAW: "var", SAW: "var", LDV: "var", STV: "
 
 
 def parse(data):
-    """(code length, variables' size, code) of a file; ValueError if it is not one."""
-    if data[:3] != b"BX\x01" or len(data) < 7:
+    """(rtid, code length, variables' size, code, [(offset, line)]) of a file; ValueError if it is not one."""
+    if data[:3] != b"BX\x01" or len(data) < 9:
         raise ValueError("not a BX 1 file")
-    n, v = struct.unpack("<HH", data[3:7])
-    if len(data) != 7 + n:
-        raise ValueError("length %d, header says %d" % (len(data) - 7, n))
-    return n, v, data[7:]
+    rid, n, v = struct.unpack("<HHH", data[3:9])
+    if len(data) < 9 + n or (len(data) - 9 - n) % 4:
+        raise ValueError("length %d, header says %d of code" % (len(data) - 9, n))
+    t = data[9 + n:]
+    return rid, n, v, data[9:9 + n], [struct.unpack("<HH", t[i:i + 4]) for i in range(0, len(t), 4)]
 
 
 def walk(code):
