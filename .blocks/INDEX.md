@@ -23,5 +23,5 @@ PORTABILITY. Which blocks work outside this repo's own environment:
 - Any cc65/ld65 project: lbl-sym, routine-sizes (they read `-Ln` and `-m` output).
 - Need this repo's build and tools (`make` output, `tools/asim.py`, py65): chess-diff, lib-weight, pvm-prof.
 - Need the containerised VICE (`tools/ci/run.sh`) and a built image; the analysis half also runs on a saved trace: vice-profile, vice-prof.
-- Written for the owner's machine, of no use elsewhere: leak-scan (its patterns are the owner's local names and paths).
+- Written for the owner's machine, of no use elsewhere: leak-scan (the owner's names and paths live in the gitignored `.blocks/leak-scan.patterns`, `kind<TAB>regex` per line; without it only generic patterns run).
 Blocks may be missing from the index above (it lists at most `index_max`); `ls .blocks/*.py` shows them all.

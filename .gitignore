@@ -33,3 +33,4 @@ experiments/iec-stall/keym.d.nibbler.prg
 
 # fleet/ is local-only coordination (roster, handoffs, logs); it is never tracked on main
 /fleet/
+.blocks/leak-scan.patterns

@@ -3,7 +3,7 @@
 
 Same interface as tools/vicetest.py's Vice, so a test can run on either:
 
-    BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=192.168.1.64 \\
+    BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=<ultimate-host> \\
         python3 -m unittest tests.test_system.Boot.test_02_echo
 
     with UltimateTarget("build/breadbin.d64") as v:     # mounts, resets, boots
