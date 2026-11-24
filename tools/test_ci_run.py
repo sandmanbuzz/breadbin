@@ -83,6 +83,18 @@ class RunSh(unittest.TestCase):
         self.run_ci("test-smoke", BREADBIN_CI_EXCLUSIVE="1")
         self.assertIn("vice.1.lock", self.lock_files())
 
+    def test_serial_full_suite_needs_a_reason(self):
+        r = self.run_ci("test")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("sharded.sh", r.stderr)
+        self.assertEqual(open(self.log).read().count("ARG["), 0)             # nothing ran
+        r = self.run_ci("--serial-because", "timing reference", "test")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("timing reference", r.stderr)
+        self.assertIn("ARG[breadbin.ci.reason=timing reference]", open(self.log).read())
+        self.assertEqual(self.run_ci("--serial-because", "", "test").returncode, 2)   # empty reason
+        self.assertEqual(self.run_ci("test-smoke").returncode, 0)            # other targets unaffected
+
     def test_words_with_spaces_stay_whole(self):
         self.run_ci("test-only", "T=tests.a tests.b", BREADBIN_VICE_ARGS="-x -y")
         args = open(self.log).read().splitlines()

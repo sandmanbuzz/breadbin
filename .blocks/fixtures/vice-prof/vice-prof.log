@@ -1,0 +1,2 @@
+ok test_a ... ok
+vice-profile {"wall": 100.0, "methods": {"_cmd:x": [10, 6.0], "_cmd:save": [5, 3.0], "type": [4, 5.0]}, "sleeps": {"test_console.py:83": [1, 15.0], "vicetest.py:250": [15, 2.0]}}

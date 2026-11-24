@@ -74,7 +74,7 @@ RESTORE: NMI handler becomes `inc nmi_req; rti` (4 B, no register saved). The IR
 Failure modes:
 - RESTORE: same target set as RUN/STOP: non-BG, non-IGNINT. (BRK differs: see above.) The shell (IGNINT) survives; an idle shell at its prompt makes RESTORE a no-op; a `&` job needs `kill`.
 - A foreground process that ignores signals cannot exist (no catch; SIGINT catch comes later and RESTORE stays uncatchable on purpose).
-- A process stuck inside a kernel wait that never reaches `check_signal` (the open physical-1541 stall) is not freed: same as RUN/STOP today.
+- A process stuck inside a kernel wait that never reaches `check_signal` (formerly the physical-1541 stall, closed 2026-11-18: it was harness DMA; the case is still real for any wedged bus) is not freed: same as RUN/STOP today.
 - Pipeline: every non-BG member dies; `proc_exit` closes the pipe ends, so no orphan. Raw console: `con_release` (`proc.s:350`) restores cooked; screen is not repainted.
 - init (pid 1) BRK or RESTORE-kill: `proc_exit` panics "init" (V), as today for any pid-1 death. Ultimate freeze button is an NMI too (U): it would kill the foreground; flag in docs.
 

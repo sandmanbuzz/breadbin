@@ -48,8 +48,16 @@ con_init:
         rts
 
 ; ---- cursor ----
+; The four console entry points are jmp stubs, so that the con80 module (src/mod/con80.s,
+; an 80-column soft console) can point them at itself and back; unloaded, they run the 40
+; column code below. Resident cost: 12 bytes.
 .segment "CODE"
-cursor_hide:
+cursor_hide:    jmp c40_hide
+cursor_show:    jmp c40_show
+con_putc:       jmp c40_putc
+con_write:      jmp c40_write
+
+c40_hide:
         lda cur_vis
         beq @r
         tya
@@ -63,7 +71,7 @@ cursor_hide:
         tay
 @r:     rts
 
-cursor_show:
+c40_show:
         lda cur_vis
         bne @r
         tya
@@ -97,7 +105,7 @@ con_cursor_tick:
 
 ; ---- output ----
 ; con_putc: print ASCII char in A. Preserves X, Y.
-con_putc:
+c40_putc:
         pha
         txa
         pha
@@ -584,7 +592,7 @@ con_hex:
         jmp con_putc
 
 ; con_write: write r1 bytes from (r0) to the screen. Returns r1 unchanged.
-con_write:
+c40_write:
         lda r0
         sta p1
         lda r0+1

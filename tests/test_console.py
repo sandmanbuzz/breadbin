@@ -46,6 +46,25 @@ class Console(unittest.TestCase):
                 return lines
             time.sleep(0.2)
 
+    def ls_bin(self, timeout=90):
+        """Type `ls -l /bin` and return the screen lines once the whole listing has been drawn: the
+        screen has changed from before (or, when the same listing repeats and finishes before the first
+        look, 4 s have passed: the shell has long since taken the line), the last row is the prompt, the listing's last entry is
+        on screen and the screen has held still for a second (a disk read can pause the listing)."""
+        before = self.v.screen_lines()
+        self.v.type("ls -l /bin\n")
+        start = time.time()
+        end = start + timeout
+        stable = None
+        while time.time() < end:
+            time.sleep(0.5)
+            lines = self.v.screen_lines()
+            done = ((lines != before or time.time() - start > 4) and lines[24] == "/ $" and any("whoami" in l for l in lines))
+            if done and lines == stable:
+                return lines
+            stable = lines if done else None
+        raise TimeoutError("ls -l /bin did not finish:\n" + "\n".join(lines))
+
     def byte(self, addr):
         return self.v.mem(addr, addr)[0]
 
@@ -79,9 +98,7 @@ class Console(unittest.TestCase):
     def test_scrolls_at_the_bottom(self):
         self.v.type("clear\n")
         self.v.wait_for("/ $")
-        self.v.type("ls -l /bin\n")
-        time.sleep(15)
-        lines = self.v.screen_lines()
+        lines = self.ls_bin()
         self.assertEqual(lines[24], "/ $")                 # prompt back on the last row
         self.assertNotEqual(lines[0], "/ $ clear")          # the top has scrolled away
         self.assertTrue(any("whoami" in l for l in lines))  # the end of the listing is there
@@ -94,9 +111,7 @@ class Console(unittest.TestCase):
         self.v.type("clear\n")
         self.v.wait_for("/ $")
         for _ in range(6):
-            self.v.type("ls -l /bin\n")
-            time.sleep(12)
-        lines = self.v.screen_lines()
+            lines = self.ls_bin()
         self.assertEqual(lines[24], "/ $")
         body = [l for l in lines[:24] if l]
         self.assertGreaterEqual(len(body), 20)

@@ -383,9 +383,55 @@ class FS:
             bm[(b >> 3) & 255] &= ~(1 << (b & 7)) & 0xff
         self.img.put_block(blk, bm)
 
-    def alloc_block(self):
-        for b in range(self.nblocks):
-            if not self.is_used(b):
+    # ---- placement (a 1541 image only: the head's travel and the revolution decide the latency) ----
+    # Directory and indirect blocks are read on every lookup, so they sit in a zone next to the
+    # inode table (the head is there anyway); file data fills outward from the same track, each
+    # file's blocks one after another (stride 1, which the fast reader serves best).
+    def plan_layout(self, host_root, extra=4):
+        """Call after format(), before filling: set the centre-out order and reserve the meta zone
+        for the directories (and indirect blocks) of the host tree at host_root, plus extra."""
+        self.pref = self.meta = None
+        if self.nblocks != NBLOCKS:
+            return
+        c = block_to_ts(self.istart)[0]
+        self.pref = sorted(range(self.nblocks), key=lambda b: (abs(block_to_ts(b)[0] - c), b))
+        need = extra
+        for d, dirs, files in os.walk(host_root):
+            dirs[:] = sorted(x for x in dirs if not x.startswith("."))
+            names = [f for f in files if not f.startswith(".")]
+            need += max(1, (2 + len(dirs) + len(names) + 15) // 16)
+            for f in names:
+                if os.path.getsize(os.path.join(d, f)) > NDIRECT * 256:
+                    need += 1
+        free = [b for b in self.pref if not self.is_used(b)]
+        self.meta = free[:need]
+        self.held = set(self.meta)
+        r = self.read_inode(ROOT_INO)           # format() put the root directory wherever was free
+        old = r["direct"][0]
+        r["direct"][0] = self.alloc_block("meta")
+        self.img.put_block(r["direct"][0], self.img.block(old))
+        self.write_inode(ROOT_INO, r)
+        self.set_used(old, False)
+
+    def alloc_block(self, kind="data", after=0):
+        pref = getattr(self, "pref", None)
+        if pref is None:
+            order = range(self.nblocks)
+        elif kind == "meta" and self.meta:
+            b = self.meta.pop(0)
+            self.held.discard(b)
+            self.set_used(b, True)
+            self.img.put_block(b, bytearray(256))
+            return b
+        else:
+            order = pref
+            if after:                       # on: the next sector, else the nearest track to where the head is
+                t = block_to_ts(after)[0]
+                order = sorted(pref, key=lambda b: (abs(block_to_ts(b)[0] - t) if block_to_ts(b)[0] != t
+                                                    else -1, b < after, b))
+        held = getattr(self, "held", ())
+        for b in order:
+            if not self.is_used(b) and b not in held:
                 self.set_used(b, True)
                 self.img.put_block(b, bytearray(256))
                 return b
@@ -435,7 +481,8 @@ class FS:
         """Block number of file block i (0 if a hole and not allocating)."""
         if i < NDIRECT:
             if not ino["direct"][i] and alloc:
-                ino["direct"][i] = self.alloc_block()
+                ino["direct"][i] = self.alloc_block(
+                    "meta" if ino["type"] == T_DIR else "data", ino["direct"][i - 1] if i else 0)
             return ino["direct"][i]
         i -= NDIRECT
         if i >= 128:
@@ -443,11 +490,12 @@ class FS:
         if not ino["indirect"]:
             if not alloc:
                 return 0
-            ino["indirect"] = self.alloc_block()
+            ino["indirect"] = self.alloc_block("meta")
         ind = self.img.block(ino["indirect"])
         b = ind[2 * i] | ind[2 * i + 1] << 8
         if not b and alloc:
-            b = self.alloc_block()
+            b = self.alloc_block("meta" if ino["type"] == T_DIR else "data",
+                                 (ind[2 * i - 2] | ind[2 * i - 1] << 8) if i else ino["direct"][-1])
             ind[2 * i], ind[2 * i + 1] = b & 0xff, b >> 8
             self.img.put_block(ino["indirect"], ind)
         return b
@@ -521,7 +569,7 @@ class FS:
         return n
 
     def add_tree(self, host_dir, ino):
-        for entry in sorted(os.listdir(host_dir)):
+        for entry in sorted(os.listdir(host_dir), key=lambda e: (HOT.index(e) if e in HOT else len(HOT), e)):
             if entry.startswith("."):
                 continue
             p = os.path.join(host_dir, entry)
@@ -546,6 +594,11 @@ class FS:
                 self.create(dst_dir, name, src.read_file(n))
 
 
+# Loaded on every boot or most sessions: created first, so they sit nearest the inode table and
+# early in their directory (a lookup reads it from the front).
+HOT = ["init", "login", "sh", "fast", "cbm", "ls", "cat"]
+
+
 def build(out, boot, root, devs, rev=None):
     img = Image()
     with open(boot, "rb") as f:
@@ -553,6 +606,7 @@ def build(out, boot, root, devs, rev=None):
     reserved = img.write_cbm(b"BREADBIN", boot_data, rev=rev)
     fs = FS(img)
     fs.format(reserved)
+    fs.plan_layout(root)
     fs.add_tree(root, ROOT_INO)
     if rev:
         try:
