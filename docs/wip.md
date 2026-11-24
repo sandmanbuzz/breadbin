@@ -33,7 +33,7 @@ The roster is `fleet/roster.md` on `fleet-store` (the owner's roster, published 
 - Local `main` in the primary clone is the shared truth. Origin is a mirror and out of scope for now; a push waits for the user's go (`docs/process.md`).
 - Each session works in its own worktree. Land work on local `main` under the land lock (`tools/with-lock -r land -- ...`), and say what was run and not run in the commit message.
 - A commit records state, not success: red is fine when it is what you are working on.
-- Emulator runs go through `tools/ci/run.sh`; timing runs take every slot with `BREADBIN_CI_EXCLUSIVE=1`. Hardware runs take `tools/with-lock -r ultimate -- ...`, announce the write first, restore the configuration by trap, and read it back.
+- Emulator runs go through `tools/ci/run.sh`; timing runs take every slot with `BREADBIN_CI_EXCLUSIVE=1`. Since 2026-11-23 the vice pool is 12 slots (for testing) and a work unit takes at most six: `sharded.sh` takes one slot per shard, `--exclusive` is the only whole-pool path (`docs/process.md`). Hardware runs take `tools/with-lock -r ultimate -- ...`, announce the write first, restore the configuration by trap, and read it back.
 - Post claims, results and blocks on the roster. Re-read the `fleet-store` tip before a roster write, and base the write on that tip.
 
 ## Open items

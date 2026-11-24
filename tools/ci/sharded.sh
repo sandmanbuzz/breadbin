@@ -1,12 +1,15 @@
 #!/bin/bash
 # The VICE suite in parallel: one tools/ci/run.sh container per shard (tools/ci/shards.txt).
-#   tools/ci/sharded.sh [--rev REV] [--out DIR] [--stagger SECS] [--shard-timeout SECS] [--no-outer-lock] [--expect N]
+#   tools/ci/sharded.sh [--rev REV] [--out DIR] [--stagger SECS] [--shard-timeout SECS] [--exclusive] [--expect N]
 #   tools/ci/sharded.sh --check        # host-only: every VICE test is in exactly one shard
 # Exit 0 only if every shard exits 0, ran tests, skipped none, and the tests run add up to the
-# count discovered at REV. The whole run holds every vice slot (with-lock -x), so nothing else
-# VICE runs meanwhile; the result is a timing-clean pass/fail, and a failing shard counts as red
-# until its cause is known (there is no retry). A serial run (`BREADBIN_CI_EXCLUSIVE=1 run.sh test`)
-# stays the reference until three sharded runs in a row give the same pass/fail set (docs/ci.md).
+# count discovered at REV. Each shard takes one vice slot (its run.sh), so the run holds six of the
+# pool and other VICE runs share the rest; a work unit takes at most six slots (docs/process.md).
+# That is a pass/fail run, not a timing one. --exclusive holds the whole pool (with-lock -x) for a
+# run whose wall-clock figures will be quoted; it breaks the six-slot rule, so use it only for that.
+# A failing shard counts as red until its cause is known (there is no retry). A serial run
+# (`BREADBIN_CI_EXCLUSIVE=1 run.sh test`) stays the reference until three sharded runs in a row give
+# the same pass/fail set (docs/ci.md).
 # It runs the commit REV (default HEAD), not the working tree: commit first (a dirty tree is warned about).
 # A shard that runs past --shard-timeout (default 1800 s, about three times the longest shard) is killed
 # and reads as red (rc 124); Ctrl-C or TERM stops every shard and removes its container.
@@ -14,20 +17,20 @@
 set -u
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-rev=HEAD; out=; stagger=5; outer=1; expect=; check=0; vdir=; tlimit=1800; runsh=; preflight=1
+rev=HEAD; out=; stagger=5; exclusive=0; expect=; check=0; vdir=; tlimit=1800; runsh=; preflight=1
 while [ $# -gt 0 ]; do
     case $1 in
         --rev) rev=$2; shift 2 ;;
         --out) out=$2; shift 2 ;;
         --stagger) stagger=$2; shift 2 ;;
-        --no-outer-lock) outer=0; shift ;;
+        --exclusive) exclusive=1; shift ;;
         --expect) expect=$2; shift 2 ;;
         --check) check=1; shift ;;
         --verdict) vdir=$2; shift 2 ;;
         --shard-timeout) tlimit=$2; shift 2 ;;
         --run-sh) runsh=$2; shift 2 ;;
         --no-preflight) preflight=0; shift ;;
-        *) echo "usage: $0 [--check] [--verdict DIR --expect N] [--rev REV] [--out DIR] [--stagger S] [--shard-timeout S] [--no-outer-lock] [--expect N]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--check] [--verdict DIR --expect N] [--rev REV] [--out DIR] [--stagger S] [--shard-timeout S] [--exclusive] [--expect N]" >&2; exit 2 ;;
     esac
 done
 
@@ -113,7 +116,7 @@ verdict() {
     return $fail
 }
 
-slots=${BREADBIN_VICE_SLOTS:-8}
+slots=6      # a work unit takes at most six vice slots (docs/process.md)
 if [ -n "$vdir" ]; then
     [ -n "$expect" ] || { echo "--verdict needs --expect N" >&2; exit 2; }
     verdict "$vdir" "$expect"; exit $?
@@ -122,8 +125,8 @@ if [ $check = 1 ]; then
     exec python3 -I "$repo/tools/ci/shards.py" check "$slots"
 fi
 
-# Take the whole vice pool once and re-enter; each shard's own with-lock call passes through.
-if [ $outer = 1 ] && [ -z "${SHARDED_INNER:-}" ]; then
+# --exclusive: take the whole vice pool once and re-enter; each shard's own with-lock call passes through.
+if [ $exclusive = 1 ] && [ -z "${SHARDED_INNER:-}" ]; then
     export SHARDED_INNER=1
     exec "$repo/tools/with-lock" -x -- "$0" --rev "$rev" ${out:+--out "$out"} \
         --stagger "$stagger" --shard-timeout "$tlimit" ${expect:+--expect "$expect"} \
