@@ -164,8 +164,11 @@ class Con80(unittest.TestCase):
 
     def test_braces_bar_tilde_glyphs(self):
         # { | } ~ print their own glyphs ($65-$68), not '?'; the 6502 (sc80) and the model agree
-        self.feed("\f" + "{|}~ x{}~|")
+        self.feed("\f" + "{|}~@ x{}~|@")
         self.same()
+        # @ is screen code 0: the real font must have ink there (it printed blank before)
+        with open(os.path.join(ROOT, "src", "mod", "con80.font"), "rb") as f:
+            self.assertTrue(any(f.read(4)))
         self.assertEqual([m.screen_code(c) for c in '{|}~?'], [0x65, 0x66, 0x67, 0x68, 0x3F])
 
     def test_stray_cur_vis_toggles_once(self):
