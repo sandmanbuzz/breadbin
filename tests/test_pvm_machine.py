@@ -282,7 +282,7 @@ class Basic(unittest.TestCase):
             status = v.run("echo $?", clear=False, timeout=30)
             refused = v.run("brun /t.bas", timeout=60)
             after = used()
-        self.assertEqual(built.splitlines()[-3:], [" 1  2  3 ", "built", "?DIVISION BY ZERO ERROR IN 20"], built)
+        self.assertEqual(built.splitlines()[-2:], [" 1  2  3 built", "?DIVISION BY ZERO ERROR IN 20"], built)
         self.assertIn("?DIVISION BY ZERO ERROR IN 20", ran)
         self.assertEqual(status.split(), ["1"])
         self.assertIn("not a file of this bas", refused)
