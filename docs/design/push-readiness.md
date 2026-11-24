@@ -19,7 +19,7 @@ The scan covered all 256 blobs in the unpushed range, each commit's author and c
 | hostname or local username | none found | clean |
 | absolute home path of the host | none found. The `/home/...` strings in `tests/`, `tools/` and `docs/` are paths inside the C64 test filesystem. | clean |
 | internal or private IP address, including the Ultimate's address | none found. Only the loopback address `127.0.0.1` (in `docs/ci.md`, `tools/ci/run.sh`, `tools/vicetest.py`) | clean. The Ultimate address is not in the range. |
-| scratch or tmp path of this machine | none found. `/tmp/...` and `claude-<uid>` strings appear only as generic examples in `docs/process.md`, `docs/runner-move.md`, `tools/with-lock`, `tools/readiness` and `tools/workspace.py`, and as C64 paths in `tests/test_system.py` and `docs/hardware-notes.md` | clean |
+| scratch or tmp path of this machine | none found. `/tmp/...` and `claude-<uid>` strings appear only as generic examples in `docs/process.md`, `tools/with-lock`, and as C64 paths in `tests/test_system.py` and `docs/hardware-notes.md` | clean |
 | volume or mount path | none found. `/mnt/...` strings are C64 paths in `tests/test_system.py`. | clean |
 | ROM or JiffyDOS content | none found. No binary blobs in the range; the only mentions are in text (`docs/design/jiffydos-cleanroom.md`, `tools/setup-vice-roms.sh`, two experiment scripts) | clean |
 | SSH or GPG key material | none found | clean |
@@ -54,7 +54,6 @@ Breakdown of the 181 trailer commits on origin by author: 33 "Claude", 18 upstre
 | file | bytes |
 |---|---|
 | `tools/cc.py` | 38,847 |
-| `docs/runner-move.md` | 28,478 |
 | `docs/design/upstream-survey.md` | 18,994 |
 | `docs/design/next/cp3-spec.md` | 17,830 |
 | `tools/test_cc.py` | 16,232 |

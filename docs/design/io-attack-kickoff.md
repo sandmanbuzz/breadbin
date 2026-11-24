@@ -1,5 +1,7 @@
 # Kickoff prompt for the IO attack lead (paste into a new session)
 
+> **Historical (2026-11-23): the IO effort is closed (harness DMA; `docs/design/io-attack-log.md`, closing entry).**
+
 You are the lead for the Breadbox IO failure attack. You start with no memory of earlier work; everything you need is in the repository. Work in your own git worktree. The primary clone stays on `main` and nobody works in it.
 
 Read, in this order, before doing anything else: `CLAUDE.md`, `docs/process.md`, `docs/design/io-attack-brief.md` (your mission, hypotheses, protocol, rules and what done means), then `docs/design/io-evidence.md` (265 lines of sourced evidence), then `docs/hardware-notes.md` as needed.

@@ -1,5 +1,7 @@
 # IO failure attack: brief for the lead
 
+> **Historical (2026-11-23): the IO effort is closed (harness DMA; `docs/design/io-attack-log.md`, closing entry).**
+
 Status: draft for the owner, 2026-11-07, against main `1c7268f` (tag `v0.1`). The evidence behind every statement is in `docs/design/io-evidence.md` (cited below as E-n.m). Read it after this page; this page does not repeat it.
 
 ## 1. Mission
@@ -73,7 +75,6 @@ H5 and H8 are software-side and cheap. H1, H2, H4, H6 and H7 need the hardware a
 - The Ultimate's network address is private. Never write it, a hostname, a username or a home path into a file in the repository, a commit message or an artifact.
 - No push, tag or release without the owner's go. Commits are signed, authored as `sandmanbuzz` (check `git var GIT_AUTHOR_IDENT`), with no model identifier and no `Co-Authored-By` trailer. Land with `tools/with-lock -r land -- sh tools/land.sh BRANCH "message"` from a worktree; the primary clone stays on `main` and nobody works in it.
 - Delegate cheaply. Contextless Sonnet or Haiku agents do harnesses, builds, bisects, trial runs and evidence gathering; the lead designs, decides and judges. Every change gets a hater review whose brief says to find every reason to block it and gives it the touched-area test list as well as the diff.
-- Quota tracking is passive (`tools/claude-quota`). Do not add allocation logic. Drop `tools/claude-quota mark "io attack: <phase>" --tag swarm` at the start and end of each phase so the spike is labelled.
 
 ## 8. Deliverables
 

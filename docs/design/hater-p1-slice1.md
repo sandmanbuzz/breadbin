@@ -1,5 +1,7 @@
 # Hater Review: P1 Slice 1 - Shell $? && || Operators
 
+> **Done (2026-11-23): P1 slice 1 landed after its hater review.**
+
 ## Spec
 - `$?` expands to decimal exit status of last command.
 - `a && b` runs `b` only if `a` succeeded (exit status 0).

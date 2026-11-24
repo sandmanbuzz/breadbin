@@ -1,5 +1,7 @@
 # Recommendation: feat/cp2-sh-bss (sh input buffer 256 -> 128)
 
+> **Closed (2026-11-23): the owner accepted CP2 at 21 pages on main; the branch stays unmerged (`docs/wip.md`).**
+
 Written 2026-11 for the owner's decision. Docs only; nothing was merged or changed in code.
 
 ## What the branch does

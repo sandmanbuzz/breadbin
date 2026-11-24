@@ -1,5 +1,7 @@
 # Inherited userland: ROI inventory (2026-11-06)
 
+> **Historical (2026-11-23): sizes and counts are from 2026-11-06 and stale.**
+
 Read-only analysis; nothing built or run. Sizes are from the baseline row of docs/program-size-ledger.tsv and are stale; test counts are bare-word greps; GUESS marks are from skimming source.
 
 # Userland ROI inventory (read-only; main @ ledger baseline 433ed4e; fork base aa58d27 verified; 579 commits since)

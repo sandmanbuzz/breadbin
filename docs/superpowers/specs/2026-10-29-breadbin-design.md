@@ -1,5 +1,7 @@
 # c64os — a Unix-like operating system for the Commodore 64
 
+> **Historical (2026-11-23): the first design of the fork, superseded by `docs/roadmap.md`.**
+
 > Renamed to **Breadbin** on 2026-10-30 ("C64 OS" is an existing product). The original name is kept below as written.
 
 Date: 2026-10-29

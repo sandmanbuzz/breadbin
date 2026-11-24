@@ -1,5 +1,7 @@
 # Feature priority table (design note, draft)
 
+> **Historical (2026-11-23): its top picks (BRK kill, `$?`/`&&`/`||`, TAB) have landed and its byte budget is out of date. Still useful as costings for the E4 candidates in `docs/roadmap.md`.**
+
 Status: DRAFT for the owner, 2026-11-04. Drafted by a Sonnet pass over `main`, reviewed by a hostile Sonnet pass (arithmetic held; three BLOCK findings and several FIX findings, triaged in section 6), then edited by the hygiene/broad-view agent. Design only. Every kernel figure from a note is a hand estimate unless built.
 
 Frame: better than upstream on features and on user memory (TPA), Ultimate-first. Budget: **361 B below $CF00, 14 B above BSS+CODEHI** (VERIFIED `docs/size-ledger.tsv` last row 6bb4635; `docs/wip.md:21` and `cp3-spec.md:85` still say 354, the older row 45eacff; I use 361). Source is `main`. Doc lines are as read on `main`.

@@ -1,5 +1,7 @@
 # Decisions for the owner
 
+> **Historical (2026-11-23): a 2026-11-04 decision pack. CP2 is closed, NBUF is an approved experiment, the BRK kill and `$?` landed; the roster it cites is gone. Open items live in `docs/wip.md`.**
+
 A pack of the decisions the owner holds, one section each: the evidence and where it comes from, the options, the cost in bytes or pages, and a recommendation. Nothing here is decided; the owner decides. Sources are the design notes on main and the fleet roster (`fleet-store:fleet/roster.md`, post dates given). A figure with no source I could find is marked **unverified**. Written 2026-11-04.
 
 Room, as of the R17 measurement (roster, 2026-11-04, main ba69ca4): kernel room below `$CF00` 361 bytes; room above BSS and CODEHI 14 bytes; pool 154 pages, `$A200`. The policy keeps about one page of kernel headroom, so about 105 bytes are usable (`docs/wip.md:92`). Each pool page is 256 bytes of TPA at every prompt.
