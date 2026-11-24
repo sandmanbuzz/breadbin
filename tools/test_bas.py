@@ -117,8 +117,8 @@ class Bas(unittest.TestCase):
         self.assertGreater(len(uses), 25)
         for n, name in uses:
             self.assertEqual(int(n), 128 + table.index(name), name)
-        firsts = [k[0] for k in table]
-        self.assertEqual(firsts, sorted(firsts))            # grouped by first letter
+        self.assertEqual(table.index("PRINT"), 16)          # c_crunch's T_PRINT and T_REM (bas-rt.s) are 144, 145
+        self.assertEqual(table.index("REM"), 17)
         for i, k in enumerate(table):                       # no keyword after its own prefix
             self.assertFalse(any(k.startswith(e) for e in table[:i] if e != k), k)
 

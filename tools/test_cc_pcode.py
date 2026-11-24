@@ -31,6 +31,7 @@ def build(src, d, fstack=None, natives=None):
             f.write(text)
         objs.append(os.path.join(d, name + ".o"))
         pvmlink.sh("ca65", "-g", "-I", os.path.join(ROOT, "include"), "-I", os.path.join(ROOT, "src", "pvm"),
+                   "-I", os.path.join(ROOT, "src", "pc"),
                    "-o", objs[-1], s)
     return pvmlink.link_prog(os.path.join(d, "p.cx"), test_pvm.lib_dir(), objs)
 
