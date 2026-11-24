@@ -1,5 +1,5 @@
 import sys, time
-sys.path.insert(0, "/home/user/breadbin/tools")
+import os; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
 import vicetest
 img = sys.argv[1]; secs = int(sys.argv[2])
 with vicetest.Vice(img, warp=True) as v:

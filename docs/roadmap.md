@@ -10,7 +10,9 @@ Where this fork is heading. Realigned 2026-11-18 after the owner's direction on 
 - **Contract drift:** internal behaviour may improve if the call looks the same and does not violate least surprise. The user-facing contract matters more than the vintage one.
 - **Never buy the next milestone's problems.**
 
-## Where we are (2026-11-18)
+## Where we are (2026-11-24)
+
+Since 2026-11-18, on `main`: the VM runs as a shared library (L1 and L1s: `/lib/pvm`, two processes share one copy, `SharedVM`); the BASIC compiler's first slices (L3a, L3b, `docs/design/basic.md`) and compile to file; `SYS_LSEEK` (the `$CF00` page is now full); an opt-in 80-column console module (`con80`); the `fast.km` write path; `cut`, `uniq` and `calc`.
 
 Built and on `main`:
 
@@ -76,7 +78,7 @@ UCI v1 was the unlock: without it the filesystem limits make anything beyond toy
 
 ### E4. Quality of life, differentiators, upstream parity
 
-An epic of its own, not a backlog: what a user meets in the first ten minutes decides whether the rest is ever seen. Candidates, to be ranked when the epic starts (`docs/design/feature-priority.md` has costs for most, `docs/design/upstream-survey.md` the upstream side):
+An epic of its own, not a backlog: what a user meets in the first ten minutes decides whether the rest is ever seen. Candidates, to be ranked when the epic starts (`docs/design/upstream-survey.md` has the upstream side):
 
 - `2>` and `2>&1`; job control (Ctrl-Z, `fg`, `bg`); line-editor polish.
 - The web demo hosted (hosting is an owner call), which needs the root filesystem served from a preloaded REU, and doubles as a benchmark. The emulator (EmulatorJS with the libretro VICE core) is GPL: its parts are never committed here, and any hosted copy ships LICENSES and a source offer.

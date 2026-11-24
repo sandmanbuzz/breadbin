@@ -35,7 +35,7 @@ def pvm(body_main):
     """Cycles and result of a bytecode main under asim."""
     with open(os.path.join(BENCH, "bench.s")) as f:
         bench = f.read()
-    body = bench + "f_main: P_FUNC\n" + body_main + """
+    body = bench + "f_main:\n" + body_main + """
         P_W PO_SAW, buf
         P_CN 2
         WRITE_BUF

@@ -1,67 +1,9 @@
-# claude-quota: subscription quota for dispatchers
+# claude-quota: ask for the current quota
 
-`tools/claude-quota` (stdlib-only Python) reads how much of the Claude subscription quota is used, records it, and projects the burn. The fleet that builds Breadbin can dispatch work by remaining quota.
+`tools/claude-quota now [--human]` is an ad hoc query: it prints how much of the Claude subscription quota is used, per bucket (`five_hour`, `seven_day`, per-model, `extra_usage`) with `remaining` and the reset time. `raw` prints the upstream payload. Agents may run it to see live data; nothing polls, schedules or dispatches on it (agent management is manual).
 
-It calls the **unofficial** OAuth usage endpoint that Claude Code's `/usage` uses. It may change or break without notice; `raw` prints the upstream payload to see what drifted, and the DB keeps every raw payload so history can be re-parsed. It uses the logged-in user's own token, read at call time (`CLAUDE_QUOTA_TOKEN`, else the Claude Code credentials file or the macOS keychain). The token is never stored or printed.
+It calls the **unofficial** OAuth usage endpoint that Claude Code's `/usage` uses, so it may break without notice; `raw` shows what drifted. It uses the logged-in user's own token, read at call time (`CLAUDE_QUOTA_TOKEN`, else the Claude Code credentials file or the macOS keychain), and never stores or prints it.
 
-## Commands
+Exit codes: 0 ok; 2 auth (no token, expired, HTTP 401/403); 3 upstream or network error; 4 parse error. Errors are JSON on stderr. Tests: `tools/test_claude_quota.py` (in `make test-host`), against a local mock.
 
-- `now [--record] [--human]`: current utilization per bucket (`five_hour`, `seven_day`, per-model, `extra_usage`) with `remaining` and a `burn` block. Without `--record` it writes nothing and creates no DB; it reads history if a DB exists.
-- `poll [--quiet]`: fetch and record. A new row only when values change; otherwise the last row's `last_seen` is extended. Failed polls are logged too.
-- `history [--since 24h|7d|ISO] [--bucket B] [--format json|csv]`: usage rows and marks on one timeline.
-- `mark "text" [--tag T]`: record a workload event.
-- `raw`: the upstream payload.
-- `status [--json|--human] [--window-hours N]`: the token-free path (see below).
-
-Environment: `CLAUDE_QUOTA_DB` (default `~/.local/share/claude-quota/quota.db`), `CLAUDE_QUOTA_TOKEN`, `CLAUDE_CREDENTIALS`, `CLAUDE_QUOTA_BASE_URL` (tests point it at a local mock).
-
-The DB holds raw payloads: keep it private and never commit it. It is created mode 0600 in a 0700 directory, and `*.db` is in `.gitignore`.
-
-## Exit codes
-
-0 ok; 5 `status`: DB missing or empty; 6 `status`: stale; 2 auth (no token, expired, HTTP 401/403); 3 upstream or network error; 4 parse error (not JSON, no recognizable buckets). Errors are JSON on stderr.
-
-## For a dispatcher
-
-Run `tools/claude-quota now` and read `buckets.<name>.burn`. `will_cap_before_reset` is the throttle signal: true means the fitted rate reaches 100% before the window resets, so hold back new work. `hours_until_cap`, `projected_at_reset` and `remaining` give the margin. With under five minutes of history in the window, `burn` carries only a `note` and no rate; treat that as unknown, not safe. Windows are matched by `resets_at` within 120 s, since the reported time jitters.
-
-### `status`: token-free
-
-`tools/claude-quota status` reads only the history DB. It never touches the network, the token or the credentials, never creates or writes the DB, and costs no quota. The fleet reads this; one timer (below) polls. Output (JSON by default, `--human` for text, which adds a tier line and per bucket the rate, budget rate and ratio):
-
-- `buckets.<name>`: latest `utilization`, `remaining`, `resets_at` and the `burn` block (computed by the same code as `now`, against the latest recorded values with now = the current time).
-- `buckets.<name>.rate`: measured burn from snapshots, no network. `windows.1h|6h|24h` each hold `pct_per_hour` (net utilization change over the window divided by elapsed hours; `null` with fewer than two distinct readings or under 10 minutes between them), `span_hours`, `partial` (history shorter than the window) and `reset_in_window` (only the span since the reset is used). `measured_pct_per_hour` is the blend: the 1h rate if available, else 6h, else 24h, and `basis` names which (null if none). `hours_to_reset`, `budget_rate_pct_per_hour` (`(100 - utilization) / hours_to_reset`, null when the reset time has passed) and `ratio` (measured over budget; null if either is unknown or the budget is zero). `seven_day` also has `floor_headroom_pct` (`97 - utilization`). `seven_day` and `five_hour` carry `tier` and `tier_reason`.
-- `suggested_tier` (`G`, `Y`, `R` or `FLOOR`) with `reason`, `tier_now` and `tier_15m_ago`. Per bucket: ratio under 0.7 is G, 0.7 to 1.0 is Y, 1.0 or more is R, unknown rate is Y. The overall tier is the worse of `seven_day` and `five_hour`. `seven_day` at 97% or more is `FLOOR` (soft all-stop: hand to owner); `five_hour` at 90% or more is R; a stale poller is at least Y. A step toward G must hold in two readings 15 minutes apart: `status` computes the tier as of now and as of 15 minutes ago from the DB and `suggested_tier` is the worse of the two (`tier_15m_ago` is null when no data existed then). See `docs/quota-strategy.md`.
-- `last_poll_ok`, `last_poll_age_min`: the newest successful poll.
-- `stale`: true when there is no successful poll in the last 15 minutes. Do not trust the numbers then.
-- `recent_failures`: `count` of failed polls in the last hour, with `last_error` and `last_at`.
-- `--window-hours N` adds `buckets.<name>.window`: `delta` is the net change in utilization over the last N hours (latest value minus the value at the cutoff; `partial` is true when history starts inside the window; `reset_in_window` is true when the quota window rolled over, so the delta is net and may be negative).
-
-Exit 0 normally; 5 if the DB is missing or has no snapshots (a JSON error on stdout); 6 if stale (everything is still printed). Check the exit code before acting on the numbers.
-
-### Polling with a systemd user timer
-
-Tracking needs no model inference: a poll is one HTTP GET with the logged-in user's token. `tools/systemd/claude-quota.service` (oneshot, `claude-quota poll --quiet`) and `claude-quota.timer` (`OnBootSec=1min`, `OnUnitActiveSec=5min`, `Persistent=false`) are templates; the install directory appears as `@BIN@`, substituted at install time; the installer copies `claude-quota` there (`QUOTA_BIN_DIR`, default `~/.local/bin`). Install them with:
-
-```
-tools/install-quota-timer.sh              # dry run: prints the units and the commands, changes nothing
-tools/install-quota-timer.sh --yes        # copy to ~/.config/systemd/user, daemon-reload, enable --now
-tools/install-quota-timer.sh --uninstall --yes
-```
-
-The script is POSIX sh and defaults to a dry run; nothing is written or run without `--yes`. `QUOTA_UNIT_DIR` overrides the unit directory. Poll failures are recorded in the `polls` table (and so show up in `status` as `recent_failures`); the unit itself also fails visibly in `systemctl --user status claude-quota`. Token expiry shows as exit 2 (`OAuth token expired`) until any Claude Code command refreshes the token; `status` then goes stale after 15 minutes. The unit runs the installed copy, so it does not care where the clone is, which branch it is on, or whether it still exists; re-run the installer with `--yes` after changing `tools/claude-quota`. Run the timer only on one machine per DB.
-
-Record continuously with cron instead:
-
-```
-*/5 * * * * tools/claude-quota poll --quiet
-```
-
-Mark sprints so the history shows which work cost what:
-
-```
-tools/claude-quota mark "start: <sprint>" --tag swarm
-tools/claude-quota mark "stop: <sprint>" --tag swarm
-```
-
-Tests: `tools/test_claude_quota.py` (part of `make test-host`) runs against a local mock; nothing in the repo calls the live endpoint.
+The tool still carries the old recording subcommands (`poll`, `status`, `history`, `mark`) and a history DB; they are unused and slated for removal (see `docs/wip.md`).

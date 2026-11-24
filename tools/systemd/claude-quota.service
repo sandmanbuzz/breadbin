@@ -1,8 +1,0 @@
-[Unit]
-Description=Record Claude subscription quota usage (claude-quota poll)
-
-[Service]
-Type=oneshot
-# The install directory is substituted by tools/install-quota-timer.sh, which copies
-# claude-quota there, so the unit does not depend on where the clone is or which branch it is on.
-ExecStart=/usr/bin/env python3 @BIN@/claude-quota poll --quiet

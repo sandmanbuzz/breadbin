@@ -8,7 +8,7 @@
 #
 # [returns]
 # keys = ["clean", "count", "hits", "truncated"]
-# doc = "hits is up to 10 {file, line, kind, text}; kind is home-path, tmp-path, ipv4, local-host, user-name or mail; text is cut to 80 chars; only added lines are scanned. --head empty means the working tree (staged and unstaged) against --base"
+# doc = "hits is up to 10 {file, line, kind, text}; kind is home-path, tmp-path, ipv4, local-host, or a kind named in the gitignored .blocks/leak-scan.patterns (the owner's names, paths, mail domains); text is cut to 80 chars; only added lines are scanned. --head empty means the working tree (staged and unstaged) against --base"
 #
 # [params]
 # base = { type = "str", default = "main", help = "Ref the change is measured against" }
@@ -24,20 +24,29 @@
 """Outward-privacy check: absolute home paths, scratch paths, internal IPs, hostnames, local names."""
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 
 MAX_HITS = 10
-# Character classes keep this file from matching itself when it is the diff.
+# Generic patterns only. Names, home paths and mail domains of the person running the scan go in
+# .blocks/leak-scan.patterns (gitignored, never committed): one `kind<TAB>regex` per line, `#` comments.
 KINDS = [
-    ("home-path", r"[/]Users[/][A-Za-z]|[/]home[/]m[a]jick|[/]private[/]"),
+    ("home-path", r"[/]Users[/][A-Za-z]|[/]private[/]"),
     ("tmp-path", r"[/]tmp[/]claude|[/]var[/]folders[/]"),
     ("ipv4", r"\b(10|192[.]168|172[.](1[6-9]|2[0-9]|3[01]))[.][0-9]{1,3}[.][0-9]{1,3}([.][0-9]{1,3})?\b"),
     ("local-host", r"[A-Za-z0-9-][.]local\b"),
-    ("user-name", r"\bm[a]jick\b"),
-    ("mail", r"icl[o]ud[.]com|noreply[.]codeberg"),
 ]
+LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leak-scan.patterns")
+
+
+def local_kinds():
+    try:
+        rows = open(LOCAL).read().splitlines()
+    except OSError:
+        return []
+    return [tuple(r.split("\t", 1)) for r in rows if r.strip() and not r.startswith("#") and "\t" in r]
 
 
 def added_lines(base, head):
@@ -61,9 +70,9 @@ def main():
     ap.add_argument("--head", default="HEAD")
     args = ap.parse_args()
     try:
-        hits = []
+        hits, kinds = [], KINDS + local_kinds()
         for path, line, text in added_lines(args.base, args.head):
-            for kind, pat in KINDS:
+            for kind, pat in kinds:
                 if re.search(pat, text):
                     hits.append({"file": path, "line": line, "kind": kind, "text": text.strip()[:80]})
                     break

@@ -1,5 +1,5 @@
 import sys, time
-sys.path.insert(0, "/home/user/breadbin/tools")
+import os; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
 import vicetest
 with vicetest.Vice(sys.argv[1], warp=True) as v:
     time.sleep(10)

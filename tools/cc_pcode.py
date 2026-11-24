@@ -74,7 +74,7 @@ FSTACK = 1024                        # bytes of frame stack (return IPs, spills,
 POOL = 39680                         # the user pool ($0800-$A2FF): static bytes past it can never load
 STRAIGHT = 240                       # most bytecode bytes past the IP base before a renormalising branch
 
-SIZE = {"P_CN": 1, "P_OP": 1, "P_B": 2, "P_W": 3, "P_BR": 3, "P_ENTER": 3, "P_SYS": 2}
+SIZE = {"P_CN": 1, "P_OP": 1, "P_B": 2, "P_W": 3, "P_BR": 2, "P_ENTER": 3, "P_SYS": 2}
 
 # A program with `/* xops */` keeps the vector table of the VM's XOP opcodes (pvm.s) in the 56
 # bytes under the bottom of its frame stack, copied at start from `xtab` (28 words, which the
@@ -110,9 +110,12 @@ start:{xinit}  lda #<(cc_fstk{xoff})
         lda #<cc_fend
         ldy #>cc_fend
         jsr pvm_init
-        jsr fn_main
+        jsr @call
         lda P_ESTKL,x
         jmp SYS_EXIT
+@call:  jsr pvm_interp          ; the one native entry into bytecode: main starts at its ENTER
+        P_W PO_CALL, fn_main
+        P_OP PO_RET
 """
 
 # native helpers, called with CALL: X is the eval stack index (TOS at X, the one under it at X+1)
@@ -199,11 +202,14 @@ class Local(Var):
 
 
 class PGen(cc.Gen):
-    def __init__(self, funcs, fstack=FSTACK, xops=False, xcalls=None):
+    def __init__(self, funcs, fstack=FSTACK, xops=False, xcalls=None, voids=(), xvoid=()):
         super().__init__(funcs)
+        self.voids = frozenset(voids) | frozenset(xvoid)   # functions whose result nobody reads: they return nothing
+        self.valued = set()              # the functions whose result is read, or whose address is taken
         self.fstack = fstack
         self.xops = xops
         self.xcalls = xcalls or {}       # extern name -> its XOP opcode: a call is one byte
+        self.xvoid = xvoid               # those whose routine leaves nothing on the eval stack (/* xop N void */)
         self.helpers = set()
         self._need = {}
         self.loops = []                  # (break label, continue label), innermost last
@@ -232,7 +238,7 @@ class PGen(cc.Gen):
         self.straight += size
         if macro == "P_BR":
             self.straight = 0 if args[0] == "PO_BRNCH" else min(self.straight, 130)
-        elif macro == "P_W" and args[0] == "PO_CALL":
+        elif macro == "P_W" and args[0] in ("PO_CALL", "PO_NCAL"):
             self.straight = 0
 
     def const(self, v):
@@ -248,7 +254,7 @@ class PGen(cc.Gen):
 
     def helper(self, name):
         self.use(name)
-        self.op("P_W", "PO_CALL", name)
+        self.op("P_W", "PO_NCAL", name)
 
     def use(self, name):
         self.helpers.add(name)
@@ -291,6 +297,7 @@ class PGen(cc.Gen):
         total = sum(v.nbytes() for v in self.globals.values())
         if total > POOL:   # cc.STATIC_MAX is the native back end's (the on-system `as`); ca65 has none
             raise CompileError(f"the program's static variables take {total} bytes; the limit is {POOL}")
+        self.relax()
         helpers = "".join(HELPERS[h] for h in HELPERS if h in self.helpers)
         if self.externs:    # the natives may share the globals, by their labels
             helpers += "".join(f".export {v.label}\n" for v in self.globals.values())
@@ -298,13 +305,50 @@ class PGen(cc.Gen):
                 + '.segment "DATA"\n' + self.strings_text() + "\n".join(self.gdata) + "\n"
                 + '.segment "BSS"\n' + "\n".join(self.gres) + "\n" + '.segment "CODE"\n')
 
+    def relax(self):
+        """Branches are two bytes (a signed offset from the offset byte). One that cannot reach is
+        a JUMP (unconditional) or the opposite branch over a JUMP, found by growing the set of far
+        branches until no more are out of range (sizes only grow)."""
+        out = self.out
+        brs = [i for i, l in enumerate(out) if l.lstrip().startswith("P_BR ")]
+        far = {}
+        while True:
+            at, lab, pos = 0, {}, {}
+            for i, l in enumerate(out):
+                t = l.strip()
+                m = re.match(r"(P_\w+)", t)
+                pos[i] = at
+                if not m:
+                    if t.endswith(":"):
+                        lab[t[:-1]] = at
+                elif m[1] == "P_BR":
+                    at += (3 if "PO_BRNCH" in t else 5) if i in far else 2
+                else:
+                    at += SIZE[m[1]]
+            grew = False
+            for i in brs:
+                if i not in far:
+                    off = lab[out[i].rsplit(",", 1)[1].strip()] - (pos[i] + 1)
+                    if not -128 <= off <= 127:
+                        far[i] = True
+                        grew = True
+            if not grew:
+                break
+        for i in far:
+            op, tgt = (x.strip() for x in out[i].strip()[5:].split(","))
+            if op == "PO_BRNCH":
+                out[i] = f"        P_W PO_JUMP, {tgt}"
+            else:
+                skip = self.new_label()
+                inv = {"PO_BRTRU": "PO_BRFLS", "PO_BRFLS": "PO_BRTRU", "PO_BREQ": "PO_BRNE", "PO_BRNE": "PO_BREQ"}[op]
+                out[i] = f"        P_BR {inv}, {skip}\n        P_W PO_JUMP, {tgt}\n{skip}:"
+
     def function(self, name, params, body, line):
         self.fn, self.vars = name, {}
-        self.frame, self.temps, self.depth, self.straight = 0, [], 0, 0
+        self.frame, self.temps, self.depth, self.straight = 1, [], 0, 0
         lbl = "fn_" + name
         self.claim(lbl, line)
         self.lab(lbl)
-        self.ins("P_FUNC")
         self.op("P_ENTER", f"FS_{name}", len(params))
         for base, ptr, pname, pline in params:
             v = self.declare(pname, base, ptr, None, pline)
@@ -312,9 +356,10 @@ class PGen(cc.Gen):
                 self.frame += 1             # ENTER stores two bytes per parameter: a char reads the low one
         for s in body:
             self.stmt(s)
-        if not self.out[-1].strip().startswith("P_B PO_LEAVE"):     # after a return no label reaches this
-            self.const(0)
-            self.op("P_B", "PO_LEAVE", f"FS_{name}")
+        if not self.out[-1].strip().startswith("P_OP PO_LEAVE"):     # after a return no label reaches this
+            if name not in self.voids:
+                self.const(0)
+            self.op("P_OP", "PO_LEAVE")
         if self.frame > FRAME_MAX:
             raise CompileError(f"line {line}: {name}'s frame (parameters, locals and temporaries) takes "
                                f"{self.frame} bytes; the limit is {FRAME_MAX}")
@@ -415,17 +460,32 @@ class PGen(cc.Gen):
             e = s[1]
             if e[0] == "call" and e[1] == "puts":
                 self.puts(e[2], e[3], value=False)
+            elif e[0] == "call" and e[1] not in cc.BUILTINS:
+                self.call(e[1], e[2], e[3], False)
+                if e[1] not in self.voids:
+                    self.op("P_OP", "PO_DROP")
+                    self.pop()
             else:
                 self.expr(e)
                 self.op("P_OP", "PO_DROP")
                 self.pop()
         elif kind == "return":
+            void = self.fn in self.voids
             if s[1] is None:
-                self.const(0)
+                if not void:
+                    self.const(0)
+            elif void and s[1][0] == "num":     # nobody reads it: no op at all
+                pass
+            elif s[1][0] == "call" and s[1][1] in self.xvoid:    # return f(): f leaves nothing, the result is 0
+                self.call(s[1][1], s[1][2], s[1][3], False)
+                if not void:
+                    self.const(0)
             else:
                 self.check(("int", False), self.expr(s[1]), s[1], s[2], "return")
+                if void:
+                    self.op("P_OP", "PO_DROP")
                 self.pop()
-            self.op("P_B", "PO_LEAVE", f"FS_{self.fn}")
+            self.op("P_OP", "PO_LEAVE")
         elif kind == "if":
             _, cond, then, other, _line = s
             else_l, end_l = self.new_label(), self.new_label()
@@ -635,6 +695,10 @@ class PGen(cc.Gen):
             self.pop()
             self.op("P_OP", "PO_NEG")
             return ("int", False)
+        if kind in ("neg", "comp") and e[1][0] == "num" and e[1][1] == (1 if kind == "neg" else 0):
+            self.op("P_OP", "PO_MINUS1")    # -1 and ~0: one byte, not a 1 and a NEG
+            self.push()
+            return ("int", False)
         if kind in ("neg", "comp"):
             if self.expr(e[1])[1]:
                 raise CompileError(f"line {e[2]}: {'-' if kind == 'neg' else '~'} of a pointer is not in this slice")
@@ -661,6 +725,7 @@ class PGen(cc.Gen):
         if x[0] == "var":
             if x[1] not in self.vars and x[1] not in self.globals and x[1] in self.funcs:
                 name = x[1]             # a function's address, typed char *: for icall
+                self.valued.add(name)
                 self.op("P_W", "PO_LA", name if name in self.externs else "fn_" + name)
                 self.push()
                 return ("char", True)
@@ -753,7 +818,7 @@ class PGen(cc.Gen):
         self.pop()
         return (ta[0], True) if ta[1] else ("int", False)
 
-    def call(self, name, args, line):
+    def call(self, name, args, line, value=True):
         if name not in self.funcs:
             raise CompileError(f"line {line}: undefined function {name}")
         params = self.params[name]
@@ -765,9 +830,14 @@ class PGen(cc.Gen):
             self.op("P_OP", self.xcalls[name])
             self.straight = 0               # the VM renormalises IP after an XOP, as after a CALL
         else:
-            self.op("P_W", "PO_CALL", name if name in self.externs else "fn_" + name)
+            self.op("P_W", "PO_NCAL", name) if name in self.externs else self.op("P_W", "PO_CALL", "fn_" + name)
         self.pop(len(args))
-        self.push()
+        if value and name in self.xvoid:
+            raise CompileError(f"line {line}: {name} leaves no result (xop void)")
+        if value:
+            self.valued.add(name)
+        if name not in self.voids:
+            self.push()
 
     def arguments(self, name, args, params, line):
         """Push the arguments, the first deepest; through frame temporaries when they would not
@@ -793,10 +863,13 @@ class PGen(cc.Gen):
         self.temps += reversed(slots)
 
     def icall(self, args, line):
-        """icall(p): call the code at p, a bytecode function (one that starts with JSR
-        pvm_interp, as &f gives) or native code; no arguments, its result is the value."""
+        """icall(p): call the code at p, a bytecode function (as &f gives; ICAL is
+        bytecode-only, a native is called directly by name: NCAL); no arguments, its result is the value."""
         if len(args) != 1:
             raise CompileError(f"line {line}: icall takes 1 argument, not {len(args)}")
+        x = args[0][1] if args[0][0] == "addr" else None
+        if x and x[0] == "var" and x[1] in self.externs and x[1] not in self.vars and x[1] not in self.globals:
+            raise CompileError(f"line {line}: icall of the native {x[1]}: ICAL runs bytecode only; call it by name")
         if not self.expr(args[0])[1]:
             raise CompileError(f"line {line}: argument 1 of icall: a number where a pointer is needed")
         self.op("P_OP", "PO_ICAL")          # pops the address, pushes the result
@@ -860,13 +933,28 @@ def compile_pcode(src, fstack=None):
                 raise CompileError(f"line {line}: function {name} is defined twice")
             seen.add(name)
         xops = bool(re.search(r"^/\*\s*xops\s*\*/", src, re.M))
-        xcalls = {}
-        for m in re.finditer(r"^extern\s[^;]*?(\w+)\s*\([^;]*\)[ \t]*;[ \t]*/\*[ \t]*xop[ \t]+(\d+)", src, re.M):
-            n = int(m.group(2))
-            if not xops or n % 2 or not 200 <= n <= 254:
-                raise CompileError(f"extern {m.group(1)}: xop {n}: needs /* xops */ and an even number, 200 to 254")
-            xcalls[m.group(1)] = n
-        return PGen(funcs, fstack, xops, xcalls).program(funcs, globs)
+        xcalls, xvoid = {}, set()
+        # an extern's comment: "xop N" (a one-byte op), "void" (it leaves no result: no DROP after a call
+        # and none may read it; the routine pops its own arguments), or "xop N void"
+        for m in re.finditer(r"^extern\s[^;]*?(\w+)\s*\([^;]*\)[ \t]*;[ \t]*/\*[ \t]*(?:xop[ \t]+(\d+))?([ \t]*void)?[ \t]*\*/", src, re.M):
+            if m.group(3):
+                xvoid.add(m.group(1))
+            if m.group(2):
+                n = int(m.group(2))
+                if not xops or n % 2 or not 200 <= n <= 254:
+                    raise CompileError(f"extern {m.group(1)}: xop {n}: needs /* xops */ and an even number, 200 to 254")
+                xcalls[m.group(1)] = n
+        g = PGen(funcs, fstack, xops, xcalls, xvoid=xvoid)
+        text = g.program(funcs, globs)
+        # a program may keep functions valued whatever it does with their results: /* valued f g */. Code
+        # that names a function by its place (a compiled BASIC file calls the rt_ functions by offsets) needs
+        # the same bytes from every program that has it, and a function's code depends on which of the
+        # functions it calls are void.
+        forced = {n for m in re.finditer(r"^/\*[ \t]*valued\b([^*]*)\*/", src, re.M) for n in m.group(1).split()}
+        voids = {n for n, _, b, _ in funcs if b is not None and n != "main"} - g.valued - forced
+        if voids:               # a second pass: nobody reads those results, so no 0 to return and no DROP
+            text = PGen(funcs, fstack, xops, xcalls, voids, xvoid).program(funcs, globs)
+        return text
     except RecursionError:
         raise CompileError("expression nested too deeply for the compiler") from None
     finally:

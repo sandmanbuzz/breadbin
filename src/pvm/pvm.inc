@@ -1,6 +1,6 @@
 ; pvm.inc - p-code for the Breadbin VM (src/pvm/pvm.s) as ca65 macros. The opcode numbers are
-; PLASMA's (docs/design/pvm.md). A bytecode function starts with P_FUNC; addresses are emitted as
-; .word so the CX relocation sees them; branch offsets are relative to the offset word.
+; PLASMA's (docs/design/pvm.md). A bytecode function starts at its ENTER (native entry: P_FUNC); addresses are emitted as
+; .word so the CX relocation sees them; branch offsets are one signed byte from the offset byte.
 .import pvm_init, pvm_interp
 .importzp pvm_errno
 
@@ -19,8 +19,13 @@ P_IFP   = $2D
 P_IP    = $26
 P_IPY   = $2F
 
-.macro P_FUNC
+.macro P_FUNC                   ; a native entry into bytecode: what follows is bytecode (run with NCAL or JSR)
         jsr pvm_interp
+.endmacro
+.macro P_START fn               ; native code JSRs here to run bytecode function fn, which comes back with RET
+        jsr pvm_interp
+        P_W PO_CALL, fn
+        P_OP PO_RET
 .endmacro
 .macro P_CN n                   ; 0-15
         .byte (n) * 2
@@ -35,9 +40,10 @@ P_IPY   = $2F
         .byte op
         .word .loword(w)
 .endmacro
-.macro P_BR op, target          ; branch: offset from the offset word
+.macro P_BR op, target          ; branch: a signed byte, from the offset byte (cc_pcode.py relaxes far ones to a JUMP)
         .byte op
-        .word .loword((target) - *)
+        .assert ((target) - *) >= -128 .and ((target) - *) <= 127, error, "branch out of range"
+        .byte .lobyte((target) - *)
 .endmacro
 .macro P_ENTER framesize, params
         .byte $58, framesize, params
@@ -73,6 +79,7 @@ PO_ISLT   = $46
 PO_BRFLS  = $4C
 PO_BRTRU  = $4E
 PO_BRNCH  = $50
+PO_NCAL   = $52
 PO_CALL   = $54
 PO_ICAL   = $56
 PO_ENTER  = $58

@@ -924,13 +924,14 @@ class Session3(Base):
 
     def test_real_sigint_sigterm_sighup_in_restore_are_blocked(self):
         import signal
+        prior = signal.getsignal(signal.SIGINT)     # whatever the launching shell left (SIG_IGN under nohup or &)
         for sg in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             self.fake.configs[self.KERNAL] = "JiffyDOS-C64.bin"
             self.fake.config_puts.clear()
             self.during_restore(lambda: os.kill(os.getpid(), sg))
             self.assertEqual(self.fake.configs[self.KERNAL], "JiffyDOS-C64.bin", sg)
             self.assertConfigRestored()
-            self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)   # handlers put back
+            self.assertIs(signal.getsignal(signal.SIGINT), prior)   # handlers put back
 
     def test_restore_puts_the_kernal_first_and_reboots_even_if_resume_fails(self):
         sim = Sim(self.fake, self.prg, loads=["ok"] * 3, labels=self.labels)
@@ -1147,10 +1148,11 @@ class Session3(Base):
             return orig(g)
         session.ConfigGuard.restore = restore
         self.addCleanup(setattr, session.ConfigGuard, "restore", orig)
+        prior = signal.getsignal(signal.SIGINT)
         sim = Sim(self.fake, self.prg, loads=["ok"], labels=self.labels)
         self.run_session(sim, plan="1 C 1\n")
         self.assertEqual(seen, [signal.SIG_IGN])
-        self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)
+        self.assertIs(signal.getsignal(signal.SIGINT), prior)
 
     def test_restore_announces_itself(self):
         sim = Sim(self.fake, self.prg, loads=["ok"], labels=self.labels)
