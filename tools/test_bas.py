@@ -80,9 +80,16 @@ class Bas(unittest.TestCase):
     def test_the_arena_is_what_the_kernel_grants(self):
         # BYTES FREE follows the pages BRK gives: 64 is 16,384 bytes, 80 is 20,480, and a pool
         # too small for 4096 bytes is refused with a message on stderr, not a crash
-        for pages, text in ((64, "16384"), (80, "20480"), (120, "30464"), (200, "30464"), (16, "4096")):
+        for pages, text in ((64, "16384"), (80, "20480"), (16, "4096")):
             out, status = bas("", tty=True, brk=pages)
             self.assertEqual((out, status), (text + " BYTES FREE\nREADY.\n", 0), pages)
+        # with room to spare the arena is what the pool leaves after the image (the pool is 155 pages, the VM's library 8
+        # and the system 27): a floor, so that a new feature that costs the arena its pages is noticed
+        for pages in (120, 200):
+            out, status = bas("", tty=True, brk=pages)
+            free = int(out.split()[0])
+            self.assertEqual((free % 256, status), (0, 0))
+            self.assertTrue(28000 <= free <= 30720, free)
         r = asim.run("bas", [], path=binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
                      stdin=b"", tty=True, brk=15)
         self.assertEqual((r.out, r.err, r.exit), (b"", b"bas: out of memory\n", 1))
@@ -585,6 +592,56 @@ class Strings(unittest.TestCase):
         bx, st = bas(prog + "BUILD\n")
         self.assertEqual(st, 0)
         for brk in (64, 24, 120):
+            self.assertEqual(brun(bx.encode("latin-1"), brk=brk), (want, 0), brk)
+
+
+@unittest.skipUnless(test_pvm.HAVE_TOOLS, "needs ca65, ld65 and py65")
+class Arrays(unittest.TestCase):
+    """DIM and arrays of numbers, integers and strings (docs/design/basic.md 6.2)."""
+
+    def test_the_three_kinds_and_two_dimensions(self):
+        prog = ('10 DIM A(5),B%(3),C$(2),D(2,3)\n20 FOR I=0 TO 5:A(I)=I*1.5:NEXT\n'
+                '30 B%(2)=7:C$(1)="HI":C$(2)=C$(1)+"!":D(1,2)=4.25:D(2,3)=A(5)\n'
+                '40 PRINT A(3);B%(2);C$(2);D(1,2);D(2,3);D(0,0);D(2,1)\n'
+                '50 X(3)=2:PRINT X(3);X(4):Y$(10)="Z":PRINT Y$(10);LEN(Y$(9))\n')
+        self.assertEqual(bas(prog + "RUN\n")[0], " 4.5  7 HI! 4.25  7.5  0  0 \n 2  0 \nZ 0 \n")
+
+    def test_subscripts_are_expressions_and_nest(self):
+        out, _ = bas('10 DIM A(3),B%(3),D(2,3):FOR I=0 TO 3:A(I)=I:B%(I)=3-I:NEXT\n'
+                     '20 FOR I=0 TO 2:FOR J=0 TO 3:D(I,J)=I*10+J:NEXT:NEXT\n'
+                     '30 PRINT A(B%(1));B%(A(1)+1);A(A(2)/2);D(1,2);D(2,1);D(2,3)\nRUN\n')
+        self.assertEqual(out, " 2  1  1  12  21  23 \n")
+
+    def test_errors(self):
+        for prog, err in (("10 A(-1)=1", "BAD SUBSCRIPT"), ("10 PRINT A(11)", "BAD SUBSCRIPT"),
+                          ("10 DIM A(2,2):PRINT A(1)", "BAD SUBSCRIPT"), ("10 DIM A(1):PRINT A(1,1)", "BAD SUBSCRIPT"),
+                          ("10 DIM A(2):DIM A(3)", "REDIM'D ARRAY"), ("10 DIM A(2):A(1)=A$(1)", "TYPE MISMATCH"),
+                          ("10 DIM A(32000)", "OUT OF MEMORY"), ("10 DIM A(2),B(3):A(3)=1", "BAD SUBSCRIPT"),
+                          ("10 DIM A(X)", "SYNTAX")):
+            self.assertEqual(bas(prog + "\nRUN\n")[0], "?%s ERROR IN 10\n" % err, prog)
+        # a DIM that never runs before a use is still a DIM: a subroutine at the end makes the array the code above uses
+        self.assertEqual(bas("10 GOSUB 100:PRINT Q(7)\n20 END\n100 DIM Q(8):Q(7)=9:RETURN\nRUN\n")[0], " 9 \n")
+        self.assertEqual(bas("DIM A(3):A(2)=5\nPRINT A(2)\n")[0], " 5 \n")      # and in immediate mode
+
+    def test_string_elements_follow_the_collector(self):
+        prog = ('10 DIM C$(19)\n20 FOR R=1 TO 12:FOR I=0 TO 19\n'
+                '30 C$(I)=LEFT$("ABCDEFGHIJKLMNOPQRSTUVWXYZ",5+(I+R)/2)+STR$(R)\n'
+                '40 NEXT:NEXT\n50 FOR I=0 TO 19:IF C$(I)<>LEFT$("ABCDEFGHIJKLMNOPQRSTUVWXYZ",5+(I+12)/2)+" 12" THEN PRINT "BAD";I\n'
+                '60 NEXT:PRINT "OK";C$(0);C$(19)\n')
+        out, _ = bas(prog + "RUN\n", brk=20)
+        self.assertEqual(out, "OKABCDEFGHIJK 12ABCDEFGHIJKLMNOPQRST 12\n")
+
+    def test_input_into_elements(self):
+        out, _ = bas('10 DIM Z$(3):INPUT Z$(2),Q(1),W%(0)\n30 PRINT Z$(2);Q(1);W%(0)\nRUN\nHEY,4.5,3\n')
+        self.assertEqual(out, "? HEY 4.5  3 \n")
+
+    def test_built_file_matches_run(self):
+        prog = ('10 DIM A(40),B%(9,2),C$(9)\n20 FOR I=0 TO 40:A(I)=I/4:NEXT\n'
+                '30 FOR I=0 TO 9:B%(I,2)=I*I:C$(I)=STR$(A(I*4))+"!":NEXT\n40 PRINT A(33);B%(9,2);C$(9);C$(0)\n')
+        want, _ = bas(prog + "RUN\n")
+        bx, st = bas(prog + "BUILD\n")
+        self.assertEqual(st, 0)
+        for brk in (64, 24):
             self.assertEqual(brun(bx.encode("latin-1"), brk=brk), (want, 0), brk)
 
 

@@ -4,7 +4,7 @@
    natives in rt.s by offsets from rt_mark; docs/design/basic.md 6.1). Included first in each,
    which keeps those offsets the same; tools/test_bas.py checks that they are. */
 
-/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next rt_sres rt_scat rt_sset rt_scmp rt_len rt_asc rt_chr rt_left rt_right rt_mid rt_str rt_val rt_inp rt_ifld */   /* tools/cc_pcode.py: a
+/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next rt_sres rt_scat rt_sset rt_scmp rt_len rt_asc rt_chr rt_left rt_right rt_mid rt_str rt_val rt_inp rt_ifld rt_sub rt_sw */   /* tools/cc_pcode.py: a
    program that never reads one of these (brun) would make it void, and the offsets would differ from bas's */
 
 extern int rt_mark();   /* rt.s, for the compiled code: these take their arguments from the */
@@ -24,7 +24,7 @@ extern int c_fmt(char *buf);
 extern int c_throw(int e);
 
 int err;                /* the error numbers are emsg's */
-char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|STRING TOO LONG|TYPE MISMATCH|";
+char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|STRING TOO LONG|TYPE MISMATCH|BAD SUBSCRIPT|REDIM'D ARRAY|";
 char ctl[193];          /* GOSUB and FOR entries, each with its tag last: G (3 bytes) the return
                            address; F (13) the variable, the body, the limit and the step */
 int csp;
@@ -552,6 +552,16 @@ int rt_ifld() {         /* the next field of the line rt_inp read, as a temporar
         scopy(t + 1, ib + fs - nul, fl);
     }
     return t;
+}
+
+int rt_sub(int i, int n) {      /* a subscript i of 0 to n: itself, else BAD SUBSCRIPT */
+    if (i < 0 || i > n) c_throw(14);
+    return i;
+}
+
+int rt_sw(int a, int v) {       /* the word v at a (an array element's address) */
+    putw(nul + a, v);
+    return 0;
 }
 
 int report(int e, int line) {   /* error e as MS prints it; line -1 for none */

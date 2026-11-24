@@ -54,7 +54,7 @@ int vbot;               /* the variables: [vbot, MEM) */
 int clim;               /* where the code must stop: vbot, or the string heap once there is one */
 int straight;           /* bytes since the VM last reset Y: pvm.s addresses code as base + Y */
 int eline;              /* the line a compile error is in */
-char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|LEFT$|RIGHT$|MID$|LEN|CHR$|ASC|STR$|VAL|INPUT|";
+char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|LEFT$|RIGHT$|MID$|LEN|CHR$|ASC|STR$|VAL|INPUT|DIM|";
                         /* the keywords: the program holds each as a token, 128 + its place
                            here, written as the number with "tk NAME" in a comment (test_bas checks the
                            numbers; bas-rt.s has PRINT's and REM's); a keyword before its prefixes, as
@@ -310,35 +310,52 @@ int toint(int k) {
     return 2;
 }
 
-int var() {             /* the variable at si (a letter): its value's address, made 0 if new;
-                           vint says whether it is an integer. Two characters count, as MS */
-    int c1 = src[si];
-    int c2 = 0;
-    int p = vbot;
-    int size;
+int nc1;                /* the name name() parsed: its two characters, flagged for the type */
+int nc2;
+int arr;                /* the last var() was an array element: its address is on the eval stack */
+
+int name() {            /* the variable name at si (a letter): two characters count, as MS; vint says its type */
+    nc1 = src[si];
+    nc2 = 0;
     si = si + 1;
     while (c_letter() || c_digit()) {   /* a keyword is a token: it ends the name */
-        if (!c2) c2 = src[si];
+        if (!nc2) nc2 = src[si];
         si = si + 1;
     }
     vint = 0;
     if (src[si] == '%') {
         si = si + 1;
         vint = 1;
-        c2 = c2 | 128;
+        nc2 = nc2 | 128;
     } else if (src[si] == '$') {
         si = si + 1;
         vint = 2;
-        c1 = c1 | 128;
-        c2 = c2 | 128;
+        nc1 = nc1 | 128;
+        nc2 = nc2 | 128;
     }
+    return 0;
+}
+
+int esz(int p) {        /* the size of the table entry at p: a variable's 6 or 4 bytes, or an array's header (name, the
+                           counts of its two dimensions: the second 0 for one) and its elements, 4 bytes or 2 */
+    int n;
+    if (!(mem[p] & 32)) return 6 - (mem[p + 1] & 128) / 64;
+    n = mem[p + 2] + mem[p + 3] * 256;
+    if (mem[p + 4] + mem[p + 5]) n = n * (mem[p + 4] + mem[p + 5] * 256);
+    return 6 + n * (4 - (mem[p + 1] & 128) / 64);
+}
+
+int slot(int c1, int c2) {      /* the table entry named so, or -1 */
+    int p = vbot;
     while (p < msz) {
-        if (mem[p] == c1 && mem[p + 1] == c2) return addr(p + 2);
-        p = p + 6 - (mem[p + 1] & 128) / 64;
+        if (mem[p] == c1 && mem[p + 1] == c2) return p;
+        p = p + esz(p);
     }
-    size = 6;
-    if (vint) size = 4;
-    p = cend;
+    return -1;
+}
+
+int grab(int size) {    /* a new table entry of size bytes, zeroed, at vbot: its offset (OUT OF MEMORY, 0, if it does not fit) */
+    int p = cend;
     if (hlo) p = htop - addr(0);
     if (vbot - size < p) {
         c_fail(2);
@@ -347,10 +364,117 @@ int var() {             /* the variable at si (a letter): its value's address, m
     vbot = vbot - size;
     hhi = addr(vbot);
     if (!hlo) clim = vbot;
-    mem[vbot] = c1;
-    mem[vbot + 1] = c2;
-    for (p = 2; p < size; p = p + 1) mem[vbot + p] = 0;
-    return addr(vbot + 2);
+    for (p = 0; p < size; p = p + 1) mem[vbot + p] = 0;
+    return vbot;
+}
+
+int var() {             /* the variable at si (a letter): its value's address, made 0 if new;
+                           vint says whether it is an integer. An element of an array (arr): its address is
+                           pushed instead, and the value returned is 0 */
+    int p;
+    arr = 0;
+    name();
+    if (src[si] == '(') return elem();
+    p = slot(nc1, nc2);
+    if (p >= 0) return addr(p + 2);
+    p = grab(6 - (nc2 & 128) / 64);
+    if (err) return 0;
+    mem[p] = nc1;
+    mem[p + 1] = nc2;
+    return addr(p + 2);
+}
+
+int array(int n1, int n2) {     /* the array nc1, nc2 of n1 elements (n2 by n1 for two dimensions, else 0), made if it is
+                                   not there: its offset. An explicit DIM that disagrees with it is a REDIM'D ARRAY */
+    int p = slot(nc1 | 32, nc2);
+    int q;
+    if (p >= 0) {
+        if (n1 && (mem[p + 2] + mem[p + 3] * 256 != n1 || mem[p + 4] + mem[p + 5] * 256 != n2)) c_fail(15);
+        return p;
+    }
+    if (!n1) {
+        n1 = 11;                /* not DIMed: 0 to 10, as MS */
+        if (n2) n2 = 11;
+    }
+    q = n1;
+    if (n2) q = 15360 / n2;
+    if (n1 > q || n1 > 15360) {
+        c_fail(2);
+        return 0;
+    }
+    q = n1;
+    if (n2) q = n1 * n2;
+    p = grab(6 + q * (4 - (nc2 & 128) / 64));
+    if (err) return 0;
+    mem[p] = nc1 | 32;
+    mem[p + 1] = nc2;
+    mem[p + 2] = n1;
+    mem[p + 3] = n1 / 256;
+    mem[p + 4] = n2;
+    mem[p + 5] = n2 / 256;
+    return p;
+}
+
+int more() {            /* does the parenthesis at si hold a comma of its own: a second subscript */
+    int i = si;
+    int d = 0;
+    while (src[i]) {
+        if (src[i] == '(') d = d + 1;
+        if (src[i] == ')') {
+            d = d - 1;
+            if (!d) return 0;
+        }
+        if (src[i] == ',' && d == 1) return 1;
+        i = i + 1;
+    }
+    return 0;
+}
+
+int elem() {            /* A(i) or A(i, j): the element's address on the eval stack, after a check of each subscript */
+    int n2 = more();
+    int p = array(0, n2);
+    int m1;
+    int m2;
+    int sz = 4 - (nc2 & 128) / 64;      /* the subscripts' own variables change nc2 and vint: keep them */
+    int ty = vint;
+    if (err) return 0;
+    m1 = mem[p + 2] + mem[p + 3] * 256;
+    m2 = mem[p + 4] + mem[p + 5] * 256;
+    if (!m2 != !n2) c_fail(14);     /* a different number of subscripts */
+    need('(');
+    deep = deep + 2;
+    c_opw(38 /* PO_LA */, addr(p + 6));
+    epush(1);
+    toint(climb(1));
+    pushint(m1 - 1);
+    epush(1);
+    pcall(&rt_sub);
+    epush(-1);
+    if (m2) {
+        need(',');
+        pushint(m2);
+        epush(1);
+        c_op1(134 /* PO_MUL */);
+        epush(-1);
+        toint(climb(1));
+        pushint(m2 - 1);
+        epush(1);
+        pcall(&rt_sub);
+        epush(-1);
+        c_op1(130 /* PO_ADD */);
+        epush(-1);
+    }
+    pushint(sz);
+    epush(1);
+    c_op1(134 /* PO_MUL */);
+    epush(-1);
+    c_op1(130 /* PO_ADD */);
+    epush(-1);
+    need(')');
+    deep = deep - 2;
+    arr = 1;
+    vint = ty;
+    return 0;
 }
 
 int constant() {        /* a number at si: digits, a point, digits (spaces among them skipped,
@@ -469,6 +593,15 @@ int primary() {
     if (c > 154 && c < 163 && c_tok(c)) return sfn(c);
     if (c_letter()) {
         k = var();
+        if (arr) {                      /* the address is on the stack: load by the type */
+            if (vint) {
+                c_op1(98 /* PO_LW */);
+                return vint + 1;
+            }
+            c_xop(240 /* c_ldv */);
+            epush(-1);
+            return npush(1);
+        }
         if (vint) {
             c_opw(106 /* PO_LAW */, k);
             epush(1);
@@ -622,6 +755,25 @@ int assign(int a, int isint, int k) {
     return 0;
 }
 
+int eassign(int t, int k) {     /* the value of kind k, and the element's address under it (or, for a number, anywhere) */
+    if (!t) {
+        tonum(k);
+        c_xop(246 /* c_stv */);
+        npush(-1);
+        epush(-1);
+        return 0;
+    }
+    if (t == 2) {
+        if (k != 3) c_fail(13);
+        ecall(&rt_sset);
+    } else {
+        toint(k);
+        ecall(&rt_sw);
+    }
+    epush(-2);
+    return 0;
+}
+
 int let() {             /* [LET] v = expression */
     int a;
     int i;
@@ -632,6 +784,10 @@ int let() {             /* [LET] v = expression */
     }
     a = var();
     i = vint;
+    if (arr) {
+        if (!need('=')) return 0;
+        return eassign(i, climb(1));
+    }
     if (!need('=')) return 0;
     if (i == 2) {
         c_opw(38 /* PO_LA */, a);
@@ -741,7 +897,7 @@ int fors() {            /* FOR v = a TO b [STEP c] */
         return 0;
     }
     a = var();
-    if (vint) c_fail(1);  /* as MS: the variable is a number */
+    if (vint || arr) c_fail(1);  /* as MS: the variable is a number */
     if (!need('=')) return 0;
     assign(a, 0, climb(1));
     if (!need(153 /* tk TO */)) return 0;
@@ -769,7 +925,7 @@ int nexts() {           /* NEXT [v [, w ...]] */
         a = 0;
         if (c_letter()) {
             a = var();
-            if (vint) c_fail(1);
+            if (vint || arr) c_fail(1);
         }
         c_opw(38 /* PO_LA */, a);
         pcall(&rt_next);
@@ -797,7 +953,7 @@ int sres() {            /* before a statement with strings in it, room for the t
         }
         i = i + 1;
     }
-    if (!s || src[si] == 145 /* tk REM */) return 0;
+    if (!s || src[si] == 145 /* tk REM */ || src[si] == 164 /* tk DIM */) return 0;
     n = n + s;
     if (n > 6) n = 6;
     pushint(n);
@@ -813,6 +969,8 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
     int c;
     int a;
     int k;
+    int t;
+    int d = 0;
     if (c_sp() == '"') {
         c_tok('"');
         strlit();
@@ -825,12 +983,14 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
     i = si;
     while (!err) {
         c = src[i];
-        if (c == 0 || c == ':' || c == ',') {
+        if (c == '(') d = d + 1;
+        if (c == ')') d = d - 1;
+        if (c == 0 || c == ':' || (c == ',' && !d)) {
             if (p != '$') m = m + (1 << n);
             n = n + 1;
             p = 0;
             if (c != ',') break;
-        } else if (c != ' ') p = c;
+        } else if (c != ' ' && !d && c != ')') p = c;
         i = i + 1;
     }
     if (n > 7) c_fail(11);
@@ -845,20 +1005,80 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
             return 0;
         }
         a = var();
-        if (vint == 2) {
+        t = vint;
+        if (t == 2 && !arr) {
             c_opw(38 /* PO_LA */, a);
             epush(1);
-            pcall(&rt_ifld);
-            epush(1);
-            assign(a, 2, 3);
+        }
+        pcall(&rt_ifld);
+        epush(1);
+        if (t == 2) {
+            if (arr) eassign(2, 3);
+            else assign(a, 2, 3);
         } else {
-            pcall(&rt_ifld);
-            epush(1);
             ecall(&rt_val);
             epush(-1);
             npush(1);
-            assign(a, vint, 1);
+            if (arr) eassign(t, 1);
+            else assign(a, t, 1);
         }
+    }
+    return 0;
+}
+
+int dims() {            /* DIM v(n [, m]) [, ...]: the sizes are numbers, and the arrays are made here, as the program is
+                           compiled (MS makes one when its DIM runs: predim has found them all first) */
+    int n1;
+    int n2;
+    while (!err) {
+        c_sp();
+        if (!c_letter()) {
+            c_fail(1);
+            return 0;
+        }
+        arr = 0;
+        name();
+        if (!need('(')) return 0;
+        c_sp();
+        n1 = number();
+        n2 = 0;
+        if (n1 < 0 || n1 > 15359) c_fail(2);
+        if (c_sp() == ',') {
+            c_tok(',');
+            c_sp();
+            n2 = number() + 1;
+            if (n2 < 1 || n2 > 15360) c_fail(2);
+        }
+        if (!need(')') || err) return 0;
+        array(n1 + 1, n2);
+        if (c_sp() != ',') return 0;
+        c_tok(',');
+    }
+    return 0;
+}
+
+int predim() {          /* every DIM of the program, before a line is compiled: a subroutine at the end may DIM what the lines
+                           before it use */
+    int p = 0;
+    int q;
+    int c;
+    while (p < ptop && !err) {
+        src = mem + p + 5;
+        si = 0;
+        q = 0;
+        c = src[0];
+        while (c && c != 145 /* tk REM */ && !err) {
+            if (c == '"') q = 1 - q;
+            si = si + 1;
+            if (c == 164 /* tk DIM */ && !q) {
+                nd = 0;
+                ed = 0;
+                dims();
+                if (err) eline = lineno(p);
+            }
+            c = src[si];
+        }
+        p = next(p);
     }
     return 0;
 }
@@ -872,6 +1092,7 @@ int stmt() {
         return 0;
     }
     if (c_tok(163 /* tk INPUT */)) return inputs();
+    if (c_tok(164 /* tk DIM */)) return dims();
     if (c_tok(138 /* tk LET */)) return let();
     if (c_tok(136 /* tk IF */)) return ifs_();
     if (c_tok(133 /* tk GOSUB */)) {
@@ -965,6 +1186,7 @@ int compile() {         /* the program into code from ptop: pend, or err and eli
     eline = -1;
     pend = 0;
     cend = ptop;
+    predim();
     prologue();
     while (p < ptop && !err) {
         cline(p);
