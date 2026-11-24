@@ -6,7 +6,7 @@ Standard library only. Written from the firmware documentation
 tools/fake_ultimate.py; NOT yet run against hardware. Things that are unverified
 until it is are marked UNVERIFIED.
 
-    u = Ultimate("192.168.1.64", password=None)
+    u = Ultimate("<ultimate-host>", password=None)
     u.info()                          # product, firmware version
     u.readmem(0x0400, 1000)           # DMA read of C64 memory
     u.writemem(0x0277, b"hi")

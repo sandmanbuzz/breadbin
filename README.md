@@ -163,7 +163,6 @@ Shell built-ins: `cd`, `exit`, `kill`, `jobs`.
 | `docs/process.md` | how sessions work together: branches, the machine lock, kickoff |
 | `docs/size-ledger.tsv` | kernel bytes and headroom per landing (`make size` measures) |
 | `tools/land.sh` | merges a branch into main after building and running the host tests |
-| `docs/superpowers/` | original design spec and implementation plan |
 | `tools/setup-vice-roms.sh` | fetches the ROMs VICE needs for `make test` |
 
 ## How it works

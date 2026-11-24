@@ -12,7 +12,7 @@ make size             # bytes per kernel module and the headroom; quote it in co
 tools/ci/run.sh test-smoke      # boot, echo, pipe, Ctrl-C: about 2 minutes
 tools/ci/run.sh test-only T="tests.test_system.Boot.test_24_editor"
 tools/ci/run.sh test-keyboard   # real keystrokes (xdotool); also test-console; docs/ci.md
-tools/ci/sharded.sh             # the whole suite, six containers, one slot each (podman; 136 tests in about 24 minutes)
+tools/ci/sharded.sh             # the whole suite, six containers at once (podman; about 24 minutes; `sharded.sh --check` prints the test count)
 # Serial `run.sh test` holds every slot for about two hours and is refused without --serial-because "<why>".
 ```
 
