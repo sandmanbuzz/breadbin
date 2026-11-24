@@ -4,7 +4,7 @@
 ; bas's p-code by mk/pvm.mk (src/pc/NAME-rt.s goes with src/pc/NAME.c).
 .include "inc/rt.s"
 
-.export c_crunch, c_find, c_const, incsi, c_sres, c_more, c_binop, c_relop
+.export c_crunch, c_find, c_const, incsi, c_sres, c_more, c_binop, c_relop, c_vars
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 .export xtab
 
@@ -614,6 +614,34 @@ c_more: jsr srcp                ; Y = 0
         bne @l
         .byte $2C               ; BIT abs: skip the LDA #0 (A is 1)
 @n:     lda #0
+        ldy #0
+        jmp pushay
+
+; c_vars(): INPUT's count of variables from si: 1 + the commas outside parentheses, to a : or the end.
+c_vars: stx sx
+        jsr srcp                ; Y = 0
+        sty t0                  ; the depth
+        ldx #1
+        dey
+@l:     iny
+        lda (ptr),y
+        beq @e
+        cmp #':'
+        beq @e
+        cmp #'('
+        bne :+
+        inc t0
+:       cmp #')'
+        bne :+
+        dec t0
+:       cmp #','
+        bne @l
+        lda t0
+        bne @l
+        inx
+        bne @l                  ; (a line is under 256 bytes)
+@e:     txa
+        ldx sx
         ldy #0
         jmp pushay
 

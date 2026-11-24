@@ -106,11 +106,6 @@ int inheap(int s) {
     return s && s - hlo > 0 && s - htop < 0;
 }
 
-int slen(int s) {       /* a string's length; "" (0) has none */
-    if (s) return nul[s];
-    return 0;
-}
-
 int sfree(int s) {      /* a temporary used up */
     if (inheap(s) && getw(nul + s - 2) == -1) putw(nul + s - 2, 0);
     return 0;
@@ -572,6 +567,12 @@ int rt_sw(int a, int v) {       /* the word v at a (an array element's address) 
     return 0;
 }
 
+int slen(int s) {       /* a string's length; "" (0) has none. Here, after the runtime the compiled
+                           code calls (rt_prs to rt_sw), its address marks that block's end (rtid) */
+    if (s) return nul[s];
+    return 0;
+}
+
 int report(int e, int line) {   /* error e as MS prints it; line -1 for none */
     fresh();
     if (e != 9) outc('?');     /* BREAK is a message and no error */
@@ -628,6 +629,6 @@ int reloc(int c, int n, int vb, int un) {  /* the n bytes of code at address c, 
 }
 
 int rtid() {            /* what a compiled file must agree with: the sizes of the two runtime blocks its
-                           offsets are in (rt.s's natives and the bytecode from rt_prs to report) */
-    return (&rt_end - nul - (&rt_mark - nul)) * 3 + (&report - nul - (&rt_prs - nul));
+                           offsets are in (rt.s's natives and the bytecode from rt_prs to slen) */
+    return (&rt_end - nul - (&rt_mark - nul)) * 3 + (&slen - nul - (&rt_prs - nul));
 }

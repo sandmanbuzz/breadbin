@@ -47,6 +47,7 @@ extern int c_sres();
 extern int c_more();
 extern int c_binop(int c);
 extern int c_relop(int m); /* void */
+extern int c_vars();
 extern int c_grow(int n);       /* up to n pages from the kernel for mem (bas-rt.s); the pages granted */
 
 char *mem;              /* MEM: the arena, msz bytes of pages the kernel grants at start (c_grow) */
@@ -906,13 +907,12 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
                            look ahead, and the kinds go to it as a mask, put in the constant once the variables are
                            parsed), then each variable takes its field (rt_ifld) */
     int m = 0;
-    int n = 1;
+    int n;
     int i;
     int c;
     int a;
     int k;
     int t;
-    int d = 0;
     if (c_sp() == '"') {
         c_tok('"');
         strlit();
@@ -921,15 +921,7 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
         pushi(0);
     }
     c_sp();
-    i = si;
-    while (1) {
-        c = src[i];
-        if (!c || c == ':') break;
-        if (c == '(') d = d + 1;
-        if (c == ')') d = d - 1;
-        if (c == ',' && !d) n = n + 1;
-        i = i + 1;
-    }
+    n = c_vars();
     if (n > 7) c_fail(11);
     pushi(n * 128);
     i = cend - 1 - (n > 1);     /* the constant's low byte (a CB's or a CW's): the mask is added to it */
