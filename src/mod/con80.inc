@@ -6,7 +6,7 @@
 ; Bank 0 layout (the kernel will choose; constants here for the POC):
 ;   BMP   $2000-$3F3F  bitmap, VIC cell order (40x25 cells x 8 bytes); the BSS sits in the
 ;                      192 bytes after it ($3F40-$3FFF), which c80_clear zeroes with the bitmap
-;   FONT  404 bytes    glyph-major, 4 bytes per screen code 0-$64 (what to_screen returns): byte j =
+;   FONT  420 bytes    glyph-major, 4 bytes per screen code 0-$68 (to_screen's 0-$64, sc80's $65-$68): byte j =
 ;                      row j in the high nibble, row j+4 in the low (4 pixel columns a nibble);
 ;                      gp unpacks a glyph into the 20-byte gl/gr buffers that put reads
 ; Stock zero page keeps its meaning: $D3 = column (0-79 here), $D6 = row.
@@ -273,6 +273,18 @@ tog:    jsr cellp
 cur_none: plp
         rts
 
+; sc80: A = ASCII -> screen code, as to_screen (carry set: prints nothing). { | } ~ ($7B-$7E) are
+; the glyphs $65-$68, after the kernel's own 101; everything else is to_screen's.
+sc80:   cmp #$7b
+        bcc @k
+        cmp #$7f
+        bcs @k
+        sec
+        sbc #$16
+        clc
+        rts
+@k:     jmp to_screen
+
 ; cellp: dp = the cell of (COLD, ROWD); carry = odd column; A = the half's pixel mask ($f0 / $0f)
 cellp:  lda ROWD
         ldx #dp
@@ -370,7 +382,7 @@ run:    lda #80
         cpx rlim
         bcs @e                  ; the row is full
         iny
-        jsr to_screen           ; (keeps X, Y)
+        jsr sc80                ; (keeps X, Y)
         bcs @c                  ; prints nothing
         sta rb,x
         inx

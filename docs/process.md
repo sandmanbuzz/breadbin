@@ -55,9 +55,9 @@ The repository is the mailbox. Results and requests go in:
 - `docs/hardware-notes.md`: measurements, with the command, the date and the commit. Hardware session writes, kernel session reads.
 - `docs/wip.md`: who is doing what, the work packages, and the "state" block a fresh context needs. Update it when the plan changes, not for every step.
 - A request to another session: a short entry in the other's file ("Request from <role>, <date>: what, why, the smallest version"). Answer it in the same place.
-- `tools/claude-quota`: subscription quota, burn projection and sprint marks for dispatching by remaining quota; see `docs/claude-quota.md`.
+- `tools/claude-quota now`: an ad hoc read of the subscription quota (`docs/claude-quota.md`). Agent management is manual; nothing dispatches on it.
 
-Sessions message each other at the addresses on the roster (`fleet/roster.md` on the `fleet-store` branch: `git show fleet-store:fleet/roster.md`); the address of a parked session is dead and a message to it fails quietly. All worktrees share one set of refs, so before you start `git log --oneline -15 main` shows what the others did. Do not `git pull` from origin: it is a stale mirror.
+There is no roster or fleet coordination any more; the owner manages sessions by hand. All worktrees share one set of refs, so before you start `git log --oneline -15 main` shows what the others did. Do not `git pull` from origin: it is a stale mirror.
 
 ## Kickoff procedure (a new or replacement session)
 
@@ -66,7 +66,7 @@ Sessions message each other at the addresses on the roster (`fleet/roster.md` on
 3. Toolchain: `make` needs cc65 (`ca65`, `ld65`); VICE tests need `x64sc`, `c1541`, xvfb and the ROMs from `tools/setup-vice-roms.sh`. JiffyDOS images go **outside** the repo; point `BREADBIN_VICE_ARGS` at them (see `docs/testing.md`). Run `make test-host` once to prove the environment.
 4. Scratchpad: use one directory per session outside the repo (the session's scratchpad under `/tmp/claude-<uid>/`, which is tmpfs and lost at reboot). Put in it: downloaded sources (each archive in its own new, empty directory, never executed), ROM images, logs, throw-away scripts. Anything another session needs, or you will want after a restart, gets committed: reports to `docs/design/research/`, experiment scripts to `experiments/<topic>/` with a README.
 5. Containers: a local container only needs the toolchain above, the repo checked out, and the shared lock directory. Record the recipe (image, packages, mounts) in `docs/testing.md` the first time it works, so the next session can reproduce it.
-6. Say hello to the facilitator at its roster address (the role, the branch, what you are about to do) and add your lane to the board in `docs/wip.md` when it changes.
+6. Say in `docs/wip.md` what you are about to do when it changes what others should expect.
 
 ## Tests
 
@@ -90,7 +90,7 @@ From the debriefs of the parked sessions (2026-11): what they say cost them time
 - Findings go in one append-only log. A wrong conclusion is retracted in the log, in the open, not edited away.
 
 **Working together**
-- Claim work in `fleet/roster.md` before building (two sessions once built the same module tooling at once).
+- Say what you are building (in `docs/wip.md`) before a long build; two sessions once built the same module tooling at once.
 - A message to a peer carries the result, the commands, and what was NOT run.
 - Hands-needed asks go last and one at a time, with the exact state wanted ("drive on, device 8, nothing else on the bus").
 - Relay an owner decision verbatim and say who answered. A policy finding is a branch, not an applied edit.

@@ -18,3 +18,11 @@ vice-profile  [--image …] [--command ""] [--setup ""] [--points "bread iec_rea
 lib-weight    [--objs build/p] [--lib …] [--cfg src/prog.cfg] [--bin build/root/bin] Per-module weight of…
 vice-prof     --path <path> [--top 12]          Sum the vice-profile lines of a BREADBIN_VICE_PROFILE=1 run:…
 wt-state      [--base main]                     Worktree hygiene: counts, which trees are safe to remove,…
+
+PORTABILITY. Which blocks work outside this repo's own environment:
+- Any repo: bin-diff, json-peek (plain files); wt-state (any git repo with worktrees; `--base` names the landed ref).
+- Any cc65/ld65 project: lbl-sym, routine-sizes (they read `-Ln` and `-m` output).
+- Need this repo's build and tools (`make` output, `tools/asim.py`, py65): chess-diff, lib-weight, pvm-prof.
+- Need the containerised VICE (`tools/ci/run.sh`) and a built image; the analysis half also runs on a saved trace: vice-profile, vice-prof.
+- Written for the owner's machine, of no use elsewhere: leak-scan (the owner's names and paths live in the gitignored `.blocks/leak-scan.patterns`, `kind<TAB>regex` per line; without it only generic patterns run).
+Blocks may be missing from the index above (it lists at most `index_max`); `ls .blocks/*.py` shows them all.

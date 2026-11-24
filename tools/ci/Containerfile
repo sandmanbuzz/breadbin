@@ -7,7 +7,7 @@
 # version fails loudly instead of drifting. The base image tag floats inside trixie-slim;
 # pin it by digest (podman manifest inspect) when a build must be reproducible to the byte.
 # A toolchain change is a deliberate edit here, checked with `make size` and the d64 hash
-# against the previous image (docs/runner-move.md).
+# against the previous image.
 FROM mirror.gcr.io/library/debian:trixie-slim
 # VICE lives in "contrib" on Debian.
 RUN sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources \
