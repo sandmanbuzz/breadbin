@@ -13,7 +13,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from vicetest import Vice  # noqa: E402
+from vicetest import make_target  # noqa: E402
 import test_pvm  # noqa: E402
 import test_cc_pcode  # noqa: E402
 from tests import test_compiled  # noqa: E402
@@ -155,7 +155,7 @@ class PCode(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.results = {}
-        with Vice(make_disk()) as v:
+        with make_target(make_disk()) as v:
             v.wait_shell()
             for name in PROGRAMS:
                 cls.results[name] = v.run(f"/home/{name}", timeout=120)
@@ -192,7 +192,7 @@ class CompiledC(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.results = {}
-        with Vice(make_disk(C_PROGRAMS)) as v:
+        with make_target(make_disk(C_PROGRAMS)) as v:
             v.wait_shell()
             for name in C_PROGRAMS:
                 cls.results[name] = v.run(f"/home/{name}", timeout=120)
@@ -225,7 +225,7 @@ class Basic(unittest.TestCase):
         pg_used = label("pg_used")
         npool = (int(re.search(r"^KSTART\s*=\s*\$([0-9A-Fa-f]+)", open(os.path.join(ROOT, "src", "kernel", "k.inc")).read(),
                               re.M).group(1), 16) >> 8) - 8
-        with Vice(make_disk()) as v:
+        with make_target(make_disk()) as v:
             v.wait_shell()
 
             def used():
@@ -264,7 +264,7 @@ class Basic(unittest.TestCase):
         pg_used = label("pg_used")
         npool = (int(re.search(r"^KSTART\s*=\s*\$([0-9A-Fa-f]+)", open(os.path.join(ROOT, "src", "kernel", "k.inc")).read(),
                               re.M).group(1), 16) >> 8) - 8
-        with Vice(make_disk()) as v:
+        with make_target(make_disk()) as v:
             v.wait_shell()
 
             def used():
@@ -299,7 +299,7 @@ class SharedVM(unittest.TestCase):
         lib_base, lib_ref = label("lib_base"), label("lib_ref")
         lib_np = label("lib_np")
 
-        with Vice(make_disk()) as v:
+        with make_target(make_disk()) as v:
             v.wait_shell()
 
             def used():
