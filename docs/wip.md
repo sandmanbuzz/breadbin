@@ -174,3 +174,8 @@ From `git branch -a --merged main` / `--no-merged main` on 2026-11-06 (dates are
   3. Design doc still says VICE tests not run
 - All three fixed and pushed (1d48353)
 - Waiting for final verdict
+
+## L3 compile-to-file (B1 to B3), feat/bas-crush, 2026-11-24
+
+`bas` BUILD writes a `.bx` file; `brun` runs it (basic.md 6.1). Gate at 33c80dd (code as at 908d465): full sharded suite with stock ROMs 168 of 168 (s5 25 of 25), with JiffyDOS ROMs 168 of 168 (14 skips by design), smoke 4 of 4 (the Ctrl-C test fails only when started with SIGINT ignored, e.g. a shell `&`), host py65 153 OK. Hardware (Ultimate, drive A on bus 9): the BUILD-then-brun test, `Basic.test_hello`, `CompiledC` and `SharedVM` pass; `SharedVM` failed once on a stray `[12] done` job line and passed on rerun, `test_hello` once on an HTTP timeout. The harness leaves drive A on `/Temp/t_pvm.d64`; it was remounted on `/Temp/test.d64` (mode `unlinked`).
+Hater gate found, fixed in 908d465: reloc walked an `x LDK`'s 4 constant bytes as code; brun's size check wrapped at 16 bits; BUILD ignored write errors. Accepted, not fixed: a corrupt `.bx` can still point variable and call offsets anywhere (the VM has no sandbox); `rtid` is a sum of sizes (the host layout test compares labels); LEAVE trusts frame byte 0; no +-127/-128 branch edge tests. `bas` is 9,209 B with BSS: 36 pages, 7 B to spare. Next: B4 manual page, then L3d.
