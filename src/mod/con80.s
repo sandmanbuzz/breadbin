@@ -8,7 +8,7 @@
 ; screen matrix is the text screen at $0400. Init fails with ENOMEM if a process holds a page in
 ; $20-$3F: unload or exit it first.
 ;
-; The font (con80.font: 101 glyphs, screen codes 0-$64, 4 bytes each, packed one nibble per row
+; The font (con80.font: 105 glyphs, screen codes 0-$68 (sc80 maps { | } ~ to $65-$68), 4 bytes each, packed one nibble per row
 ; pair; gp unpacks it) is the Novaterm 9.6 80-column font (misc/font80.novaterm), reordered to Breadbin's
 ; screen codes by tools/soft80_render.py. Source: novaterm-source.tgz at
 ; zimmers.net/pub/cbm/c64/comm/Novaterm/. Evidence for adopting it: owner-asserted public release
