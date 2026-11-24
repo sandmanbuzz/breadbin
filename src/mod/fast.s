@@ -172,6 +172,8 @@ unreserve:
 
 ; ft_close: in place of the jmp iec_ch_close that closes a drive's command channel
 ; (A = drive, X = 15): the drive frees every buffer, so the program has to go up again.
+; The sector kept in RB2 is from the disk that was in the drive then: a close is where the
+; disk can change, so the next read sends a throwaway request first (ft_inval), which drops it.
 ft_close:
         pha
         and #3
@@ -179,6 +181,8 @@ ft_close:
         lda #0
         sta state,y
         sta ovl,y
+        lda #1
+        sta ft_inval
         pla
         jmp iec_ch_close
 
