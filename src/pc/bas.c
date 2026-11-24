@@ -119,7 +119,7 @@ int addr(int i) {       /* mem[i] as an address */
    code follows from ptop to pend (0 when out of date), then free space, then the variables
    from vbot to the top. */
 
-int lineno(int p) {
+int mw(int p) {          /* the word at mem[p]: a line's number, an array's dimension */
     return getw(mem + p);
 }
 
@@ -168,7 +168,7 @@ int store(int n, int t, int len) {  /* line n is ib from t, len bytes; none dele
     int p = find(n);
     int old = 0;
     int add = 0;
-    if (p < ptop && lineno(p) == n) old = next(p) - p;
+    if (p < ptop && mw(p) == n) old = next(p) - p;
     if (len) add = len + 6;
     if (ptop - old + add > msz) {
         c_fail(2);
@@ -192,7 +192,7 @@ int list(int a, int b) {
     int c;
     int q;              /* 1 in a string, 2 in a REM: no tokens there */
     while (p < ptop) {
-        n = lineno(p);
+        n = mw(p);
         if (!c_ult(n, a) && !c_ult(b, n)) {
             outu(n);
             outc(' ');
@@ -294,7 +294,6 @@ int toint(int k) {
 
 int nc1;                /* the name name() parsed: its two characters, flagged for the type */
 int nc2;
-int arr;                /* the last var() was an array element: its address is on the eval stack */
 
 int name() {            /* the variable name at si (a letter): two characters count, as MS; vint says its type */
     nc1 = src[si];
@@ -318,13 +317,16 @@ int name() {            /* the variable name at si (a letter): two characters co
     return 0;
 }
 
+int vsz(int c2) {      /* the bytes of a value, by the name's second character: a number's 4, an int's or a string's 2 */
+    return 4 - (c2 & 128) / 64;
+}
+
 int esz(int p) {        /* the size of the table entry at p: a variable's 6 or 4 bytes, or an array's header (name, the
                            counts of its two dimensions: the second 0 for one) and its elements, 4 bytes or 2 */
-    int n;
-    if (!(mem[p] & 32)) return 6 - (mem[p + 1] & 128) / 64;
-    n = mem[p + 2] + mem[p + 3] * 256;
-    if (mem[p + 4] + mem[p + 5]) n = n * (mem[p + 4] + mem[p + 5] * 256);
-    return 6 + n * (4 - (mem[p + 1] & 128) / 64);
+    int n = 1;
+    if (!(mem[p] & 32)) return 2 + vsz(mem[p + 1]);
+    if (mw(p + 4)) n = mw(p + 4);
+    return 6 + n * mw(p + 2) * vsz(mem[p + 1]);
 }
 
 int slot(int c1, int c2) {      /* the table entry named so, or -1 */
@@ -352,15 +354,14 @@ int grab(int size) {    /* a new table entry of size bytes, zeroed, at vbot: its
 }
 
 int var() {             /* the variable at si (a letter): its value's address, made 0 if new;
-                           vint says whether it is an integer. An element of an array (arr): its address is
-                           pushed instead, and the value returned is 0 */
+                           vint says whether it is an integer. An element of an array: its address is
+                           pushed instead, and the value returned is 0 (as after an error) */
     int p;
-    arr = 0;
     name();
     if (src[si] == '(') return elem();
     p = slot(nc1, nc2);
     if (p >= 0) return addr(p + 2);
-    p = grab(6 - (nc2 & 128) / 64);
+    p = grab(2 + vsz(nc2));
     if (err) return 0;
     mem[p] = nc1;
     mem[p + 1] = nc2;
@@ -372,7 +373,7 @@ int array(int n1, int n2) {     /* the array nc1, nc2 of n1 elements (n2 by n1 f
     int p = slot(nc1 | 32, nc2);
     int q;
     if (p >= 0) {
-        if (n1 && (mem[p + 2] + mem[p + 3] * 256 != n1 || mem[p + 4] + mem[p + 5] * 256 != n2)) c_fail(15);
+        if (n1 && (mw(p + 2) != n1 || mw(p + 4) != n2)) c_fail(15);
         return p;
     }
     if (!n1) {
@@ -387,14 +388,12 @@ int array(int n1, int n2) {     /* the array nc1, nc2 of n1 elements (n2 by n1 f
     }
     q = n1;
     if (n2) q = n1 * n2;
-    p = grab(6 + q * (4 - (nc2 & 128) / 64));
+    p = grab(6 + q * vsz(nc2));
     if (err) return 0;
     mem[p] = nc1 | 32;
     mem[p + 1] = nc2;
-    mem[p + 2] = n1;
-    mem[p + 3] = n1 / 256;
-    mem[p + 4] = n2;
-    mem[p + 5] = n2 / 256;
+    putw(mem + p + 2, n1);
+    putw(mem + p + 4, n2);
     return p;
 }
 
@@ -413,49 +412,52 @@ int more() {            /* does the parenthesis at si hold a comma of its own: a
     return 0;
 }
 
+int pushi(int v) {      /* pushint, counted on the eval stack */
+    pushint(v);
+    return epush(1);
+}
+
+int iop(int op) {       /* a VM op on the eval stack's top two ints */
+    c_op1(op);
+    return epush(-1);
+}
+
+int isub(int m) {       /* the subscript on top checked for 0 to m */
+    pushi(m);
+    pcall(&rt_sub);
+    return epush(-1);
+}
+
 int elem() {            /* A(i) or A(i, j): the element's address on the eval stack, after a check of each subscript */
     int n2 = more();
     int p = array(0, n2);
     int m1;
     int m2;
-    int sz = 4 - (nc2 & 128) / 64;      /* the subscripts' own variables change nc2 and vint: keep them */
+    int sz = vsz(nc2);      /* the subscripts' own variables change nc2 and vint: keep them */
     int ty = vint;
     if (err) return 0;
-    m1 = mem[p + 2] + mem[p + 3] * 256;
-    m2 = mem[p + 4] + mem[p + 5] * 256;
+    m1 = mw(p + 2);
+    m2 = mw(p + 4);
     if (!m2 != !n2) c_fail(14);     /* a different number of subscripts */
     need('(');
     deep = deep + 2;
     c_opw(38 /* PO_LA */, addr(p + 6));
     epush(1);
     toint(climb(1));
-    pushint(m1 - 1);
-    epush(1);
-    pcall(&rt_sub);
-    epush(-1);
+    isub(m1 - 1);
     if (m2) {
         need(',');
-        pushint(m2);
-        epush(1);
-        c_op1(134 /* PO_MUL */);
-        epush(-1);
+        pushi(m2);
+        iop(134 /* PO_MUL */);
         toint(climb(1));
-        pushint(m2 - 1);
-        epush(1);
-        pcall(&rt_sub);
-        epush(-1);
-        c_op1(130 /* PO_ADD */);
-        epush(-1);
+        isub(m2 - 1);
+        iop(130 /* PO_ADD */);
     }
-    pushint(sz);
-    epush(1);
-    c_op1(134 /* PO_MUL */);
-    epush(-1);
-    c_op1(130 /* PO_ADD */);
-    epush(-1);
+    pushi(sz);
+    iop(134 /* PO_MUL */);
+    iop(130 /* PO_ADD */);
     need(')');
     deep = deep - 2;
-    arr = 1;
     vint = ty;
     return 0;
 }
@@ -507,6 +509,12 @@ int strlit() {          /* a string literal after its quote: a CS, whose address
     return epush(1) + 1;
 }
 
+int val() {             /* VAL of the string on the eval stack, to the number stack */
+    ecall(&rt_val);
+    epush(-1);
+    return npush(1);
+}
+
 int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$, 156 RIGHT$, 157 MID$, 158 LEN,
                            159 CHR$, 160 ASC, 161 STR$, 162 VAL): its kind */
     int k = 3;
@@ -528,12 +536,7 @@ int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$
         } else if (t == 160) {
             pcall(&rt_asc);
             k = 2;
-        } else if (t == 162) {
-            ecall(&rt_val);
-            epush(-1);
-            npush(1);
-            k = 1;
-        } else {
+        } else if (t == 162) k = val(); else {
             need(',');
             toint(climb(1));
             if (t == 157) {
@@ -576,7 +579,7 @@ int primary() {
     if (c > 154 && c < 163 && c_tok(c)) return sfn(c);
     if (c_letter()) {
         k = var();
-        if (arr) {                      /* the address is on the stack: load by the type */
+        if (!k) {                       /* an element: its address is on the stack, load by the type */
             if (vint) {
                 c_op1(98 /* PO_LW */);
                 return vint + 1;
@@ -683,8 +686,7 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
                 npush(-2);
                 epush(1);
             }
-            c_op1(0 /* PO_CN 0 */);
-            epush(1);
+            pushi(0);
             relop(p);
             k = epush(-1);
             continue;
@@ -693,9 +695,8 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
         if (p <= 4) {
             toint(k);
             toint(climb(p + 1));
-            if (p == 4) c_op1(148 /* PO_BAND */);
-            else c_op1(150 /* PO_IOR */);
-            k = epush(-1);
+            if (p == 4) k = iop(148 /* PO_BAND */);
+            else k = iop(150 /* PO_IOR */);
             continue;
         }
         if (k == 3) {           /* a string: + joins */
@@ -719,41 +720,37 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
 
 /* ---- statements ---- */
 
-int assign(int a, int isint, int k) {
-    if (isint == 2) {           /* the address of the variable was pushed before the expression */
+int assign(int a, int t, int k) {       /* the value of kind k to the variable of type t at a (var's), or for
+                                           a = 0 to the array element whose address is under the value */
+    if (t == 2) {               /* the address of the variable was pushed before the expression */
         if (k != 3) c_fail(13);
         ecall(&rt_sset);
-        epush(-2);
-        return 0;
+        return epush(-2);
     }
-    if (isint) {
+    if (t) {
         toint(k);
-        c_opw(122 /* PO_SAW */, a);
-        epush(-1);
-        return 0;
+        if (a) {
+            c_opw(122 /* PO_SAW */, a);
+            return epush(-1);
+        }
+        ecall(&rt_sw);
+        return epush(-2);
     }
     tonum(k);
-    c_xopw(202 /* x STV */, a);
+    if (a) {
+        c_xopw(202 /* x STV */, a);
+        return npush(-1);
+    }
+    c_xop(246 /* c_stv */);
     npush(-1);
-    return 0;
+    return epush(-1);
 }
 
-int eassign(int t, int k) {     /* the value of kind k, and the element's address under it (or, for a number, anywhere) */
-    if (!t) {
-        tonum(k);
-        c_xop(246 /* c_stv */);
-        npush(-1);
-        epush(-1);
-        return 0;
+int sla(int a, int t) {        /* a string variable's address, for rt_sset: an element's is pushed already */
+    if (t == 2 && a) {
+        c_opw(38 /* PO_LA */, a);
+        epush(1);
     }
-    if (t == 2) {
-        if (k != 3) c_fail(13);
-        ecall(&rt_sset);
-    } else {
-        toint(k);
-        ecall(&rt_sw);
-    }
-    epush(-2);
     return 0;
 }
 
@@ -767,15 +764,8 @@ int let() {             /* [LET] v = expression */
     }
     a = var();
     i = vint;
-    if (arr) {
-        if (!need('=')) return 0;
-        return eassign(i, climb(1));
-    }
     if (!need('=')) return 0;
-    if (i == 2) {
-        c_opw(38 /* PO_LA */, a);
-        epush(1);
-    }
+    sla(a, i);
     return assign(a, i, climb(1));
 }
 
@@ -825,7 +815,7 @@ int jump(int t) {       /* JUMP to line t: a line not compiled yet is fixed up w
         return c_emit(0);
     }
     p = find(t);
-    if (p == ptop || lineno(p) != t || (cur == -1 && !pend)) {
+    if (p == ptop || mw(p) != t || (cur == -1 && !pend)) {
         c_fail(10);
         return 0;
     }
@@ -880,7 +870,7 @@ int fors() {            /* FOR v = a TO b [STEP c] */
         return 0;
     }
     a = var();
-    if (vint || arr) c_fail(1);  /* as MS: the variable is a number */
+    if (vint || !a) c_fail(1);  /* as MS: the variable is a number */
     if (!need('=')) return 0;
     assign(a, 0, climb(1));
     if (!need(153 /* tk TO */)) return 0;
@@ -908,7 +898,7 @@ int nexts() {           /* NEXT [v [, w ...]] */
         a = 0;
         if (c_letter()) {
             a = var();
-            if (vint || arr) c_fail(1);
+            if (vint || !a) c_fail(1);
         }
         c_opw(38 /* PO_LA */, a);
         pcall(&rt_next);
@@ -959,8 +949,7 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
         strlit();
         need(';');
     } else {
-        c_op1(0 /* PO_CN 0 */);
-        epush(1);
+        pushi(0);
     }
     c_sp();
     i = si;
@@ -977,8 +966,7 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
         i = i + 1;
     }
     if (n > 7) c_fail(11);
-    pushint(n * 128 + m);
-    epush(1);
+    pushi(n * 128 + m);
     ecall(&rt_inp);
     epush(-2);
     for (k = 0; k < n && !err; k = k + 1) {
@@ -989,22 +977,12 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
         }
         a = var();
         t = vint;
-        if (t == 2 && !arr) {
-            c_opw(38 /* PO_LA */, a);
-            epush(1);
-        }
+        sla(a, t);
         pcall(&rt_ifld);
         epush(1);
-        if (t == 2) {
-            if (arr) eassign(2, 3);
-            else assign(a, 2, 3);
-        } else {
-            ecall(&rt_val);
-            epush(-1);
-            npush(1);
-            if (arr) eassign(t, 1);
-            else assign(a, t, 1);
-        }
+        c = 3;
+        if (t != 2) c = val();
+        assign(a, t, c);
     }
     return 0;
 }
@@ -1019,7 +997,6 @@ int dims() {            /* DIM v(n [, m]) [, ...]: the sizes are numbers, and th
             c_fail(1);
             return 0;
         }
-        arr = 0;
         name();
         if (!need('(')) return 0;
         c_sp();
@@ -1057,7 +1034,7 @@ int predim() {          /* every DIM of the program, before a line is compiled: 
                 nd = 0;
                 ed = 0;
                 dims();
-                if (err) eline = lineno(p);
+                if (err) eline = mw(p);
             }
             c = src[si];
         }
@@ -1132,7 +1109,7 @@ int endline() {         /* the IFs' false branches come here */
 }
 
 int cline(int p) {      /* compile the line at p */
-    int n = lineno(p);
+    int n = mw(p);
     int i = 0;
     putw(mem + p + 3, cend);
     while (i < nfix) {  /* the GOTOs waiting for this line, or for one that is not there */
@@ -1210,7 +1187,7 @@ int build() {           /* BUILD: the program as a file on the output: "BX", 1, 
     w = w | (write(1, mem + ptop, pend - ptop) != pend - ptop);
     for (p = 0; p < ptop; p = next(p)) {
         putw(ib, getw(mem + p + 3) - ptop);
-        putw(ib + 2, lineno(p));
+        putw(ib + 2, mw(p));
         w = w | (write(1, ib, 4) != 4);
     }
     if (w) {
@@ -1234,7 +1211,7 @@ int go(int at) {        /* run the code at mem[at]; then report an error, with i
     if (!e) return 0;
     a = c_curip() - (mem - nul);
     if (pend && a > ptop && a <= pend)
-        for (p = 0; p < ptop; p = next(p)) if (getw(mem + p + 3) < a) ln = lineno(p);
+        for (p = 0; p < ptop; p = next(p)) if (getw(mem + p + 3) < a) ln = mw(p);
     return report(e, ln);
 }
 
