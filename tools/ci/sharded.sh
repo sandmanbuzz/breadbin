@@ -128,7 +128,7 @@ fi
 # --exclusive: take the whole vice pool once and re-enter; each shard's own with-lock call passes through.
 if [ $exclusive = 1 ] && [ -z "${SHARDED_INNER:-}" ]; then
     export SHARDED_INNER=1
-    exec "$repo/tools/with-lock" -x -- "$0" --rev "$rev" ${out:+--out "$out"} \
+    exec "$repo/tools/with-lock" -x --emergency -- "$0" --rev "$rev" ${out:+--out "$out"} \
         --stagger "$stagger" --shard-timeout "$tlimit" ${expect:+--expect "$expect"} \
         ${runsh:+--run-sh "$runsh"} $( [ $preflight = 1 ] || echo --no-preflight )
 fi

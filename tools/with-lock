@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run a command while holding a shared machine lock, so that sessions do not disturb
 # each other's timing-sensitive runs (VICE, the Ultimate and the drives).
-#   tools/with-lock [-r ultimate|vice] [-x] [-t SECONDS] -- command args...
+#   tools/with-lock [-r ultimate|vice] [-x --emergency] [-t SECONDS] -- command args...
 # Locks live in $BREADBIN_LOCKDIR (default /tmp/breadbin-locks). Resources:
 #   vice      a pool of $BREADBIN_VICE_SLOTS slots (default 12): a plain run takes any one
 #             slot, so up to that many VICE runs go at once (a work unit should take at most
@@ -9,6 +9,8 @@
 #             whose wall-clock data matters (nothing else VICE runs meanwhile). -x also
 #             takes every slot file that exists, so a session with a smaller cap in its
 #             environment still excludes the others; every session should use one cap.
+#             -x is the emergency measure: it needs --emergency, and it says how impolite
+#             it is as the slot count grows (notice below; over 64 slots it is refused).
 #   ultimate  one holder at a time (the hardware session); -x is implied.
 # Slot 0 is the old single-lock file ($res.lock), the others are $res.N.lock.
 # -t is a limit in whole seconds on the whole wait (exit 75 on timeout; a command that
@@ -41,12 +43,21 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -r) res=$2; shift 2 ;;
         -t) wait=$2; shift 2 ;;
-        -x) excl=1; shift ;;
+        -x) excl=1; asked_x=1; shift ;;
+        --emergency) emerg=1; shift ;;
         --) shift; break ;;
         *) break ;;
     esac
 done
-[ $# -gt 0 ] || { echo "usage: with-lock [-r vice|ultimate] [-x] [-t secs] -- cmd..." >&2; exit 2; }
+[ $# -gt 0 ] || { echo "usage: with-lock [-r vice|ultimate] [-x --emergency] [-t secs] -- cmd..." >&2; exit 2; }
+if [ "${asked_x:-0}" = 1 ] && [ "${emerg:-0}" != 1 ]; then
+    echo "with-lock: -x takes the whole pool, so it needs --emergency to confirm (docs/process.md, \"The machine lock\")" >&2
+    exit 2
+fi
+if [ "${emerg:-0}" = 1 ] && [ "${asked_x:-0}" != 1 ]; then
+    echo "with-lock: --emergency goes with -x and nothing else" >&2
+    exit 2
+fi
 case $wait in ''|*[!0-9]*) echo "with-lock: -t takes whole seconds, not '$wait'" >&2; exit 2 ;; esac
 n=1
 [ "$res" = vice ] && n=${BREADBIN_VICE_SLOTS:-12}
@@ -70,6 +81,23 @@ for f in "$dir/$res".[0-9]*.lock; do
     case $i in ''|*[!0-9]*) continue ;; esac
     i=$((i + 1)); [ $i -gt $nx ] && nx=$i
 done
+# -x takes every slot file, one nested flock process each. The notice grows with the count: a
+# pool of 6 is the guideline, past 12 is impolite, past 32 is dangerous, and past 64 the nested
+# chain is not sane to build, so it is refused.
+exclusive_notice() {
+    s=$1
+    if [ "$s" -gt 64 ]; then
+        echo "with-lock: refusing -x over $s slots: past the hard ceiling of 64 (one nested flock process per slot). Check BREADBIN_VICE_SLOTS and the slot files in $dir." >&2
+        exit 2
+    elif [ "$s" -gt 32 ]; then
+        echo "with-lock: DANGEROUS: -x takes all $s slots. No pool that size has been measured, and every VICE run on this machine waits for this one, for as long as it runs." >&2
+    elif [ "$s" -gt 12 ]; then
+        echo "with-lock: impolite: -x takes all $s slots, more than the 12-slot pool; every other session waits for the whole run." >&2
+    elif [ "$s" -gt 6 ]; then
+        echo "with-lock: -x takes all $s slots, past the six-slot guideline (docs/process.md): say why in the commit." >&2
+    fi
+}
+[ "$excl" = 1 ] && exclusive_notice "$nx"
 holders() {
     k=0
     while [ $k -lt $nx ]; do

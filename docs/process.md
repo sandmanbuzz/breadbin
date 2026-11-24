@@ -28,16 +28,22 @@ In practice: do not build on origin's history or on a hash that exists only ther
 
 ## The machine lock
 
-The tests are timing-sensitive, so sessions share the machine through `tools/with-lock`. The `vice` resource is a pool of 12 slots (`BREADBIN_VICE_SLOTS`; raised from 8 on 2026-11-23 for testing, not yet measured at 12; the cap check in `docs/ci.md` measured six). **A work unit should take at most six slots (a guideline, not a hard limit: be polite about the pool).** A plain run takes one, so up to twelve VICE runs go at once; `tools/ci/sharded.sh` takes six (one per shard) and no more. A run whose wall-clock data matters (timing, performance, anything you will quote a number from) takes the whole pool with `-x` (`BREADBIN_CI_EXCLUSIVE=1`, `sharded.sh --exclusive`), and nothing else VICE runs meanwhile; that is an exception to the six-slot guideline: say in the commit or note why the run needs the whole pool (see the exclusivity backlog item in `docs/wip.md`). `ultimate` (the hardware) is one holder at a time.
+The tests are timing-sensitive, so sessions share the machine through `tools/with-lock`. The `vice` resource is a pool of 12 slots (`BREADBIN_VICE_SLOTS`; raised from 8 on 2026-11-23 for testing, not yet measured at 12; the cap check in `docs/ci.md` measured six). **A work unit should take at most six slots (a guideline, not a hard limit: be polite about the pool).** A plain run takes one, so up to twelve VICE runs go at once; `tools/ci/sharded.sh` takes six (one per shard) and no more. **The exclusive run (`-x`) is an emergency measure, not a default.** Pattern: a run whose wall-clock figures you will quote (timing, performance, anything you will put a number from) takes every slot file with `-x`, so nothing else VICE runs until it finishes. For everyone else the whole pool is one atomic unit. Rules:
+
+- `-x` needs `--emergency` to confirm. Without it `with-lock` refuses before taking anything. `BREADBIN_CI_EXCLUSIVE=1` and `sharded.sh --exclusive` pass it for you, because setting them is the confirmation.
+- The notice on stderr grows with the slots taken: past 6 is past the guideline (say why in the commit); past 12 is impolite; past 32 is dangerous; past 64 `with-lock` refuses, because the nested lock chain is one `flock` process per slot.
+- Take it for the command, not while you think. Whether it is needed at all is the exclusivity backlog item in `docs/wip.md`.
+
+`ultimate` (the hardware) is one holder at a time; its `-x` is implied.
 
 VICE runs in the container: `tools/ci/run.sh` takes its own slot (`BREADBIN_CI_EXCLUSIVE=1` takes them all), so the one obvious way to run the emulator is `tools/ci/run.sh <make target>`. Host VICE is a stopgap for what the container cannot do yet; if you hit such a gap, write it down in `docs/wip.md` so it can be closed.
 
 ```sh
 tools/ci/run.sh test-smoke                                      # takes one vice slot itself
 BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test-only T="..."       # every slot: wall-clock measurements
-tools/with-lock -x -- <cmd>                                     # the same for a host command
+tools/with-lock -x --emergency -- <cmd>                          # the same for a host command (emergency)
 tools/with-lock -r ultimate -- python3 tools/ultimate.py ...    # the hardware
-tools/with-lock -r ultimate -- tools/with-lock -x -- ...        # hardware run that also uses VICE
+tools/with-lock -r ultimate -- tools/with-lock -x --emergency -- ...   # hardware run that also uses VICE
 ```
 
 The lock directory is `$BREADBIN_LOCKDIR` (default `/tmp/breadbin-locks`); sessions in separate containers share it by bind-mounting the same host path. `with-lock` prints the holders and waits (default an hour, exit 75 on timeout); a stale `*.holder` file is informational only, the kernel releases the `flock` when the process dies. A command already under `with-lock` for that resource passes straight through, so wrapping `run.sh` in `with-lock` still works; asking for `-x` while holding a plain slot is an error. An `-x` request closes the queue behind it, so it is not starved by new plain runs. Do not hold a lock while thinking: take it for the command, release it.
