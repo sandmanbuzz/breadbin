@@ -4,7 +4,7 @@
    natives in rt.s by offsets from rt_mark; docs/design/basic.md 6.1). Included first in each,
    which keeps those offsets the same; tools/test_bas.py checks that they are. */
 
-/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next rt_sres rt_scat rt_sset rt_scmp rt_len rt_asc rt_chr rt_left rt_right rt_mid rt_str rt_val */   /* tools/cc_pcode.py: a
+/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next rt_sres rt_scat rt_sset rt_scmp rt_len rt_asc rt_chr rt_left rt_right rt_mid rt_str rt_val rt_inp rt_ifld */   /* tools/cc_pcode.py: a
    program that never reads one of these (brun) would make it void, and the offsets would differ from bas's */
 
 extern int rt_mark();   /* rt.s, for the compiled code: these take their arguments from the */
@@ -438,6 +438,120 @@ int rt_val(int s) {     /* VAL: the number at the start of s (spaces, a sign, di
     }
     sfree(s);
     return 0;
+}
+
+char ib[126];           /* INPUT's line, and where we are in it */
+int il;
+int ii;
+int fs;                 /* the field ifield found: from fs, fl bytes */
+int fl;
+
+int iread() {           /* a line of stdin appended to ib: 0 at the end of the input */
+    int n = il;
+    int c;
+    while (1) {
+        if (read(0, pb, 1) <= 0) {
+            if (n == il) return 0;
+            break;
+        }
+        c = pb[0];
+        if (c == '\n' || c == '\r') break;
+        if (n < 124) {
+            ib[n] = c;
+            n = n + 1;
+        }
+    }
+    ib[n] = 0;
+    il = n;
+    col = 0;                /* the console echoed the return */
+    return 1;
+}
+
+int ifield() {          /* the next field of ib from ii, as MS: leading spaces dropped, "quoted" as it is,
+                           else up to the comma without the trailing spaces. 0 when ii is past the end */
+    int e;
+    if (ii > il) return 0;
+    while (ib[ii] == ' ') ii = ii + 1;
+    fs = ii;
+    if (ib[ii] == '"') {
+        fs = ii + 1;
+        ii = fs;
+        while (ib[ii] && ib[ii] != '"') ii = ii + 1;
+        fl = ii - fs;
+        if (ib[ii]) ii = ii + 1;
+        while (ib[ii] && ib[ii] != ',') ii = ii + 1;
+    } else {
+        while (ib[ii] && ib[ii] != ',') ii = ii + 1;
+        e = ii;
+        while (e > fs && ib[e - 1] == ' ') e = e - 1;
+        fl = e - fs;
+    }
+    ii = ii + 1;
+    return 1;
+}
+
+int inum(int s, int n) {        /* ib[s, s+n) is a number as rt_val reads it (or empty, which is 0) */
+    int i = s;
+    int e = s + n;
+    int d = 0;
+    if (i < e && (ib[i] == '+' || ib[i] == '-')) i = i + 1;
+    while (i < e && ib[i] >= '0' && ib[i] <= '9') {
+        i = i + 1;
+        d = 1;
+    }
+    if (i < e && ib[i] == '.') {
+        i = i + 1;
+        while (i < e && ib[i] >= '0' && ib[i] <= '9') {
+            i = i + 1;
+            d = 1;
+        }
+    }
+    return i == e && (d || !n);
+}
+
+int rt_inp(int s, int m) {      /* INPUT: the prompt s (0: none), then n = m / 128 variables, m & 127 bit k set
+                                   for a number. Reads lines until each field fits its variable, as MS:
+                                   ?? for more, ?REDO FROM START for a bad number, ?EXTRA IGNORED */
+    int n = m / 128;
+    int k;
+    int ok;
+    rt_prs(s);
+    while (1) {
+        outs("? ");
+        il = 0;
+        if (!iread()) c_throw(9);
+        while (1) {
+            ii = 0;
+            k = 0;
+            while (ifield()) k = k + 1;
+            if (k >= n) break;
+            outs("??");
+            ib[il] = ',';
+            il = il + 1;
+            if (!iread()) c_throw(9);
+        }
+        ii = 0;
+        ok = 1;
+        for (k = 0; k < n; k = k + 1) {
+            ifield();
+            if (((m >> k) & 1) && !inum(fs, fl)) ok = 0;
+        }
+        if (ok) break;
+        outs("?REDO FROM START\n");
+    }
+    if (ii <= il) outs("?EXTRA IGNORED\n");
+    ii = 0;
+    return 0;
+}
+
+int rt_ifld() {         /* the next field of the line rt_inp read, as a temporary */
+    int t = 0;
+    ifield();
+    if (fl) {
+        t = salloc(fl);
+        scopy(t + 1, ib + fs - nul, fl);
+    }
+    return t;
 }
 
 int report(int e, int line) {   /* error e as MS prints it; line -1 for none */

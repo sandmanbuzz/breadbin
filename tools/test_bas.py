@@ -51,10 +51,10 @@ def brun_binary():
     return _built["brun"]
 
 
-def brun(bx, brk=64, name="/p.bx"):
+def brun(bx, brk=64, name="/p.bx", stdin=b""):
     """The compiled file bx (bytes) run by brun: (output as str, exit status)."""
     r = asim.run("brun", [name], path=brun_binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
-                 files={name: bx}, brk=brk)
+                 files={name: bx}, brk=brk, stdin=stdin)
     return r.out.decode("latin-1"), r.exit
 
 
@@ -80,7 +80,7 @@ class Bas(unittest.TestCase):
     def test_the_arena_is_what_the_kernel_grants(self):
         # BYTES FREE follows the pages BRK gives: 64 is 16,384 bytes, 80 is 20,480, and a pool
         # too small for 4096 bytes is refused with a message on stderr, not a crash
-        for pages, text in ((64, "16384"), (80, "20480"), (120, "30720"), (200, "30720"), (16, "4096")):
+        for pages, text in ((64, "16384"), (80, "20480"), (120, "30464"), (200, "30464"), (16, "4096")):
             out, status = bas("", tty=True, brk=pages)
             self.assertEqual((out, status), (text + " BYTES FREE\nREADY.\n", 0), pages)
         r = asim.run("bas", [], path=binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
@@ -552,6 +552,31 @@ class Strings(unittest.TestCase):
             out = self.out(prog + line + 'PRINT C$;B$;A$\n')
             self.assertTrue(out.endswith("KEEPKEEPKEEPKEEPKEEPKEEPKEEP\n"), (line, out))
             self.assertNotIn("ERROR", out)
+
+    def test_input(self):
+        prog = ('10 INPUT "NAME";A$,B,C%\n20 PRINT A$;"|";B;C%\n30 INPUT D$\n40 PRINT "[";D$;"]"\n'
+                '50 INPUT X:PRINT X\n')
+        cases = (
+            # fields, a quoted string, spaces round a number; "??" for a short line; ?EXTRA IGNORED
+            ("BOB, 12 ,3\nHI\n7\n", "NAME? BOB| 12  3 \n? [HI]\n?  7 \n"),
+            ('"A,B",1.25,2\n\n-.5\n', "NAME? A,B| 1.25  2 \n? []\n? -.5 \n"),
+            ("X,1\n,,\n", "NAME? ???EXTRA IGNORED\nX| 1  0 \n? \nBREAK IN 30\n"),
+            ("A\n1\n2\nQ\n3\n", "NAME? ????A| 1  2 \n? [Q]\n?  3 \n"),
+            ("A,1,2,3\nB\n9\n", "NAME? ?EXTRA IGNORED\nA| 1  2 \n? [B]\n?  9 \n"),
+        )
+        for inp, want in cases:
+            out, st = bas(prog + "RUN\n" + inp)
+            self.assertEqual(out, want, inp)
+        # a bad number asks again from the start, the prompt not repeated; the end of the input is BREAK
+        out, _ = bas('10 INPUT "P";A,B$:PRINT A;B$\nRUN\nX,Y\n1x,Z\n2,OK\n')
+        self.assertEqual(out, "P? ?REDO FROM START\n? ?REDO FROM START\n?  2 OK\n")
+        out, _ = bas("10 INPUT A$:PRINT A$\nRUN\n")
+        self.assertEqual(out, "? \nBREAK IN 10\n")
+        # the same from a built file, with the heap collected in between
+        want, _ = bas(prog + "RUN\nBOB, 12 ,3\nHI\n7\n")
+        bx, _ = bas(prog + "BUILD\n")
+        got, st = brun(bx.encode("latin-1"), stdin=b"BOB, 12 ,3\nHI\n7\n")
+        self.assertEqual((got, st), (want, 0))
 
     def test_compiled_file_matches_run(self):
         prog = ('10 A$="AB":B$=A$+"CD"\n20 FOR I=1 TO 40:C$=B$+A$:B$=C$:IF I>3 THEN B$="Z"+A$\n30 NEXT\n'

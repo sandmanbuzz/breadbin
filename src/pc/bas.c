@@ -54,7 +54,7 @@ int vbot;               /* the variables: [vbot, MEM) */
 int clim;               /* where the code must stop: vbot, or the string heap once there is one */
 int straight;           /* bytes since the VM last reset Y: pvm.s addresses code as base + Y */
 int eline;              /* the line a compile error is in */
-char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|LEFT$|RIGHT$|MID$|LEN|CHR$|ASC|STR$|VAL|";
+char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|LEFT$|RIGHT$|MID$|LEN|CHR$|ASC|STR$|VAL|INPUT|";
                         /* the keywords: the program holds each as a token, 128 + its place
                            here, written as the number with "tk NAME" in a comment (test_bas checks the
                            numbers; bas-rt.s has PRINT's and REM's); a keyword before its prefixes, as
@@ -466,7 +466,7 @@ int primary() {
     if (c_tok(137 /* tk INT */)) return fn(220 /* x INT */);
     if (c_tok(148 /* tk SGN */)) return fn(224 /* x SGN */);
     if (c_tok('"')) return strlit();
-    if (c > 154 && c_tok(c)) return sfn(c);
+    if (c > 154 && c < 163 && c_tok(c)) return sfn(c);
     if (c_letter()) {
         k = var();
         if (vint) {
@@ -804,6 +804,65 @@ int sres() {            /* before a statement with strings in it, room for the t
     return ecall(&rt_sres);
 }
 
+int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and checks the line (the kinds go to it as a
+                           mask, found by a look ahead), then each variable takes its field (rt_ifld) */
+    int m = 0;
+    int n = 0;
+    int i;
+    int p = 0;
+    int c;
+    int a;
+    int k;
+    if (c_sp() == '"') {
+        c_tok('"');
+        strlit();
+        need(';');
+    } else {
+        c_op1(0 /* PO_CN 0 */);
+        epush(1);
+    }
+    c_sp();
+    i = si;
+    while (!err) {
+        c = src[i];
+        if (c == 0 || c == ':' || c == ',') {
+            if (p != '$') m = m + (1 << n);
+            n = n + 1;
+            p = 0;
+            if (c != ',') break;
+        } else if (c != ' ') p = c;
+        i = i + 1;
+    }
+    if (n > 7) c_fail(11);
+    pushint(n * 128 + m);
+    epush(1);
+    ecall(&rt_inp);
+    epush(-2);
+    for (k = 0; k < n && !err; k = k + 1) {
+        if (k) need(',');
+        if (!c_sp() || !c_letter()) {
+            c_fail(1);
+            return 0;
+        }
+        a = var();
+        if (vint == 2) {
+            c_opw(38 /* PO_LA */, a);
+            epush(1);
+            pcall(&rt_ifld);
+            epush(1);
+            assign(a, 2, 3);
+        } else {
+            pcall(&rt_ifld);
+            epush(1);
+            ecall(&rt_val);
+            epush(-1);
+            npush(1);
+            assign(a, vint, 1);
+        }
+    }
+    return 0;
+}
+
 int stmt() {
     c_sp();
     sres();
@@ -812,6 +871,7 @@ int stmt() {
         while (src[si]) si = si + 1;
         return 0;
     }
+    if (c_tok(163 /* tk INPUT */)) return inputs();
     if (c_tok(138 /* tk LET */)) return let();
     if (c_tok(136 /* tk IF */)) return ifs_();
     if (c_tok(133 /* tk GOSUB */)) {
