@@ -4,7 +4,7 @@
    natives in rt.s by offsets from rt_mark; docs/design/basic.md 6.1). Included first in each,
    which keeps those offsets the same; tools/test_bas.py checks that they are. */
 
-/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next rt_sres rt_scat rt_sset rt_scmp */   /* tools/cc_pcode.py: a
+/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next rt_sres rt_scat rt_sset rt_scmp rt_len rt_asc rt_chr rt_left rt_right rt_mid rt_str rt_val */   /* tools/cc_pcode.py: a
    program that never reads one of these (brun) would make it void, and the offsets would differ from bas's */
 
 extern int rt_mark();   /* rt.s, for the compiled code: these take their arguments from the */
@@ -330,6 +330,113 @@ int rt_scmp(int a, int b) {     /* -1, 0 or 1 */
     sfree(b);
     if (r > 0) return 1;
     if (r < 0) return -1;
+    return 0;
+}
+
+int rt_len(int s) {
+    int n = 0;
+    if (s) n = nul[s];
+    sfree(s);
+    return n;
+}
+
+int rt_asc(int s) {
+    int n;
+    if (!s) c_throw(6);
+    n = nul[s + 1];
+    sfree(s);
+    return n;
+}
+
+int rt_chr(int n) {
+    int r;
+    if (n < 0 || n > 255) c_throw(6);
+    r = salloc(1);
+    nul[r + 1] = n;
+    return r;
+}
+
+int rt_mid(int s, int i, int n) {       /* n characters from the i-th (1 is the first): the string itself when that is all of it */
+    int l = 0;
+    int r;
+    if (s) l = nul[s];
+    if (i < 1 || n < 0) c_throw(6);
+    if (i > l) n = 0;
+    else if (n > l - i + 1) n = l - i + 1;
+    if (!n) {
+        sfree(s);
+        return 0;
+    }
+    if (n == l) return s;
+    r = salloc(n);
+    scopy(r + 1, s + i, n);
+    sfree(s);
+    return r;
+}
+
+int rt_left(int s, int n) {
+    return rt_mid(s, 1, n);
+}
+
+int rt_right(int s, int n) {
+    int l = 0;
+    if (s) l = nul[s];
+    if (n < 0) c_throw(6);
+    if (n > l) n = l;
+    return rt_mid(s, l - n + 1, n);
+}
+
+int rt_str() {          /* STR$ of the number on top of the number stack: as PRINT writes it, without the space after */
+    char b[12];
+    int n = c_fmt(b);
+    int r = salloc(n);
+    scopy(r + 1, b - nul, n);
+    return r;
+}
+
+int rt_val(int s) {     /* VAL: the number at the start of s (spaces, a sign, digits, a point, to 4 decimals: the rest is
+                           dropped, not rounded), on the number stack; 0 if there is none */
+    int l = 0;
+    int i = 1;
+    int neg = 0;
+    int d;
+    int f = 0;
+    int k = 0;
+    int pw = 1000;
+    if (s) l = nul[s];
+    c_fromi(0);
+    while (i <= l && nul[s + i] == ' ') i = i + 1;
+    if (i <= l && (nul[s + i] == '-' || nul[s + i] == '+')) {
+        neg = nul[s + i] == '-';
+        i = i + 1;
+    }
+    while (i <= l) {
+        d = nul[s + i] - '0';
+        if (d < 0 || d > 9) {
+            if (d != -2 || k) break;        /* the point, once */
+            k = 1;
+        } else if (k) {
+            f = f + d * pw;
+            pw = pw / 10;
+        } else {
+            c_fromi(10);
+            c_mul();
+            c_fromi(d);
+            c_add();
+        }
+        i = i + 1;
+    }
+    if (f) {
+        c_fromi(f);
+        c_fromi(10000);
+        c_div();
+        c_add();
+    }
+    if (neg) {
+        c_fromi(-1);
+        c_mul();
+    }
+    sfree(s);
     return 0;
 }
 

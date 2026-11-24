@@ -525,6 +525,34 @@ class Strings(unittest.TestCase):
         self.assertTrue(out.startswith("?OUT OF MEMORY ERROR IN 30"), out)
         self.assertTrue(out.endswith("01234567" * 16 + "|\n"), out)       # and the heap is intact after it
 
+    def test_functions(self):
+        self.assertEqual(self.out('10 A$="HELLO WORLD"\n20 PRINT LEFT$(A$,5);"|";RIGHT$(A$,5);"|";MID$(A$,7);"|";MID$(A$,3,4);"|";'
+                                  'LEN(A$);ASC(A$);CHR$(65)+CHR$(66)\n'
+                                  '30 PRINT STR$(5);STR$(-3.25);"|";VAL("12.3456");VAL(" -7");VAL("x");VAL(STR$(42))+VAL("+1.5")\n'
+                                  '40 PRINT LEFT$(A$,0);"|";MID$(A$,20);"|";RIGHT$(A$,99);"|";LEN("");"|";LEFT$(A$,99)\nRUN\n'),
+                         "HELLO|WORLD|WORLD|LLO | 11  72 AB\n 5-3.25| 12.3456 -7  0  43.5 \n||HELLO WORLD| 0 |HELLO WORLD\n")
+        # they nest, take expressions, and make the temporaries the collector must not move mid-statement
+        self.assertEqual(self.out('A$="ABCDEF"\nPRINT LEFT$(MID$(A$,2,4)+RIGHT$(A$,2),LEN(A$)-1);"|";LEN(STR$(VAL(MID$("X12",2))*2))\n'
+                                  'B$=CHR$(ASC("A")+1)+LEFT$(A$,1):PRINT B$;ASC(B$)\n'), "BCDEE| 3 \nBA 66 \n")
+        for line, err in (('PRINT LEN(1)', "TYPE MISMATCH"), ('PRINT ASC("")', "ILLEGAL QUANTITY"), ('PRINT CHR$(256)', "ILLEGAL QUANTITY"),
+                          ('PRINT CHR$(-1)', "ILLEGAL QUANTITY"), ('PRINT MID$("A",0)', "ILLEGAL QUANTITY"), ('PRINT LEFT$("A",-1)', "ILLEGAL QUANTITY"),
+                          ('PRINT RIGHT$("A",-1)', "ILLEGAL QUANTITY"), ('PRINT LEFT$("A")', "SYNTAX"), ('PRINT LEFT$"A",1)', "SYNTAX"),
+                          ('PRINT VAL(1)', "TYPE MISMATCH"), ('PRINT STR$("A")', "TYPE MISMATCH"), ('PRINT LEN("A"', "SYNTAX"),
+                          ('PRINT MID$("A",1,1,1)', "SYNTAX"), ('A=LEFT$("A",1)', "TYPE MISMATCH"), ('A$=LEN("A")', "TYPE MISMATCH")):
+            self.assertEqual(self.out(line + "\n"), "?%s ERROR\n" % err, line)
+
+    def test_an_immediate_line_after_a_run_has_room_below_the_heap(self):
+        # the heap starts 768 bytes after the program's code; a line may not run into it (clim stops the emitter)
+        prog = '10 A$="KEEP":B$=A$+A$:C$=B$+B$\nRUN\n'
+        for line in ('PRINT ' + '+'.join(['A$'] * 38) + '\n',
+                     'D$=' + '+'.join(['LEFT$(C$,1)'] * 7) + ':PRINT D$\n',
+                     'PRINT ' + ';'.join(['"AB"'] * 20) + '\n',
+                     'X=' + '+'.join(['1.5'] * 28) + ':PRINT X\n'):
+            self.assertLess(len(line), 125, line)
+            out = self.out(prog + line + 'PRINT C$;B$;A$\n')
+            self.assertTrue(out.endswith("KEEPKEEPKEEPKEEPKEEPKEEPKEEP\n"), (line, out))
+            self.assertNotIn("ERROR", out)
+
     def test_compiled_file_matches_run(self):
         prog = ('10 A$="AB":B$=A$+"CD"\n20 FOR I=1 TO 40:C$=B$+A$:B$=C$:IF I>3 THEN B$="Z"+A$\n30 NEXT\n'
                 '40 PRINT B$;"|";C$;A$<B$;"X"="X"\n')

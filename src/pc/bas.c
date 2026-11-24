@@ -400,6 +400,52 @@ int strlit() {          /* a string literal after its quote: a CS, whose address
     return epush(1) + 1;
 }
 
+int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$, 156 RIGHT$, 157 MID$, 158 LEN,
+                           159 CHR$, 160 ASC, 161 STR$, 162 VAL): its kind */
+    int k = 3;
+    need('(');
+    deep = deep + 2;
+    if (t == 161) {
+        tonum(climb(1));
+        pcall(&rt_str);
+        npush(-1);
+        epush(1);
+    } else if (t == 159) {
+        toint(climb(1));
+        pcall(&rt_chr);
+    } else {
+        if (climb(1) != 3) c_fail(13);
+        if (t == 158) {
+            pcall(&rt_len);
+            k = 2;
+        } else if (t == 160) {
+            pcall(&rt_asc);
+            k = 2;
+        } else if (t == 162) {
+            ecall(&rt_val);
+            epush(-1);
+            npush(1);
+            k = 1;
+        } else {
+            need(',');
+            toint(climb(1));
+            if (t == 157) {
+                if (c_sp() == ',') {
+                    need(',');
+                    toint(climb(1));
+                } else pushint(255);
+                pcall(&rt_mid);
+                epush(-1);
+            } else if (t == 155) pcall(&rt_left);
+            else pcall(&rt_right);
+            epush(-1);
+        }
+    }
+    need(')');
+    deep = deep - 2;
+    return k;
+}
+
 int need(int t) {       /* the token t after spaces, or a syntax error */
     c_sp();
     if (c_tok(t)) return 1;
@@ -420,6 +466,7 @@ int primary() {
     if (c_tok(137 /* tk INT */)) return fn(220 /* x INT */);
     if (c_tok(148 /* tk SGN */)) return fn(224 /* x SGN */);
     if (c_tok('"')) return strlit();
+    if (c > 154 && c_tok(c)) return sfn(c);
     if (c_letter()) {
         k = var();
         if (vint) {
