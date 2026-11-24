@@ -69,14 +69,14 @@ def fmt(v):
 
 HARNESS = r"""
 extern int rt_mark();
-extern int c_ldv(char *p);
-extern int c_stv(char *p);
-extern int c_add();
-extern int c_sub();
-extern int c_mul();
-extern int c_div();
-extern int c_int();
-extern int c_fromi(int i);
+extern int c_ldv(char *p); /* void */
+extern int c_stv(char *p); /* void */
+extern int c_add(); /* void */
+extern int c_sub(); /* void */
+extern int c_mul(); /* void */
+extern int c_div(); /* void */
+extern int c_int(); /* void */
+extern int c_fromi(int i); /* void */
 extern int c_toi();
 extern int c_cmp();
 extern int c_fmt(char *buf);
@@ -92,7 +92,7 @@ int cend;
 int vbot;
 int straight;
 int err;
-int ld(int lo, int hi) { v[0] = lo; v[1] = lo >> 8; v[2] = hi; v[3] = hi >> 8; return c_ldv(v); }
+int ld(int lo, int hi) { v[0] = lo; v[1] = lo >> 8; v[2] = hi; v[3] = hi >> 8; c_ldv(v); return 0; }
 int str(char *p) { int n; n = 0; while (p[n]) n = n + 1; write(1, p, n); return 0; }
 int num(int i) { char b[8]; int n; n = 7; if (i == 0 - 32767 - 1) { write(1, "-32768", 6); return 0; }
   if (i < 0) { write(1, "-", 1); i = 0 - i; }
@@ -217,12 +217,12 @@ class Numbers(unittest.TestCase):
     TK = """
 .export tk
 tk:     P_FUNC
-        P_W PO_CALL, rt_mark
+        P_W PO_NCAL, rt_mark
         P_BR PO_BRTRU, @err
         P_OP PO_ICAL
         P_OP PO_RET
 @err:   P_OP PO_DROP
-        P_W PO_CALL, c_err
+        P_W PO_NCAL, c_err
         P_B PO_ADDI, 100
         P_OP PO_RET
 """

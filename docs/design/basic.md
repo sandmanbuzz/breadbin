@@ -136,7 +136,7 @@ prove the whole path with one tiny program end to end before widening anything.
     store alone went from 40M to 9.6M. Still far from the estimate of about a second per 100
     lines in §7; what remains is spread over `getline` (4.3M), `cline`, `var` and `constant`,
     each next in line to go native.
-  - *Memory:* `bas` is about 10 KB of code and 29 KB with its 16,384-byte arena, 1 KB of VM
+  - *Memory:* `bas` was about 10 KB of code (7.6 KB after the squish below) and 29 KB with its 16,384-byte arena, 1 KB of VM
     frames and the 2.5 KB VM library, against the 31 KB `free` shows at the shell. The first
     build with the full arena **did not load** (`sh: bas: out of memory`); 15,872 did. Fitting
     16,384 took a 768-byte frame stack (a `/* fstack N */` directive in the source, read by
@@ -268,6 +268,45 @@ today) and the compiler K. **The peak is T + C + K, and only the peak limits a p
    equivalent), no text, no compiler. Interactive `bas` stays the small-program path; the
    file route is the big-program path, and the SDK story (L3f). Needs code that is position-bound
    to a load base and an entry table for the runtime (a build id check).
+   *Design (2026-11-23, option B; owner: "shoot for B", the size threat first, now removed: `bas` is
+   7.6 KB of code, 34 pages with its BSS).* Findings from reading `bas.c`:
+   - The compiled code holds absolute addresses of four kinds: the runtime (`CALL rt_*`, `c_ncall`
+     to natives), the arena's variables (`CW addr(vbot+2)`, string constants `CW addr(cend+10)`),
+     jumps and calls inside the code (`JUMP`/`CALL` to a line, the `IF` chain's targets), and plain
+     16-bit constants (`CW`, which is the same opcode as an address: the emit site must say which).
+   - The runtime is in `bas` itself (`rt_*` bytecode plus the natives), so a runner is
+     "bas without the compiler": the same source, minus `cline`/`stmt`/`climb` and the editor. The
+     mini C has no `#include`; the shared part goes in by a build-time concatenation (mk/pvm.mk), not a
+     language feature.
+   - File format (`.bx`): header (magic, the build id of the runner it was made for, code length,
+     variable-area size, fixup count), the code, then fixups delta-coded one byte each (an offset
+     step; a 0 step escapes to two bytes), the kind in the opcode that precedes the word
+     (`CALL`/`JUMP` are code-relative, `LA`/`CW` as tagged). The loader adds the load base to
+     code-relative words, the runner's base to runtime words, and the variable base to variable words.
+     A mismatched build id is `ENOEXEC`: the runtime addresses are only valid for one runner.
+   - Tagging costs bytes in `bas` (a fixup recorder in `c_opw`/`c_ncall`, one tag per emit site);
+     budget: under 150 B, and the page count is the gate (34 now; 36 would still beat the 40 we
+     started the crush with).
+   - Slices: **B1** the fixup recorder and a host-side `.bx` writer (`bas -c in.bas out.bx`),
+     tested by loading the file in the py65 harness at two different bases and running both;
+     **B2** the runner (`brun`) from the shared runtime, no compiler: measured free arena;
+     **B3** `ENOEXEC` on a build-id mismatch, errors by line number kept (a line table or none:
+     decide by size), the runner under VICE and on the Ultimate; **B4** the manual page (L3f).
+   - *Landed (2026-11-23, B1 to B3 host part):* the file is `"BX"`, 1, **rtid**, the code's length, the
+     variables' size, the code, then a **line table** (per line the offset of its code and its number).
+     No fixup list: the code is walked (`reloc()` in `src/pc/inc/rt.c`, one function both ways,
+     `bas` un-relocates at BUILD and `brun` relocates at load), which is smaller than the tags were
+     going to be. The runtime is shared, not concatenated: `cc.py` has `#include "file"` (one level
+     of the one preprocessor feature), `inc/rt.c` and `inc/rt.s` come first in `bas` and `brun`, and
+     the runner is `brun.c` + `brun-rt.s` (its `xtab` keeps the two number xops the shared bytecode
+     uses). A file names the runtime by offsets, so the layout must agree: `rtid` is the sizes of the
+     two blocks (`rt_mark` to `rt_end`, `rt_prs` to `report`), a mismatch is refused (`brun: not a file of
+     this bas`; there is no `ENOEXEC` for a program that reads the file itself), and a host test
+     compares the label offsets and the generated `rt_` block of both. The bytecode block is only the
+     same if void inference is: `/* valued ... */` in `rt.c` pins it (cc_pcode). Errors: `brun`
+     reads the file again after an error and finds the line in the table (the dead code's room is the
+     buffer), so the table costs the arena nothing. `bas` 8,143 B code + 986 B BSS (36 pages), `brun`
+     3,209 + 816.
 4. **REU/Recommended tiers** may spill text or code; never required.
 Rejected: dropping T and decompiling `LIST` from code (loses REM text and layout; heavy).
 

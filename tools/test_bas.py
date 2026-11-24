@@ -1,6 +1,8 @@
 """bas (src/pc/bas.c), the compiled BASIC, slice L3b (docs/design/basic.md section 5): built from
 the mini C with cc.py --pcode, run under py65 (tools/asim.py) with /lib/pvm. Needs ca65, ld65 and
 py65 (the container image has them)."""
+import struct
+import glob
 import os
 import random
 import re
@@ -8,6 +10,9 @@ import tempfile
 import unittest
 
 import asim
+import cc
+import cc_pcode
+import bxfile
 import pvmlink
 import test_bas_rt
 import test_cc_pcode
@@ -29,9 +34,33 @@ def BIG(n):
 def binary():
     if "path" not in _built:
         _built["dir"] = tempfile.TemporaryDirectory(prefix="bas-")
-        with open(SRC) as f, open(RT) as g:
-            _built["path"] = test_cc_pcode.build(f.read(), _built["dir"].name, natives=g.read())
+        with open(RT) as g:
+            _built["path"] = test_cc_pcode.build(cc.read_source(SRC), _built["dir"].name, natives=g.read())
     return _built["path"]
+
+
+BRUN_SRC = os.path.join(ROOT, "src", "pc", "brun.c")
+BRUN_RT = os.path.join(ROOT, "src", "pc", "brun-rt.s")
+
+
+def brun_binary():
+    if "brun" not in _built:
+        _built["brun_dir"] = tempfile.TemporaryDirectory(prefix="brun-")
+        with open(BRUN_RT) as g:
+            _built["brun"] = test_cc_pcode.build(cc.read_source(BRUN_SRC), _built["brun_dir"].name, natives=g.read())
+    return _built["brun"]
+
+
+def brun(bx, brk=64, name="/p.bx"):
+    """The compiled file bx (bytes) run by brun: (output as str, exit status)."""
+    r = asim.run("brun", [name], path=brun_binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
+                 files={name: bx}, brk=brk)
+    return r.out.decode("latin-1"), r.exit
+
+
+def labels(lbl):
+    with open(lbl) as f:
+        return {m.group(2): int(m.group(1), 16) for m in re.finditer(r"^al ([0-9A-F]+) \.(\w+)$", f.read(), re.M)}
 
 
 def bas(text, tty=False, limit=40_000_000, brk=64):
@@ -109,15 +138,14 @@ class Bas(unittest.TestCase):
                          "A\xc1\n?SYNTAX ERROR\n10 REM \xc1\n")
 
     def test_token_numbers_match_the_table(self):
-        with open(SRC) as f:
-            text = f.read()
+        text = cc.read_source(SRC)
         table = re.search(r'char kwt\[\] = "([A-Z|]+)";', text).group(1).split("|")[:-1]
         uses = re.findall(r"(\d+) /\* tk ([A-Z]+) \*/", text)
         self.assertGreater(len(uses), 25)
         for n, name in uses:
             self.assertEqual(int(n), 128 + table.index(name), name)
-        firsts = [k[0] for k in table]
-        self.assertEqual(firsts, sorted(firsts))            # grouped by first letter
+        self.assertEqual(table.index("PRINT"), 16)          # c_crunch's T_PRINT and T_REM (bas-rt.s) are 144, 145
+        self.assertEqual(table.index("REM"), 17)
         for i, k in enumerate(table):                       # no keyword after its own prefix
             self.assertFalse(any(k.startswith(e) for e in table[:i] if e != k), k)
 
@@ -205,7 +233,7 @@ class Bas(unittest.TestCase):
     def test_opcode_numbers_agree_with_the_vm(self):
         inc = open(os.path.join(ROOT, "src", "pvm", "pvm.inc")).read()
         ops = {m.group(1): int(m.group(2), 16) for m in re.finditer(r"^(PO_\w+)\s*=\s*\$([0-9A-F]+)", inc, re.M)}
-        src = open(SRC).read()
+        src = cc.read_source(SRC)
         used = re.findall(r"(\d+) /\* (PO_\w+)( \d+)? \*/", src)
         self.assertGreaterEqual(len(used), 6)
         for num, name, arg in used:
@@ -306,6 +334,14 @@ class Language(unittest.TestCase):
         self.assertEqual(self.out("PRINT ABS(-3.5);INT(-3.5);INT(2.7);SGN(-2);SGN(0);SGN(.0001);-(1)+ +1\n"),
                          " 3.5 -4  2 -1  0  1  0 \n")
 
+    def test_unary_edges(self):
+        # ABS, negation, SGN and the truth test (n_abs, n_neg, n_sgn, n_tst) at 0, the extremes and
+        # the smallest fraction, on variables so nothing is folded
+        self.assertEqual(self.out("A=-214748.3647:B=0:C=.0001\n"
+                                  "PRINT ABS(A);-A;-B;ABS(B);SGN(A);SGN(-A);SGN(B);SGN(-C);ABS(-C)\n"
+                                  "IF A THEN PRINT 1\nIF B THEN PRINT 2\nIF C THEN PRINT 3\nPRINT NOT B;NOT C\n"),
+                         " 214748.3647  214748.3647  0  0 -1  1  0 -1  .0001 \n 1 \n 3 \n-1 -1 \n")
+
     def test_constants(self):
         # four decimals, the fifth rounds; spaces inside a number are skipped, as MS
         self.assertEqual(self.out("PRINT 1.23456;.00005;.00004;214748.3647;1 000\n"),
@@ -342,6 +378,12 @@ class Language(unittest.TestCase):
         self.assertEqual(self.out("10 GOTO 25\n20 END\n30 END\nRUN\n"), "?UNDEF'D STATEMENT ERROR IN 10\n")
         self.assertEqual(self.out("10 PRINT 1\n20 PRINT 2\nRUN 20\nRUN 15\nGOTO 20\nGOTO 5\n"),
                          " 2 \n?UNDEF'D STATEMENT ERROR\n 2 \n?UNDEF'D STATEMENT ERROR\n")
+
+    def test_if_reaches_past_a_short_branch(self):
+        # the body of a false IF is skipped by a JUMP, so a line of more than 127 bytes of code still works
+        body = ":".join(["A=A+B*C-D"] * 7)
+        self.assertEqual(self.out("10 B=1:C=2:D=1:IF 0 THEN %s\n20 PRINT A\n30 IF 1 THEN %s:PRINT A\nRUN\n" % (body, body)),
+                         " 0 \n 7 \n")
 
     def test_gosub_and_return(self):
         out = self.out("10 FOR I=1 TO 3:GOSUB 100:NEXT:GOSUB 200:END\n100 PRINT I;:RETURN\n"
@@ -404,8 +446,124 @@ class Language(unittest.TestCase):
         self.out("10 A=1OR1AND1<1+(1+1*1^(1+1*1^(1+1*1^(NOT(1^(1OR(NOT ABS(1))))))))\nRUN\n")
         self.assertEqual(self.out("10 " + "IF 1 THEN " * 4 + "A=" + "1+(" * 2 + "1" + ")" * 2 + ":PRINT A\nRUN\n"), " 3 \n")
 
+    def build(self, text):
+        out, status = bas(text)
+        self.assertEqual(status, 0, out)
+        return bxfile.parse(out.encode("latin-1"))
+
+    def test_build_writes_code_with_no_addresses(self):
+        # every class of word operand, in one program: a FOR/NEXT (LA of the body and of the variable, and a
+        # NEXT with none), GOSUB/RETURN, GOTO, an IF, an integer and a number variable, PRINT, ^
+        rid, n, v, code, lines = self.build('10 FOR I=1 TO 3:A%=A%+1:B=B+I^2\n20 PRINT I;"X";:IF I>2 THEN 40\n30 NEXT:GOSUB 50\n'
+                                '40 GOTO 60\n50 RETURN\n60 NEXT I\nBUILD\n')
+        self.assertEqual(n, len(code))
+        self.assertEqual([ln for _, ln in lines], [10, 20, 30, 40, 50, 60])
+        offs = [o for o, _ in lines]
+        self.assertTrue(offs == sorted(set(offs)) and offs[0] < offs[1] and offs[-1] < n, offs)
+        self.assertEqual(v, 6 + 6 + 4)                  # I and B: a number's 4 bytes and the name; A%: an int's 2
+        classes = {}
+        for at, op, cls, w in bxfile.walk(code):
+            classes.setdefault(cls, []).append(w)
+            if cls == "code":
+                self.assertTrue(w < n, (at, w))
+            elif cls == "var":
+                self.assertTrue(w & 0x8000 and (w & 0x7FFF) < v, (at, w))
+            else:
+                self.assertTrue(w < 0x400, (cls, at, w))          # an offset inside the runtime, not an address
+        self.assertEqual(sorted(classes), ["call", "code", "ncall", "var", "zero"])
+        self.assertEqual(len(set(classes["var"])), 3)               # I, A%, B
+
+    def test_build_of_an_empty_program_and_of_an_error(self):
+        rid, n, v, code, lines = self.build("BUILD\n")
+        self.assertEqual((v, lines, list(bxfile.walk(code))[0][2:]), (0, [], ("ncall", 0)))   # the prologue's rt_mark
+        out, status = bas("10 PRINT\n20 GOTO 99\nBUILD\n")
+        self.assertEqual((out, status), ("?UNDEF'D STATEMENT ERROR IN 20\n", 0))      # no file, a message
+
+    def test_build_leaves_the_program_to_run(self):
+        out, _ = bas('10 PRINT "A"\nBUILD\nRUN\n')
+        self.assertTrue(out.endswith("A\n") and out.startswith("BX"), out[-8:])
+
     def test_bytes_free(self):
         self.assertEqual(self.out("", tty=True), FREE + "READY.\n")
+
+
+@unittest.skipUnless(test_pvm.HAVE_TOOLS, "needs ca65, ld65 and py65")
+class Compiled(unittest.TestCase):
+    """bas's BUILD and brun (docs/design/basic.md 6.1)."""
+    PROGS = (
+        '10 FOR I=1 TO 3:A%=A%+I:B=B+I^2\n20 PRINT I;"X";B,A%:NEXT\n30 GOSUB 50:GOTO 60\n50 PRINT "SUB":RETURN\n60 IF A%>5 THEN PRINT "BIG"\n',
+        '10 X=1/3:PRINT X;X*3;-X\n30 FOR J=10 TO 1 STEP -3:PRINT J:NEXT J\n',
+        '10 PRINT "HI":END\n20 PRINT "NO"\n',
+    )
+
+    def test_a_built_file_runs_as_run_does(self):
+        for prog in self.PROGS:
+            want, st = bas(prog + "RUN\n")
+            self.assertEqual(st, 0, prog)
+            bx, st = bas(prog + "BUILD\n")
+            self.assertEqual(st, 0, bx)
+            # the arena is a different size and place: the file does not know its addresses
+            for brk in (64, 40, 120):
+                self.assertEqual(brun(bx.encode("latin-1"), brk=brk), (want, 0), (prog, brk))
+
+    def test_constants_whose_bytes_look_like_opcodes(self):
+        # an LDK's 4 data bytes are not code: BUILD's walk once read them as LA, CW, JUMP...
+        import random
+        rnd = random.Random(7)
+        prog = "".join("%d PRINT %d.%04d\n" % (10 + i, rnd.randrange(1, 30000), rnd.randrange(1, 10000)) for i in range(150))
+        want, _ = bas(prog + "RUN\n")
+        bx, st = bas(prog + "BUILD\n")
+        self.assertEqual(st, 0)
+        raw = bx.encode("latin-1")
+        self.assertEqual(brun(raw), (want, 0))
+        list(bxfile.walk(bxfile.parse(raw)[3]))          # the reference walk stays in step too
+        self.assertEqual(brun(bas("10 PRINT 1109.0726\nBUILD\n")[0].encode("latin-1")), (" 1109.0726 \n", 0))
+
+    def test_a_file_whose_sizes_do_not_fit_is_refused_untouched(self):
+        bx, _ = bas('10 PRINT 1\nBUILD\n')
+        good = bx.encode("latin-1")
+        for n, v in ((0x7FFF, 2), (2, 0x8001), (0x8001, 0), (0, 4), (0x7000, 0x7000), (60, 0x7FFF)):
+            bad = good[:5] + struct.pack("<HH", n, v) + good[9:] + b"\xee" * 40
+            out, st = brun(bad)
+            self.assertEqual((out, st), ("", 1), (n, v))
+
+    def test_build_fails_when_a_write_fails(self):
+        for k in (1, 2, 3):
+            r = asim.run("bas", [], path=binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
+                         stdin=b'10 PRINT 1\n20 PRINT 2\nBUILD\n', fail_write=k)
+            self.assertEqual(r.exit, 1, k)
+
+    def test_an_error_stops_the_run_and_exits_1(self):
+        bx, _ = bas('10 PRINT "A"\n20 PRINT 1/0\n30 PRINT "C"\nBUILD\n')
+        self.assertEqual(brun(bx.encode("latin-1")), ("A\n?DIVISION BY ZERO ERROR IN 20\n", 1))
+
+    def test_a_file_that_is_not_one_is_refused(self):
+        bx, _ = bas('10 PRINT 1\nBUILD\n')
+        bad = bx.encode("latin-1")
+        other = bad[:3] + bytes([bad[3] ^ 1]) + bad[4:]        # another runtime layout
+        for data in (b"", b"BX", b"XX" + bad[2:], b"BX\x02" + bad[3:], other, bad[:20]):
+            out, st = brun(data)
+            self.assertEqual((out, st), ("", 1), data[:4])
+
+    def test_the_line_of_an_error_is_found_from_the_table(self):
+        prog = '10 PRINT "A"\n20 X=1\n25 REM\n30 GOSUB 100\n40 PRINT "NO"\n100 FOR I=1 TO 2:PRINT I:NEXT\n110 Y=1/0\n'
+        want, _ = bas(prog + "RUN\n")
+        bx, _ = bas(prog + "BUILD\n")
+        self.assertEqual(brun(bx.encode("latin-1")), (want, 1))
+        self.assertTrue(want.endswith("?DIVISION BY ZERO ERROR IN 110\n"), want)
+
+    def test_the_runtime_has_the_same_layout_in_both(self):
+        # a file names the natives by offsets from rt_mark and the runtime's bytecode by offsets from rt_prs
+        binary(), brun_binary()
+        a, b = (labels(glob.glob(os.path.join(_built[k].name, "*.lbl"))[0]) for k in ("dir", "brun_dir"))
+        rt = ("rt_mark rt_go rt_ln c_ldv c_stv c_add c_sub c_mul c_div c_int c_fromi c_toi c_cmp c_fmt c_throw "
+              "n_add n_sub n_mul n_div n_neg n_cmp n_int n_abs n_sgn n_fromi n_toi n_tst x_ldv x_stv x_ldk x_ln").split()
+        self.assertEqual({n: a[n] - a["rt_mark"] for n in rt}, {n: b[n] - b["rt_mark"] for n in rt})
+        block = []
+        for src in (SRC, BRUN_SRC):
+            asm = cc_pcode.compile_pcode(cc.read_source(src))
+            block.append(re.search(r"^fn_rt_prs:.*?^FS_rt_next = \d+$", asm, re.M | re.S).group(0))
+        self.assertEqual(block[0], block[1])
 
 
 if __name__ == "__main__":

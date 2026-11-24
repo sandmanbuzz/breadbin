@@ -8,6 +8,7 @@ Start with `CLAUDE.md` (build, tests, decisions), then `process.md`, `wip.md` an
 |---|---|
 | Live: direction and state | `roadmap.md`, `wip.md`, `process.md`, `size-ledger.tsv`, `program-size-ledger.tsv` |
 | Live: how to build and test | `testing.md`, `ci.md`, `filesystem.md`, `webdemo.md`, `claude-quota.md` |
+| Live: user books (examples run by `tools/test_manual.py`) | `manual/` |
 | Live: record of findings | `hardware-notes.md` (append-only), `design/io-attack-log.md` (append-only, closed) |
 | Reference: designs in force or in progress | `design/pvm.md`, `design/basic.md`, `design/fast-io.md`, `design/next/*`, `design/size-spike.md`, `design/soft80-*.md`, and the rest of `design/` |
 | Reference: research | `design/research/next/` (the shared-library and ABI studies behind roadmap E2), `design/research/TEMPLATE.md` |

@@ -20,9 +20,9 @@
 ; Changes from upstream (docs/design/pvm.md section 4):
 ; - zero page: the eval stack is 11 deep in $0A-$1F with a 2-byte guard at $08 (kernel syscall
 ;   scratch, saved per process); the VM state is in $23-$36. Nothing at $40 or above.
-; - calls: a CALL/ICAL to a bytecode function (one that starts with JSR pvm_interp) keeps the
+; - calls: a CALL/ICAL to a bytecode function (which starts at its ENTER, no header) keeps the
 ;   return IP on the frame stack and uses no 6502 stack; RET pops it, or returns to native code
-;   (RTS) at the marker pvm_interp pushes when native code calls in. Native targets as upstream.
+;   (RTS) at the marker pvm_interp pushes when native code calls in. A native is called with NCAL (as upstream); ICAL and CALL are bytecode-only.
 ;   NATV pushes RET's address so a native tail's RTS returns from the function, as upstream.
 ; - ENTER spills the caller's pending eval-stack entries to the frame stack when fewer than
 ;   ESRESERVE would be free, LEAVE restores them under any number of results; an eval stack
@@ -209,7 +209,7 @@ OPTBL:  .word CN,CN,CN,CN,CN,CN,CN,CN                           ; 00 02 04 06 08
         .word MINUS1,BREQ,BRNE,LA,LLA,CB,CW,CS                  ; 20 22 24 26 28 2A 2C 2E
         .word DROP,BAD,BAD,BAD,ADDI,SUBI,BAD,BAD        ; 30 32 34 36 38 3A 3C 3E
         .word ISEQ,ISNE,ISGT,ISLT,BAD,BAD,BRFLS,BRTRU         ; 40 42 44 46 48 4A 4C 4E
-        .word BRNCH,BAD,CALL,ICAL,ENTER,LEAVE,RET,BAD          ; 50 52 54 56 58 5A 5C 5E
+        .word BRNCH,NCAL,CALL,ICAL,ENTER,LEAVE,RET,BAD          ; 50 52 54 56 58 5A 5C 5E
         .word LB,LW,BAD,LLW,BAD,LAW,BAD,BAD                     ; 60 62 64 66 68 6A 6C 6E
         .word SB,SW,BAD,SLW,BAD,SAW,BAD,BAD                     ; 70 72 74 76 78 7A 7C 7E
         .word BAD,ADD,SUB,MUL,DIV,MOD,BAD,BAD                     ; 80 82 84 86 88 8A 8C 8E
@@ -618,33 +618,34 @@ BRTRU:  inx
         ora ESTKL-1,x
         bne BRNCH
 NOBRNCH: iny
-        iny
         bmi FIXNEXT
         jmp NEXTOP
 BRFLS:  inx
         lda ESTKH-1,x
         ora ESTKL-1,x
         bne NOBRNCH
-BRNCH:  tya                     ; flatten IP
+BRNCH:  tya                     ; flatten IP: TMP = the offset byte
         sec
         adc IP
         sta TMP
         lda #0
         tay
         adc IP+1
-        sta TMP+1               ; add the branch offset
-        lda (TMP),y
-        adc TMP                 ; no carry out of IP+Y
+        sta TMP+1
+        lda (TMP),y             ; a signed byte, from its own address
+        bpl :+
+        dey
+:       clc
+        adc TMP
         sta IP
-        iny
-        lda (TMP),y
+        tya
         adc TMP+1
         sta IP+1
-        dey
+        ldy #0
         jmp FETCHOP
 
 ; ---- calls ----
-; pvm_interp: the header of every bytecode function is JSR pvm_interp. Reached from native code:
+; pvm_interp: the entry of bytecode from native code (JSR pvm_interp, P_FUNC; a bytecode function itself starts at its ENTER):
 ; push the native-return marker (high byte 0) and run the bytecode after the JSR.
 pvm_interp:
         lda #2
@@ -662,19 +663,24 @@ pvm_interp:
         ldy #0
         jmp FETCHOP
 
-CALL:   iny
+NCAL:   sec                     ; native code (it can be reached by nothing else: no header)
+        .byte $24               ; BIT zp: the clc is skipped
+CALL:   clc                     ; a bytecode function: it starts at its ENTER
+        iny
         lda (IP),y
         sta TMP
         iny
         lda (IP),y
         sta TMP+1
         jmp CALLTMP
-ICAL:   lda ESTKL,x
+ICAL:   lda ESTKL,x             ; bytecode
         sta TMP
         lda ESTKH,x
         sta TMP+1
         inx
-CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
+        clc
+CALLTMP: php
+        cpx #ESDEPTH + 1        ; the eval stack wrapped: trap (see RET)
         bcs pvm_overflow
         tya                     ; IP = the next op
         sec
@@ -682,12 +688,8 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
         sta IP
         bcc :+
         inc IP+1
-:       ldy #2                  ; a bytecode function starts with JSR pvm_interp
-@hd:    lda (TMP),y
-        cmp @jsr,y
-        bne @native
-        dey
-        bpl @hd
+:       plp
+        bcs @native
         lda #2                  ; push the return IP on the frame stack
         jsr fsalloc
         ldy #0
@@ -696,16 +698,12 @@ CALLTMP: cpx #ESDEPTH + 1       ; the eval stack wrapped: trap (see RET)
         iny
         lda IP+1
         sta (IFP),y
-        lda TMP                 ; run the bytecode after the header
-        clc
-        adc #3
+        lda TMP                 ; run the function
         sta IP
         lda TMP+1
-        adc #0
         sta IP+1
         ldy #0
         jmp FETCHOP
-@jsr:   jsr pvm_interp          ; (data: what a bytecode function starts with)
 @native: lda IP+1
         pha
         lda IP
@@ -741,7 +739,8 @@ fsalloc: eor #$FF
 ; the params are gone, the caller's pending entries move to the frame stack first and LEAVE moves
 ; them back, so compiled code like n + f(n - 1) recurses as deep as the frame stack allows, not
 ; the 11-entry eval stack. The frame stack, low to high: frame, spill count, spilled entries
-; (shallowest first), return IP.
+; (shallowest first), return IP. framesize counts the frame's first byte, which holds framesize
+; for LEAVE: locals start at 1.
 ENTER:  ldy #2
         txa
         clc
@@ -779,20 +778,23 @@ ENTER:  ldy #2
 @cnt:   ldy #0
         sta (IFP),y
         iny
-        lda (IP),y              ; framesize
+        lda (IP),y              ; framesize: the frame's own bytes, the first holding this
         jsr fsalloc
-        iny
+        lda (IP),y
+        ldy #0
+        sta (IFP),y
+        ldy #2
         lda (IP),y
         beq @done
         asl
         tay
 @lp:    lda ESTKH,x
-        dey
         sta (IFP),y
+        dey
         lda ESTKL,x
         inx
-        dey
         sta (IFP),y
+        dey
         bne @lp
 @done:  txa                     ; spilled: the eval stack is now empty
         clc
@@ -800,9 +802,9 @@ ENTER:  ldy #2
         tax
         ldy #3
         jmp FETCHOP
-; LEAVE framesize: drop the frame, put back what ENTER spilled (under the results), return
-LEAVE:  iny
-        lda (IP),y
+; LEAVE: drop the frame, put back what ENTER spilled (under the results), return
+LEAVE:  ldy #0
+        lda (IFP),y
         clc
         adc IFP
         sta IFP
