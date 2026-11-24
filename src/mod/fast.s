@@ -172,8 +172,9 @@ unreserve:
 
 ; ft_close: in place of the jmp iec_ch_close that closes a drive's command channel
 ; (A = drive, X = 15): the drive frees every buffer, so the program has to go up again.
-; The sector kept in RB2 is from the disk that was in the drive then: a close is where the
-; disk can change, so the next read sends a throwaway request first (ft_inval), which drops it.
+; The sector kept in RB2 is from the disk that was in the drive then. sys_umount reaches this
+; through iec_close, so a swap done with umount -> swap -> mount gets a throwaway request first
+; (ft_inval), which drops the held sector. A swap without umount reaches no close: not covered.
 ft_close:
         pha
         and #3
