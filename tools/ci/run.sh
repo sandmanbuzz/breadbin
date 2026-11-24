@@ -125,7 +125,7 @@ set -- -v "$repo:/src:ro" -v "$roms:/roms:ro" "$@"
 [ -n "$reason" ] && set -- --label "breadbin.ci.reason=$reason" "$@"
 set -- podman run --rm --init --name "$name" "$@"
 if [ -n "$lockbin" ]; then
-    if [ "${BREADBIN_CI_EXCLUSIVE:-}" = 1 ]; then set -- "$lockbin" -x -- "$@"; else set -- "$lockbin" -- "$@"; fi
+    if [ "${BREADBIN_CI_EXCLUSIVE:-}" = 1 ]; then set -- "$lockbin" -x --emergency -- "$@"; else set -- "$lockbin" -- "$@"; fi
 fi
 # Not exec'd: a signal removes the container, otherwise podman's own helper (its own
 # session) would keep the VICE running after the lock holder died, outside the lock. A
