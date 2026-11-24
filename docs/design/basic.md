@@ -292,6 +292,21 @@ today) and the compiler K. **The peak is T + C + K, and only the peak limits a p
      **B2** the runner (`brun`) from the shared runtime, no compiler: measured free arena;
      **B3** `ENOEXEC` on a build-id mismatch, errors by line number kept (a line table or none:
      decide by size), the runner under VICE and on the Ultimate; **B4** the manual page (L3f).
+   - *Landed (2026-11-23, B1 to B3 host part):* the file is `"BX"`, 1, **rtid**, the code's length, the
+     variables' size, the code, then a **line table** (per line the offset of its code and its number).
+     No fixup list: the code is walked (`reloc()` in `src/pc/inc/rt.c`, one function both ways,
+     `bas` un-relocates at BUILD and `brun` relocates at load), which is smaller than the tags were
+     going to be. The runtime is shared, not concatenated: `cc.py` has `#include "file"` (one level
+     of the one preprocessor feature), `inc/rt.c` and `inc/rt.s` come first in `bas` and `brun`, and
+     the runner is `brun.c` + `brun-rt.s` (its `xtab` keeps the two number xops the shared bytecode
+     uses). A file names the runtime by offsets, so the layout must agree: `rtid` is the sizes of the
+     two blocks (`rt_mark` to `rt_end`, `rt_prs` to `report`), a mismatch is refused (`brun: not a file of
+     this bas`; there is no `ENOEXEC` for a program that reads the file itself), and a host test
+     compares the label offsets and the generated `rt_` block of both. The bytecode block is only the
+     same if void inference is: `/* valued ... */` in `rt.c` pins it (cc_pcode). Errors: `brun`
+     reads the file again after an error and finds the line in the table (the dead code's room is the
+     buffer), so the table costs the arena nothing. `bas` 8,143 B code + 986 B BSS (36 pages), `brun`
+     3,209 + 816.
 4. **REU/Recommended tiers** may spill text or code; never required.
 Rejected: dropping T and decompiling `LIST` from code (loses REM text and layout; heavy).
 

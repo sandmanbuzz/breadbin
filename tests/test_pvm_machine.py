@@ -258,6 +258,36 @@ class Basic(unittest.TestCase):
         self.assertEqual(status.split(), ["0"])
         self.assertEqual(piped.splitlines(), ["PIPED!"])
 
+    def test_build_a_file_and_run_it_with_brun(self):
+        # BUILD writes the program as a file; brun runs it without the compiler: the same output as RUN,
+        # an error in its line, a refusal of what is not a compiled file, and every page back at exit
+        pg_used = label("pg_used")
+        npool = (int(re.search(r"^KSTART\s*=\s*\$([0-9A-Fa-f]+)", open(os.path.join(ROOT, "src", "kernel", "k.inc")).read(),
+                              re.M).group(1), 16) >> 8) - 8
+        with Vice(make_disk()) as v:
+            v.wait_shell()
+
+            def used():
+                return sum(1 for b in v.mem(pg_used, pg_used + npool - 1) if b)
+            before = used()
+            v.run("echo '10 for i=1 to 3:print i;:next' > /t.bas", timeout=60)
+            v.run("echo '20 print \"built\":x=1/0' >> /t.bas", timeout=60)
+            v.run("cp /t.bas /r.bas", timeout=60)
+            v.run("echo run >> /r.bas", timeout=60)
+            v.run("cp /t.bas /b.bas", timeout=60)
+            v.run("echo build >> /b.bas", timeout=60)
+            ran = v.run("bas < /r.bas", timeout=60)
+            v.run("bas < /b.bas > /p.bx", timeout=60)
+            built = v.run("brun /p.bx", timeout=60)
+            status = v.run("echo $?", clear=False, timeout=30)
+            refused = v.run("brun /t.bas", timeout=60)
+            after = used()
+        self.assertEqual(built.splitlines()[-3:], [" 1  2  3 ", "built", "?DIVISION BY ZERO ERROR IN 20"], built)
+        self.assertIn("?DIVISION BY ZERO ERROR IN 20", ran)
+        self.assertEqual(status.split(), ["1"])
+        self.assertIn("not a file of this bas", refused)
+        self.assertEqual(after, before)
+
 
 class SharedVM(unittest.TestCase):
     """/lib/pvm is loaded once for every p-code process, and freed after the last one."""
