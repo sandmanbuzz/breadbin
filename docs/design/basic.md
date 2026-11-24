@@ -136,7 +136,7 @@ prove the whole path with one tiny program end to end before widening anything.
     store alone went from 40M to 9.6M. Still far from the estimate of about a second per 100
     lines in §7; what remains is spread over `getline` (4.3M), `cline`, `var` and `constant`,
     each next in line to go native.
-  - *Memory:* `bas` is about 10 KB of code and 29 KB with its 16,384-byte arena, 1 KB of VM
+  - *Memory:* `bas` was about 10 KB of code (7.6 KB after the squish below) and 29 KB with its 16,384-byte arena, 1 KB of VM
     frames and the 2.5 KB VM library, against the 31 KB `free` shows at the shell. The first
     build with the full arena **did not load** (`sh: bas: out of memory`); 15,872 did. Fitting
     16,384 took a 768-byte frame stack (a `/* fstack N */` directive in the source, read by

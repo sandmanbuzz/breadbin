@@ -20,9 +20,9 @@
 ; Changes from upstream (docs/design/pvm.md section 4):
 ; - zero page: the eval stack is 11 deep in $0A-$1F with a 2-byte guard at $08 (kernel syscall
 ;   scratch, saved per process); the VM state is in $23-$36. Nothing at $40 or above.
-; - calls: a CALL/ICAL to a bytecode function (one that starts with JSR pvm_interp) keeps the
+; - calls: a CALL/ICAL to a bytecode function (which starts at its ENTER, no header) keeps the
 ;   return IP on the frame stack and uses no 6502 stack; RET pops it, or returns to native code
-;   (RTS) at the marker pvm_interp pushes when native code calls in. Native targets as upstream.
+;   (RTS) at the marker pvm_interp pushes when native code calls in. A native is called with NCAL (as upstream); ICAL and CALL are bytecode-only.
 ;   NATV pushes RET's address so a native tail's RTS returns from the function, as upstream.
 ; - ENTER spills the caller's pending eval-stack entries to the frame stack when fewer than
 ;   ESRESERVE would be free, LEAVE restores them under any number of results; an eval stack

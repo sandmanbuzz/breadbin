@@ -110,9 +110,10 @@ Ported changes, each forced by §1:
    program keeps `$3A–$3F` (`src/pvm/prog.cfg`). A p-code program does not link `lib.s`'s zero-page users. Nothing in
    `$60–$8F` is used.
 2. **Return IPs on the frame stack**, not the 6502 stack. Recursion depth is then bounded by the
-   frame stack (in the program's BSS), not by `STKSAVE`. A function that starts with
-   `JSR pvm_interp` is entered without that `JSR` running: `CALL` pushes the return IP and jumps
-   to the bytecode after it. Native code that calls bytecode pushes a marker the matching `RET`
+   frame stack (in the program's BSS), not by `STKSAVE`. A bytecode function starts at its
+   `ENTER` (no `JSR pvm_interp` header; `CALL`/`ICAL` are bytecode-only and push the return IP
+   and jump to it); `NCAL` ($52) calls a native, which a native callee that is really bytecode
+   keeps a `P_FUNC` header for. Native code that calls bytecode pushes a marker the matching `RET`
    turns back into an `RTS`; bytecode calling native code uses the 6502 stack, as upstream.
    `NATV` pushes `RET`'s address, so a native tail's `RTS` returns from the function as it does
    upstream (where the call was a `JSR`). Frameless functions only: `RET` does not undo
@@ -228,7 +229,7 @@ BASIC, whose compare gives -1/0), `!x` is `CN 0; ISEQ; NEG` (two eval slots, whi
 `&&`/`||` as a value are `cond`'s branches then `CN 1` / `BRNCH` / `CN 0`, and a scaled local or a
 global added to TOS is `LLW`/`LAW` then `IDXW`/`ADD`. `SHL` and `SHR` are count loops (no 8-bit
 fast path: slower for counts of 8 and up, 36 bytes smaller). `FIXDROP` and the `XOP` tail reuse
-`FIXNEXT`, and `CALLTMP` tests for a `JSR pvm_interp` header with a three-byte loop. The BASIC image
+`FIXNEXT`, and `CALL`/`NCAL` share `CALLTMP` (the header test is gone: crush 1, below). The BASIC image
 grew from 10,170 to 10,202 bytes, still 40 pages. Evidence: host tests (189), `SharedVM` (7 pages),
 `Basic`, `CompiledC` and the smoke set under VICE, a hater review (one block, `!x` depth, fixed
 with a test). A page-0 padding of 7 bytes remains and `pushov0` is dead code: both are slack for
@@ -318,3 +319,19 @@ the next pass. Not run: the full suite, JiffyDOS, hardware.
   descriptions. Read for design only.
 - SWEET16: Wozniak, "SWEET16: The 6502 Dream Machine", BYTE, November 1977. Ideas only.
 - Lawless Legends: <https://github.com/badvision/lawless-legends>, Apache-2.0. Ideas only.
+
+## The bas squish (2026-11-23, branch feat/bas-crush)
+
+`bas` 9,993 → 7,570 B of code (40 → 34 pages with its 992 B BSS), the VM still 7 pages (1,787 of 1,792 B):
+1. **Headerless bytecode functions + `NCAL`**: no `JSR pvm_interp` per function; `CALL`/`ICAL` bytecode-only
+   (`icall(&native)` is a compile error); natives via `NCAL`.
+2. **One-byte branches** (signed, from the offset byte); `relax()` in `cc_pcode` grows far ones to a fixpoint (JUMP, or the
+   inverse branch over a JUMP). BASIC `IF` is `BRTRU +4; JUMP`, patched through a chain threaded in the code (`ifh`/`nif`).
+3. **Frame byte 0 is the frame size**: `ENTER` stores it, locals start at 1, `LEAVE` has no operand. A frame costs 1 B
+   more (a 1 KiB test stack recurses 170 deep, was 204).
+4. **Void functions and externs**: a defined non-main function whose result is never read nor address-taken pushes
+   nothing and callers emit no `DROP`; `/* void */` and `/* xop N void */` externs pop their own arguments.
+5. **`MINUS1`** for `-1` and `~0`.
+6. **Natives golfed** (`bas-rt.s`, −749 B): shared pop/negate/add, loop multiply and divide, one digit loop for output.
+Evidence: host tests (test_pvm, test_cc_pcode, test_bas_rt, test_cc_run, test_bas) and a hater review. **Not yet run:**
+VICE (`SharedVM`, `Basic`, `CompiledC`), smoke, shard s5; owed when a cluster slot is free.
