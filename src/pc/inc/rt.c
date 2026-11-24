@@ -439,17 +439,19 @@ int rt_val(int s) {     /* VAL: the number at the start of s (spaces, a sign, di
     return 0;
 }
 
-char ib[126];           /* INPUT's line, and where we are in it */
+char ib[126];           /* INPUT's line, and where we are in it; bas's command line too (idle while a program runs) */
 int il;
 int ii;
 int fs;                 /* the field ifield found: from fs, fl bytes */
 int fl;
 
-int iread() {           /* a line of stdin appended to ib: 0 at the end of the input */
+int iov;                /* iread cut a line: it was too long */
+
+int iread() {           /* a line of stdin appended to ib (bas's command lines too): 0 at the end of the input */
     int n = il;
     int c;
     while (1) {
-        if (read(0, pb, 1) <= 0) {
+        if (read(0, pb, 1) <= 0) {      /* a byte a call: no read-ahead to keep, and no buffer */
             if (n == il) return 0;
             break;
         }
@@ -458,12 +460,17 @@ int iread() {           /* a line of stdin appended to ib: 0 at the end of the i
         if (n < 124) {
             ib[n] = c;
             n = n + 1;
-        }
+        } else iov = 1;
     }
     ib[n] = 0;
     il = n;
-    col = 0;                /* the console echoed the return */
     return 1;
+}
+
+int iline() {           /* INPUT's next line, or BREAK at the end of the input */
+    if (!iread()) c_throw(9);
+    col = 0;                /* the console echoed the return */
+    return 0;
 }
 
 int ifield() {          /* the next field of ib from ii, as MS: leading spaces dropped, "quoted" as it is,
@@ -518,7 +525,7 @@ int rt_inp(int s, int m) {      /* INPUT: the prompt s (0: none), then n = m / 1
     while (1) {
         outs("? ");
         il = 0;
-        if (!iread()) c_throw(9);
+        iline();
         while (1) {
             ii = 0;
             k = 0;
@@ -527,7 +534,7 @@ int rt_inp(int s, int m) {      /* INPUT: the prompt s (0: none), then n = m / 1
             outs("??");
             ib[il] = ',';
             il = il + 1;
-            if (!iread()) c_throw(9);
+            iline();
         }
         ii = 0;
         ok = 1;

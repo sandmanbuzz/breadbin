@@ -59,7 +59,6 @@ char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|
                            here, written as the number with "tk NAME" in a comment (test_bas checks the
                            numbers; bas-rt.s has PRINT's and REM's); a keyword before its prefixes, as
                            the first that matches wins (so TOTAL is TO TAL, as MS) */
-char lbuf[126];         /* the line being read or compiled, NUL-ended */
 char *src;
 int si;                 /* the parse position in src */
 int cur;                /* the line being compiled; -1 in immediate mode */
@@ -78,32 +77,19 @@ int nfix;
 
 /* ---- input ---- */
 
-int getline() {         /* the next line of stdin into lbuf: its length, -1 at the end, -2 too long */
-    int n = 0;
-    int over = 0;
-    int c;
-    while (1) {
-        if (read(0, pb, 1) <= 0) {      /* a byte a call: no read-ahead to keep, and no buffer */
-            if (n == 0 && !over) return -1;
-            break;
-        }
-        c = pb[0];
-        if (c == '\n' || c == '\r') break;
-        if (n < 124) {
-            lbuf[n] = c;
-            n = n + 1;
-        } else over = 1;
-    }
-    lbuf[n] = 0;
-    if (over) return -2;
-    return n;
+int getline() {         /* the next line of stdin into ib: its length, -1 at the end, -2 too long */
+    il = 0;
+    iov = 0;
+    if (!iread()) return -1;
+    if (iov) return -2;
+    return il;
 }
 
-int normal() {          /* lbuf in place (c_crunch): keywords to tokens and the rest upper case,
+int normal() {          /* ib in place (c_crunch): keywords to tokens and the rest upper case,
                            outside quotes; tabs to spaces and runs of them to one, none leading
                            or trailing (but inside an unclosed string); a REM's text as typed.
                            Returns the length, or -1 for a byte above 127 outside quotes */
-    return c_crunch(lbuf, kwt);
+    return c_crunch(ib, kwt);
 }
 
 /* ---- parsing: c_sp, c_digit, c_letter and c_tok (bas-rt.s) read src[si] ---- */
@@ -178,7 +164,7 @@ int heapinit() {        /* the string heap, once the program's code is final: af
     return 0;
 }
 
-int store(int n, int t, int len) {  /* line n is lbuf from t, len bytes; none deletes it */
+int store(int n, int t, int len) {  /* line n is ib from t, len bytes; none deletes it */
     int p = find(n);
     int old = 0;
     int add = 0;
@@ -193,7 +179,7 @@ int store(int n, int t, int len) {  /* line n is lbuf from t, len bytes; none de
     if (len) {
         putw(mem + p, n);
         mem[p + 2] = len;
-        move(mem + p + 5, lbuf + t, len);
+        move(mem + p + 5, ib + t, len);
         mem[p + 5 + len] = 0;   /* the compiler reads the text in place */
     }
     return clearv();    /* as MS: an edit clears the variables */
@@ -1214,18 +1200,18 @@ int build() {           /* BUILD: the program as a file on the output: "BX", 1, 
     compile();
     if (err) return report(err, eline);
     reloc(addr(ptop), pend - ptop, addr(vbot), 1);
-    lbuf[0] = 'B';
-    lbuf[1] = 'X';
-    lbuf[2] = 1;
-    putw(lbuf + 3, rtid());
-    putw(lbuf + 5, pend - ptop);
-    putw(lbuf + 7, msz - vbot);
-    w = write(1, lbuf, 9) != 9;
+    ib[0] = 'B';
+    ib[1] = 'X';
+    ib[2] = 1;
+    putw(ib + 3, rtid());
+    putw(ib + 5, pend - ptop);
+    putw(ib + 7, msz - vbot);
+    w = write(1, ib, 9) != 9;
     w = w | (write(1, mem + ptop, pend - ptop) != pend - ptop);
     for (p = 0; p < ptop; p = next(p)) {
-        putw(lbuf, getw(mem + p + 3) - ptop);
-        putw(lbuf + 2, lineno(p));
-        w = w | (write(1, lbuf, 4) != 4);
+        putw(ib, getw(mem + p + 3) - ptop);
+        putw(ib + 2, lineno(p));
+        w = w | (write(1, ib, 4) != 4);
     }
     if (w) {
         write(2, "bas: write failed\n", 18);
@@ -1291,7 +1277,7 @@ int immediate() {       /* compile the line after the program's code (compiling 
     if (!pend && ptop) {
         compile();
         err = 0;
-        src = lbuf;     /* compile() read the program's lines */
+        src = ib;     /* compile() read the program's lines */
         si = 0;
     }
     cend = pend;
@@ -1374,32 +1360,20 @@ int main() {
     while (1) {
         n = getline();
         if (n == -1) break;
-        if (n == -2) {
-            report(3, -1);
-            if (tty) {
-                fresh();
-                outs("READY.\n");
-            }
-            continue;
+        if (n == -2) report(3, -1);
+        else {
+            n = normal();
+            if (n == 0) continue;
+            src = ib;
+            si = 0;
+            if (n == -1) report(1, -1);
+            else if (c_digit()) {  /* a numbered line: store it (no READY, as MS) */
+                t = number();
+                if (!err) store(t, si, n - si);
+                if (!err) continue;
+                report(err, -1);
+            } else command();
         }
-        n = normal();
-        if (n == 0) continue;
-        if (n == -1) {
-            report(1, -1);
-            if (tty) {
-                fresh();
-                outs("READY.\n");
-            }
-            continue;
-        }
-        src = lbuf;
-        si = 0;
-        if (c_digit()) {  /* a numbered line: store it (no READY, as MS) */
-            t = number();
-            if (!err) store(t, si, n - si);
-            if (!err) continue;
-            report(err, -1);
-        } else command();
         if (tty) {
             fresh();
             outs("READY.\n");
