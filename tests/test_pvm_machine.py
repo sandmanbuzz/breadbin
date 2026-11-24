@@ -246,11 +246,12 @@ class Basic(unittest.TestCase):
             status = v.run("echo $?", clear=False, timeout=30)
             piped = v.run("echo '? \"PIPED\";:?\"!\"' | bas", timeout=60)
             after = used()
-        # BYTES FREE is what BRK gave the arena: never fewer than the 16,384 the compiler started
-        # with, and all of it comes back at exit
+        # BYTES FREE is what BRK gave the arena, and all of it comes back at exit. The floor was
+        # the 16,384 the compiler started with; SAVE/LOAD (L3e) spent 256 B of it, approved by
+        # the owner as user-visible value (16,128 measured)
         free = int(re.search(r"(\d+) BYTES FREE", banner).group(1))
         sys.stderr.write("bas banner: %d BYTES FREE, %d pages in use (%d before)\n" % (free, during, before))
-        self.assertGreaterEqual(free, 16384)
+        self.assertGreaterEqual(free, 16128)
         self.assertGreaterEqual(during - before, free // 256)
         self.assertEqual(after, before)
         self.assertIn('10 PRINT "hello, world"', listed)
