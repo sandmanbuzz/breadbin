@@ -118,12 +118,14 @@ class Driver(unittest.TestCase):
                 self.assertEqual(len(parts), 3)
                 self.assertGreaterEqual(int(parts[2]), 0)
 
-    def test_check_mode_fails_when_slots_are_fewer_than_shards(self):
+    def test_check_mode_fits_a_work_unit_of_six_slots(self):
+        # a sharded run takes one slot per shard and a work unit takes at most six (docs/process.md),
+        # so the check is against six whatever the pool size is
         script = os.path.join(ROOT, "tools", "ci", "sharded.sh")
         r = subprocess.run([script, "--check"], capture_output=True, text=True,
                            env=dict(os.environ, BREADBIN_VICE_SLOTS="2"))
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("shards > 2 slots", r.stderr)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("slots", r.stderr)
 
     def test_bad_option(self):
         script = os.path.join(ROOT, "tools", "ci", "sharded.sh")
@@ -344,7 +346,7 @@ class DriverRuns(unittest.TestCase):
             f.write(STUB)
         os.chmod(self.stub, 0o755)
         self.out = os.path.join(self.d, "out")
-        self.args = [self.SCRIPT, "--no-outer-lock", "--no-preflight", "--run-sh", self.stub,
+        self.args = [self.SCRIPT, "--no-preflight", "--run-sh", self.stub,
                      "--stagger", "0", "--out", self.out, "--rev", "HEAD"]
         self.env = dict(os.environ, STUB_DIR=self.d)
 
