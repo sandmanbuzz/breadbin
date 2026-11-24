@@ -268,6 +268,30 @@ today) and the compiler K. **The peak is T + C + K, and only the peak limits a p
    equivalent), no text, no compiler. Interactive `bas` stays the small-program path; the
    file route is the big-program path, and the SDK story (L3f). Needs code that is position-bound
    to a load base and an entry table for the runtime (a build id check).
+   *Design (2026-11-23, option B; owner: "shoot for B", the size threat first, now removed: `bas` is
+   7.6 KB of code, 34 pages with its BSS).* Findings from reading `bas.c`:
+   - The compiled code holds absolute addresses of four kinds: the runtime (`CALL rt_*`, `c_ncall`
+     to natives), the arena's variables (`CW addr(vbot+2)`, string constants `CW addr(cend+10)`),
+     jumps and calls inside the code (`JUMP`/`CALL` to a line, the `IF` chain's targets), and plain
+     16-bit constants (`CW`, which is the same opcode as an address: the emit site must say which).
+   - The runtime is in `bas` itself (`rt_*` bytecode plus the natives), so a runner is
+     "bas without the compiler": the same source, minus `cline`/`stmt`/`climb` and the editor. The
+     mini C has no `#include`; the shared part goes in by a build-time concatenation (mk/pvm.mk), not a
+     language feature.
+   - File format (`.bx`): header (magic, the build id of the runner it was made for, code length,
+     variable-area size, fixup count), the code, then fixups delta-coded one byte each (an offset
+     step; a 0 step escapes to two bytes), the kind in the opcode that precedes the word
+     (`CALL`/`JUMP` are code-relative, `LA`/`CW` as tagged). The loader adds the load base to
+     code-relative words, the runner's base to runtime words, and the variable base to variable words.
+     A mismatched build id is `ENOEXEC`: the runtime addresses are only valid for one runner.
+   - Tagging costs bytes in `bas` (a fixup recorder in `c_opw`/`c_ncall`, one tag per emit site);
+     budget: under 150 B, and the page count is the gate (34 now; 36 would still beat the 40 we
+     started the crush with).
+   - Slices: **B1** the fixup recorder and a host-side `.bx` writer (`bas -c in.bas out.bx`),
+     tested by loading the file in the py65 harness at two different bases and running both;
+     **B2** the runner (`brun`) from the shared runtime, no compiler: measured free arena;
+     **B3** `ENOEXEC` on a build-id mismatch, errors by line number kept (a line table or none:
+     decide by size), the runner under VICE and on the Ultimate; **B4** the manual page (L3f).
 4. **REU/Recommended tiers** may spill text or code; never required.
 Rejected: dropping T and decompiling `LIST` from code (loses REM text and layout; heavy).
 
