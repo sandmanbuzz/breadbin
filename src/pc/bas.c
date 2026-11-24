@@ -181,7 +181,8 @@ int store(int n, int t, int len) {  /* line n is ib from t, len bytes; none dele
         move(mem + p + 5, ib + t, len);
         mem[p + 5 + len] = 0;   /* the compiler reads the text in place */
     }
-    return clearv();    /* as MS: an edit clears the variables */
+    clearv();    /* as MS: an edit clears the variables */
+    return 0;
 }
 
 int list(int a, int b) {
@@ -252,7 +253,8 @@ int prologue() {        /* the entry of a run: an error comes back here (rt_mark
     c_room(2);
     c_emit(76 /* PO_BRFLS */);
     c_emit(3);            /* to the body, past the CN 0 and RET */
-    return finish();
+    finish();
+    return 0;
 }
 
 /* ---- the runtime the compiled code calls ---- */
@@ -262,13 +264,13 @@ int prologue() {        /* the entry of a run: an error comes back here (rt_mark
 int npush(int d) {
     nd = nd + d;
     if (nd > 14) c_fail(11);      /* bas-rt.s holds 16; rt_pow and rt_next use 2 */
-    return 1;
+    return 0;
 }
 
 int epush(int d) {
     ed = ed + d;
     if (ed > 6) c_fail(11);
-    return 2;
+    return 0;
 }
 
 int tonum(int k) {
@@ -408,18 +410,21 @@ int more() {            /* does the parenthesis at si hold a comma of its own: a
 
 int pushi(int v) {      /* pushint, counted on the eval stack */
     pushint(v);
-    return epush(1);
+    epush(1);
+    return 0;
 }
 
 int iop(int op) {       /* a VM op on the eval stack's top two ints */
     c_op1(op);
-    return epush(-1);
+    epush(-1);
+    return 0;
 }
 
 int isub(int m) {       /* the subscript on top checked for 0 to m */
     pushi(m);
     pcall(&rt_sub);
-    return epush(-1);
+    epush(-1);
+    return 0;
 }
 
 int elem() {            /* A(i) or A(i, j): the element's address on the eval stack, after a check of each subscript */
@@ -464,13 +469,14 @@ int constant() {        /* a number at si: digits, a point, digits (spaces among
     if (ip >= 0) {
         pushint(ip);
         c_xop(226 /* x FROMI */);
-        return npush(1);
+    } else {
+        c_room(5);
+        c_emit(204 /* x LDK */);
+        for (i = 0; i < 4; i = i + 1) c_emit(pb[i]);
+        straight = 0;   /* the VM renormalises IP past the operand */
     }
-    c_room(5);
-    c_emit(204 /* x LDK */);
-    for (i = 0; i < 4; i = i + 1) c_emit(pb[i]);
-    straight = 0;       /* the VM renormalises IP past the operand */
-    return npush(1);
+    npush(1);
+    return 1;
 }
 
 int deep;
@@ -500,13 +506,15 @@ int strlit() {          /* a string literal after its quote: a CS, whose address
         for (c = 0; c < n; c = c + 1) c_emit(src[i + c]);
         straight = n + 1;       /* CS moves the base to the string: the next op is past it */
     } else c_op1(0 /* PO_CN 0 */);
-    return epush(1) + 1;
+    epush(1);
+    return 0;
 }
 
 int val() {             /* VAL of the string on the eval stack, to the number stack */
     ecall(&rt_val);
     epush(-1);
-    return npush(1);
+    npush(1);
+    return 1;
 }
 
 int sfn(int t) {        /* a string function, after its keyword (token 155 LEFT$, 156 RIGHT$, 157 MID$, 158 LEN,
@@ -569,7 +577,10 @@ int primary() {
     if (c_tok(128 /* tk ABS */)) return fn(222 /* x ABS */);
     if (c_tok(137 /* tk INT */)) return fn(220 /* x INT */);
     if (c_tok(148 /* tk SGN */)) return fn(224 /* x SGN */);
-    if (c_tok('"')) return strlit();
+    if (c_tok('"')) {
+        strlit();
+        return 3;
+    }
     if (c > 154 && c < 163 && c_tok(c)) return sfn(c);
     if (c_letter()) {
         k = var();
@@ -580,7 +591,8 @@ int primary() {
             }
             c_xop(240 /* c_ldv */);
             epush(-1);
-            return npush(1);
+            npush(1);
+            return 1;
         }
         if (vint) {
             c_opw(106 /* PO_LAW */, k);
@@ -588,7 +600,8 @@ int primary() {
             return vint + 1;
         }
         c_xopw(200 /* x LDV */, k);
-        return npush(1);
+        npush(1);
+        return 1;
     }
     c_fail(1);
     return 1;
@@ -682,15 +695,17 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
             }
             pushi(0);
             relop(p);
-            k = epush(-1);
+            epush(-1);
+            k = 2;
             continue;
         }
         incsi();
         if (p <= 4) {
             toint(k);
             toint(climb(p + 1));
-            if (p == 4) k = iop(148 /* PO_BAND */);
-            else k = iop(150 /* PO_IOR */);
+            if (p == 4) iop(148 /* PO_BAND */);
+            else iop(150 /* PO_IOR */);
+            k = 2;
             continue;
         }
         if (k == 3) {           /* a string: + joins */
@@ -706,7 +721,8 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
         else if (c == '/') c_xop(214 /* x DIV */);
         else if (c == '+') c_xop(208 /* x ADD */);
         else c_xop(210 /* x SUB */);
-        k = npush(-1);
+        npush(-1);
+        k = 1;
     }
     deep = deep - 2;
     return k;
@@ -719,25 +735,30 @@ int assign(int a, int t, int k) {       /* the value of kind k to the variable o
     if (t == 2) {               /* the address of the variable was pushed before the expression */
         if (k != 3) c_fail(13);
         ecall(&rt_sset);
-        return epush(-2);
+        epush(-2);
+        return 0;
     }
     if (t) {
         toint(k);
         if (a) {
             c_opw(122 /* PO_SAW */, a);
-            return epush(-1);
+            epush(-1);
+            return 0;
         }
         ecall(&rt_sw);
-        return epush(-2);
+        epush(-2);
+        return 0;
     }
     tonum(k);
     if (a) {
         c_xopw(202 /* x STV */, a);
-        return npush(-1);
+        npush(-1);
+        return 0;
     }
     c_xop(246 /* c_stv */);
     npush(-1);
-    return epush(-1);
+    epush(-1);
+    return 0;
 }
 
 int sla(int a, int t) {        /* a string variable's address, for rt_sset: an element's is pushed already */
@@ -760,7 +781,8 @@ int let() {             /* [LET] v = expression */
     i = vint;
     if (!need('=')) return 0;
     sla(a, i);
-    return assign(a, i, climb(1));
+    assign(a, i, climb(1));
+    return 0;
 }
 
 int prints() {          /* PRINT: strings and numbers; ; between them, or after the last for no
@@ -826,7 +848,8 @@ int gotol() {
         c_fail(1);
         return 0;
     }
-    return jump(number());
+    jump(number());
+    return 0;
 }
 
 int ifs_() {            /* IF e THEN n | statements, IF e GOTO n: false goes to the next line */
@@ -848,14 +871,15 @@ int ifs_() {            /* IF e THEN n | statements, IF e GOTO n: false goes to 
     ifh = cend - 2;
     epush(-1);
     c_sp();
-    if (c_tok(134 /* tk GOTO */)) return gotol();
+    if (c_tok(134 /* tk GOTO */)) { gotol(); return 0; }
     if (!c_tok(152 /* tk THEN */)) {
         c_fail(1);
         return 0;
     }
     c_sp();
-    if (c_digit()) return gotol();
-    return stmt();
+    if (c_digit()) { gotol(); return 0; }
+    stmt();
+    return 0;
 }
 
 int fors() {            /* FOR v = a TO b [STEP c] */
@@ -926,15 +950,16 @@ int sres() {            /* before a statement with strings in it, room for the t
     n = n + s;
     if (n > 6) n = 6;
     pushint(n);
-    return ecall(&rt_sres);
+    ecall(&rt_sres);
+    return 0;
 }
 
-int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and checks the line (the kinds go to it as a
-                           mask, found by a look ahead), then each variable takes its field (rt_ifld) */
+int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and checks the line (the count, found by a
+                           look ahead, and the kinds go to it as a mask, put in the constant once the variables are
+                           parsed), then each variable takes its field (rt_ifld) */
     int m = 0;
-    int n = 0;
+    int n = 1;
     int i;
-    int p = 0;
     int c;
     int a;
     int k;
@@ -949,20 +974,17 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
     }
     c_sp();
     i = si;
-    while (!err) {
+    while (1) {
         c = src[i];
+        if (!c || c == ':') break;
         if (c == '(') d = d + 1;
         if (c == ')') d = d - 1;
-        if (c == 0 || c == ':' || (c == ',' && !d)) {
-            if (p != '$') m = m + (1 << n);
-            n = n + 1;
-            p = 0;
-            if (c != ',') break;
-        } else if (c != ' ' && !d && c != ')') p = c;
+        if (c == ',' && !d) n = n + 1;
         i = i + 1;
     }
     if (n > 7) c_fail(11);
-    pushi(n * 128 + m);
+    pushi(n * 128);
+    i = cend - 1 - (n > 1);     /* the constant's low byte (a CB's or a CW's): the mask is added to it */
     ecall(&rt_inp);
     epush(-2);
     for (k = 0; k < n && !err; k = k + 1) {
@@ -973,6 +995,7 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
         }
         a = var();
         t = vint;
+        if (t != 2) m = m + (1 << k);
         sla(a, t);
         pcall(&rt_ifld);
         epush(1);
@@ -980,6 +1003,7 @@ int inputs() {          /* INPUT ["prompt";] v [, v ...]: rt_inp reads and check
         if (t != 2) c = val();
         assign(a, t, c);
     }
+    mem[i] = mem[i] + m;
     return 0;
 }
 
@@ -1042,15 +1066,15 @@ int predim() {          /* every DIM of the program, before a line is compiled: 
 int stmt() {
     c_sp();
     sres();
-    if (c_tok(144 /* tk PRINT */)) return prints();
+    if (c_tok(144 /* tk PRINT */)) { prints(); return 0; }
     if (c_tok(145 /* tk REM */)) {
         while (src[si]) incsi();
         return 0;
     }
-    if (c_tok(163 /* tk INPUT */)) return inputs();
-    if (c_tok(164 /* tk DIM */)) return dims();
-    if (c_tok(138 /* tk LET */)) return let();
-    if (c_tok(136 /* tk IF */)) return ifs_();
+    if (c_tok(163 /* tk INPUT */)) { inputs(); return 0; }
+    if (c_tok(164 /* tk DIM */)) { dims(); return 0; }
+    if (c_tok(138 /* tk LET */)) { let(); return 0; }
+    if (c_tok(136 /* tk IF */)) { ifs_(); return 0; }
     if (c_tok(133 /* tk GOSUB */)) {
         c_room(6);        /* the return address is 10 bytes on */
         c_opw(38 /* PO_LA */, addr(cend + 10));
@@ -1059,17 +1083,17 @@ int stmt() {
         c_ncall(&rt_ln);  /* the return address: the line is current again */
         return 0;
     }
-    if (c_tok(134 /* tk GOTO */)) return gotol();
+    if (c_tok(134 /* tk GOTO */)) { gotol(); return 0; }
     if (c_tok(135 /* tk GO */)) {     /* GO TO */
-        if (need(153 /* tk TO */)) return gotol();
+        if (need(153 /* tk TO */)) { gotol(); return 0; }
         return 0;
     }
     if (c_tok(146 /* tk RETURN */)) {
         pcall(&rt_return);
         return c_ncall(&rt_go);
     }
-    if (c_tok(132 /* tk FOR */)) return fors();
-    if (c_tok(141 /* tk NEXT */)) return nexts();
+    if (c_tok(132 /* tk FOR */)) { fors(); return 0; }
+    if (c_tok(141 /* tk NEXT */)) { nexts(); return 0; }
     if (c_tok(131 /* tk END */)) {
         c_op1(0 /* PO_CN 0 */);
         return c_op1(92 /* PO_RET */);
@@ -1078,7 +1102,7 @@ int stmt() {
         c_op1(18 /* PO_CN 9 */);
         return c_ncall(&c_throw);
     }
-    if (c_letter()) return let();
+    if (c_letter()) { let(); return 0; }
     c_fail(1);
     return 0;
 }
@@ -1166,14 +1190,20 @@ int compile() {         /* the program into code from ptop: pend, or err and eli
    of a variable: the offset from the variables' start, with bit 15 set), or the runtime (CALL
    and NCAL: the offset from the first routine of its kind). The runner turns them back, so it need not share bas's layout. */
 
+int wbad;               /* a write of BUILD's failed */
+
+int wr(char *b, int n) {
+    if (write(1, b, n) != n) wbad = 1;
+    return 0;
+}
+
 int build() {           /* BUILD: the program as a file on the output: "BX", 1, rtid, the code's length, the
                            variables' size, the code, then the line table: per line the offset of its code
                            and its number. The code in the arena is spent */
     int p;
-    int w;
     clearv();
     compile();
-    if (err) return report(err, eline);
+    if (err) { report(err, eline); return 0; }
     reloc(addr(ptop), pend - ptop, addr(vbot), 1);
     ib[0] = 'B';
     ib[1] = 'X';
@@ -1181,14 +1211,14 @@ int build() {           /* BUILD: the program as a file on the output: "BX", 1, 
     putw(ib + 3, rtid());
     putw(ib + 5, pend - ptop);
     putw(ib + 7, msz - vbot);
-    w = write(1, ib, 9) != 9;
-    w = w | (write(1, mem + ptop, pend - ptop) != pend - ptop);
+    wr(ib, 9);
+    wr(mem + ptop, pend - ptop);
     for (p = 0; p < ptop; p = next(p)) {
-        putw(ib, getw(mem + p + 3) - ptop);
+        putw(ib, mw(p + 3) - ptop);
         putw(ib + 2, mw(p));
-        w = w | (write(1, ib, 4) != 4);
+        wr(ib, 4);
     }
-    if (w) {
+    if (wbad) {
         write(2, "bas: write failed\n", 18);
         exit(1);
     }
@@ -1210,21 +1240,23 @@ int go(int at) {        /* run the code at mem[at]; then report an error, with i
     a = c_curip() - (mem - nul);
     if (pend && a > ptop && a <= pend)
         for (p = 0; p < ptop; p = next(p)) if (getw(mem + p + 3) < a) ln = mw(p);
-    return report(e, ln);
+    report(e, ln);
+    return 0;
 }
 
 int run(int t, int has) {       /* RUN [t] */
     clearv();
     compile();
-    if (err) return report(err, eline);
+    if (err) { report(err, eline); return 0; }
     heapinit();
-    if (!has) return go(ptop);
+    if (!has) { go(ptop); return 0; }
     cend = pend;
     cur = -1;
     prologue();
     jump(t);
-    if (err) return report(err, -1);
-    return go(pend);
+    if (err) { report(err, -1); return 0; }
+    go(pend);
+    return 0;
 }
 
 int ended() {           /* nothing after a command but spaces, and no error so far: else reported */
@@ -1243,7 +1275,8 @@ int body() {            /* an immediate line's code, from cend: its statements, 
     c_xop(206 /* x LN */);
     stmts();
     endline();
-    return finish();
+    finish();
+    return 0;
 }
 
 int immediate() {       /* compile the line after the program's code (compiling the program
@@ -1280,12 +1313,14 @@ int command() {         /* a line without a number */
             if (c_digit()) b = number();
         }
         if (!ended()) return 0;
-        return list(a, b);
+        list(a, b);
+        return 0;
     }
     if (c_tok(140 /* tk NEW */)) {
         if (!ended()) return 0;
         ptop = 0;
-        return clearv();
+        clearv();
+        return 0;
     }
     if (c_tok(147 /* tk RUN */)) {
         c_sp();
@@ -1294,11 +1329,13 @@ int command() {         /* a line without a number */
             b = 1;
         }
         if (!ended()) return 0;
-        return run(a, b == 1);
+        run(a, b == 1);
+        return 0;
     }
     if (c_tok(154 /* tk BUILD */)) {
         if (!ended()) return 0;
-        return build();
+        build();
+        return 0;
     }
     if (c_tok(130 /* tk BYE */) || c_tok(151 /* tk SYSTEM */)) {
         if (!ended()) return 0;
@@ -1313,8 +1350,9 @@ int command() {         /* a line without a number */
         at = ptop;
         body();
     }
-    if (err) return report(err, -1);
-    return go(at);
+    if (err) { report(err, -1); return 0; }
+    go(at);
+    return 0;
 }
 
 int main() {

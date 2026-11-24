@@ -640,7 +640,7 @@ c_grow: lda P_ESTKL,x
         rts
 
 ; c_mcpy(d, s, n): n bytes from s up to d, ascending, a byte at a time (so d = s + 1 fills with mem[s]).
-; Pops the three, 0.
+; Pops the three; no result.
 c_mcpy: lda P_ESTKL+2,x
         sta ptr
         lda P_ESTKH+2,x
@@ -669,9 +669,7 @@ c_mcpy: lda P_ESTKL+2,x
         beq @l
 @d:     inx
         inx
-        lda #0
-        sta P_ESTKL,x
-        sta P_ESTKH,x
+        inx
         rts
 
 ; ---- XOPs (pvm.md, "XOP"): bas's own one-byte opcodes, $C8 + 2 * the index in xtab ----

@@ -21,8 +21,8 @@ extern int c_toi();
 extern int c_fromi(int i); /* void */
 extern int c_cmp();
 extern int c_fmt(char *buf);
-extern int c_throw(int e);
-extern int c_mcpy(int d, int s, int n); /* ascending byte copy */
+extern int c_throw(int e); /* void */
+extern int c_mcpy(int d, int s, int n); /* void */  /* an ascending byte copy */
 
 int err;                /* the error numbers are emsg's */
 char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|STRING TOO LONG|TYPE MISMATCH|BAD SUBSCRIPT|REDIM'D ARRAY|";
@@ -120,10 +120,6 @@ int salloc(int n) {     /* a temporary of n bytes, 1 to 255: its address */
     return s;
 }
 
-int scopy(int d, int s, int n) {
-    return c_mcpy(d, s, n);
-}
-
 int sgc() {             /* the live blocks down over the dead ones, each variable following its block */
     int q = hlo;
     int d = hlo;
@@ -133,7 +129,7 @@ int sgc() {             /* the live blocks down over the dead ones, each variabl
         b = getw(nul + q);
         n = nul[q + 2] + 3;
         if (b && b != -1) {
-            scopy(d, q, n);
+            c_mcpy(d, q, n);
             putw(nul + b, d + 2);
             d = d + n;
         }
@@ -284,8 +280,8 @@ int rt_scat(int a, int b) {
     if (!la) return b;
     if (!lb) return a;
     r = salloc(la + lb);
-    scopy(r + 1, a + 1, la);
-    scopy(r + 1 + la, b + 1, lb);
+    c_mcpy(r + 1, a + 1, la);
+    c_mcpy(r + 1 + la, b + 1, lb);
     sfree(a);
     sfree(b);
     return r;
@@ -300,7 +296,7 @@ int rt_sset(int c, int s) {     /* the variable at c := the string s: a temporar
     if (s) {
         if (!inheap(s) || getw(nul + s - 2) != -1) {
             n = salloc(nul[s]);
-            scopy(n + 1, s + 1, nul[s]);
+            c_mcpy(n + 1, s + 1, nul[s]);
             s = n;
         }
         putw(nul + s - 2, c);
@@ -368,7 +364,7 @@ int rt_mid(int s, int i, int n) {       /* n characters from the i-th (1 is the 
     }
     if (n == l) return s;
     r = salloc(n);
-    scopy(r + 1, s + i, n);
+    c_mcpy(r + 1, s + i, n);
     sfree(s);
     return r;
 }
@@ -389,7 +385,7 @@ int rt_str() {          /* STR$ of the number on top of the number stack: as PRI
     char b[12];
     int n = c_fmt(b);
     int r = salloc(n);
-    scopy(r + 1, b - nul, n);
+    c_mcpy(r + 1, b - nul, n);
     return r;
 }
 
@@ -563,7 +559,7 @@ int rt_ifld() {         /* the next field of the line rt_inp read, as a temporar
     ifield();
     if (fl) {
         t = salloc(fl);
-        scopy(t + 1, ib + fs - nul, fl);
+        c_mcpy(t + 1, ib + fs - nul, fl);
     }
     return t;
 }
