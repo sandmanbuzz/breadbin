@@ -89,7 +89,7 @@ int si;
 char *mem;
 int msz;
 int cend;
-int vbot;
+int clim;
 int straight;
 int err;
 int ld(int lo, int hi) { v[0] = lo; v[1] = lo >> 8; v[2] = hi; v[3] = hi >> 8; c_ldv(v); return 0; }

@@ -4,7 +4,7 @@
    natives in rt.s by offsets from rt_mark; docs/design/basic.md 6.1). Included first in each,
    which keeps those offsets the same; tools/test_bas.py checks that they are. */
 
-/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next */   /* tools/cc_pcode.py: a
+/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next rt_sres rt_scat rt_sset rt_scmp */   /* tools/cc_pcode.py: a
    program that never reads one of these (brun) would make it void, and the offsets would differ from bas's */
 
 extern int rt_mark();   /* rt.s, for the compiled code: these take their arguments from the */
@@ -24,7 +24,7 @@ extern int c_fmt(char *buf);
 extern int c_throw(int e);
 
 int err;                /* the error numbers are emsg's */
-char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|";
+char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|STRING TOO LONG|TYPE MISMATCH|";
 char ctl[193];          /* GOSUB and FOR entries, each with its tag last: G (3 bytes) the return
                            address; F (13) the variable, the body, the limit and the step */
 int csp;
@@ -90,8 +90,66 @@ int outb(char *b, int n) {       /* n bytes */
     return 0;
 }
 
-int rt_prs(char *s) {   /* a CS string: length, then the text */
-    return outb(s + 1, s[0]);
+
+/* ---- strings: a heap of blocks, [back-pointer (2), length, text]. A string is the address of its
+   length byte, as a CS literal is (the literal is no block), and 0 is "". The back-pointer is the
+   address of the variable that holds the block, -1 for a temporary (made in this statement, not yet
+   assigned) and 0 once it is dead. Only rt_sres, at the start of a statement that uses strings, moves
+   blocks (sgc), so no address on the stacks goes stale; a block it finds with -1 is an error's leftover. ---- */
+
+int hlo;                /* the heap: [hlo, htop) is in use, up to hhi (the variables below) */
+int htop;
+int hhi;
+
+int inheap(int s) {
+    return s && s - hlo > 0 && s - htop < 0;
+}
+
+int sfree(int s) {      /* a temporary used up */
+    if (inheap(s) && getw(nul + s - 2) == -1) putw(nul + s - 2, 0);
+    return 0;
+}
+
+int salloc(int n) {     /* a temporary of n bytes, 1 to 255: its address */
+    int s = htop + 2;
+    if (hhi - htop < n + 3) c_throw(2);
+    putw(nul + htop, -1);
+    nul[s] = n;
+    htop = htop + n + 3;
+    return s;
+}
+
+int scopy(int d, int s, int n) {
+    int i;
+    for (i = 0; i < n; i = i + 1) nul[d + i] = nul[s + i];
+    return 0;
+}
+
+int sgc() {             /* the live blocks down over the dead ones, each variable following its block */
+    int q = hlo;
+    int d = hlo;
+    int b;
+    int n;
+    while (q - htop < 0) {
+        b = getw(nul + q);
+        n = nul[q + 2] + 3;
+        if (b && b != -1) {
+            scopy(d, q, n);
+            putw(nul + b, d + 2);
+            d = d + n;
+        }
+        q = q + n;
+    }
+    htop = d;
+    return 0;
+}
+
+int rt_prs(int s) {     /* a string: length, then the text */
+    if (s) {
+        outb(nul + s + 1, nul[s]);
+        sfree(s);
+    }
+    return 0;
 }
 
 int rt_prn() {          /* PRINT a number: a sign or a space before it, a space after */
@@ -206,6 +264,73 @@ int rt_next(int v) {    /* step the loop on v (0: the innermost): the body's add
         return 0;
     }
     return getw(ctl + e + 2);
+}
+
+int rt_sres(int n) {    /* room for n temporaries of any length, before a statement that makes them */
+    n = n * 258;
+    if (hhi - htop < n) {
+        sgc();
+        if (hhi - htop < n) c_throw(2);
+    }
+    return 0;
+}
+
+int rt_scat(int a, int b) {
+    int la = 0;
+    int lb = 0;
+    int r;
+    if (a) la = nul[a];
+    if (b) lb = nul[b];
+    if (la + lb > 255) c_throw(12);
+    if (!la) return b;
+    if (!lb) return a;
+    r = salloc(la + lb);
+    scopy(r + 1, a + 1, la);
+    scopy(r + 1 + la, b + 1, lb);
+    sfree(a);
+    sfree(b);
+    return r;
+}
+
+int rt_sset(int c, int s) {     /* the variable at c := the string s: a temporary becomes its block; any
+                                   other (a variable's, or a literal, which an immediate line's code
+                                   overwrites) is copied */
+    int o = getw(nul + c);
+    int n;
+    if (s == o) return 0;
+    if (s) {
+        if (!inheap(s) || getw(nul + s - 2) != -1) {
+            n = salloc(nul[s]);
+            scopy(n + 1, s + 1, nul[s]);
+            s = n;
+        }
+        putw(nul + s - 2, c);
+    }
+    putw(nul + c, s);
+    if (inheap(o)) putw(nul + o - 2, 0);
+    return 0;
+}
+
+int rt_scmp(int a, int b) {     /* -1, 0 or 1 */
+    int la = 0;
+    int lb = 0;
+    int i = 0;
+    int r = 0;
+    int m;
+    if (a) la = nul[a];
+    if (b) lb = nul[b];
+    m = la;
+    if (lb < la) m = lb;
+    while (i < m && !r) {
+        r = nul[a + 1 + i] - nul[b + 1 + i];
+        i = i + 1;
+    }
+    if (!r) r = la - lb;
+    sfree(a);
+    sfree(b);
+    if (r > 0) return 1;
+    if (r < 0) return -1;
+    return 0;
 }
 
 int report(int e, int line) {   /* error e as MS prints it; line -1 for none */

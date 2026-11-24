@@ -139,7 +139,7 @@ class Bas(unittest.TestCase):
 
     def test_token_numbers_match_the_table(self):
         text = cc.read_source(SRC)
-        table = re.search(r'char kwt\[\] = "([A-Z|]+)";', text).group(1).split("|")[:-1]
+        table = re.search(r'char kwt\[\] = "([A-Z|$]+)";', text).group(1).split("|")[:-1]
         uses = re.findall(r"(\d+) /\* tk ([A-Z]+) \*/", text)
         self.assertGreater(len(uses), 25)
         for n, name in uses:
@@ -176,7 +176,7 @@ class Bas(unittest.TestCase):
         self.assertEqual(self.out('40000 GOTO 10\nRUN\n'), "?UNDEF'D STATEMENT ERROR IN 40000\n")
 
     def test_bad_commands(self):
-        for line in ("LIST X", "LIST 10-20-30", "NEW 5", "RUN X", "FOO", "LISTX", "PRINT 5)", "X$=1"):
+        for line in ("LIST X", "LIST 10-20-30", "NEW 5", "RUN X", "FOO", "LISTX", "PRINT 5)"):
             self.assertEqual(self.out(line + "\n"), "?SYNTAX ERROR\n", line)
 
     def test_ready_only_on_a_terminal(self):
@@ -367,7 +367,7 @@ class Language(unittest.TestCase):
                          " 1 \n 1 \n 5 \n 0 \n")
         # a name ends where a keyword starts (as MS: FORM is FOR M)
         self.assertEqual(self.out("10 FORM=1TO2:PRINT M;:NEXT\n20 IFX=0THENPRINT\"Z\"\nRUN\n"), " 1  2 Z\n")
-        self.assertEqual(self.out("X$=1\n"), "?SYNTAX ERROR\n")
+        self.assertEqual(self.out("X$=1\n"), "?TYPE MISMATCH ERROR\n")
 
     def test_goto_and_if(self):
         out = self.out('10 GOTO 30\n20 PRINT "NO"\n30 PRINT "YES":IF 1 THEN 50\n40 PRINT "NO"\n'
@@ -485,6 +485,54 @@ class Language(unittest.TestCase):
 
     def test_bytes_free(self):
         self.assertEqual(self.out("", tty=True), FREE + "READY.\n")
+
+
+@unittest.skipUnless(test_pvm.HAVE_TOOLS, "needs ca65, ld65 and py65")
+class Strings(unittest.TestCase):
+    """L3d: string variables, literals, +, comparison and PRINT; the heap and its collector
+    (docs/design/basic.md 6.2)."""
+    def out(self, text, **kw):
+        out, status = bas(text, limit=kw.pop("limit", 200_000_000), **kw)
+        self.assertEqual(status, 0, out)
+        return out
+
+    def test_assign_join_compare_print(self):
+        self.assertEqual(self.out('10 A$="HELLO":B$=A$+" WORLD"\n20 PRINT B$;"!"\n'
+                                  '30 PRINT A$=B$;A$<B$;B$<A$;A$<>A$;"A"<"B";"AB">"A";""="";A$>=""\nRUN\n'),
+                         "HELLO WORLD!\n 0 -1  0  0 -1 -1 -1 -1 \n")
+        # variables outlive the run, as numbers do; A$ and A and A% are three variables
+        self.assertEqual(self.out('A$="X":A=5:A%=6\nPRINT A$;A;A%\nB$=A$+A$+A$:PRINT B$\n'), "X 5  6 \nXXX\n")
+        self.assertEqual(self.out('A$="Q":A$=A$+A$:A$=A$+A$:PRINT A$:A$="":PRINT A$;"|"\nB$=A$:PRINT B$;"|"\n'), "QQQQ\n|\n|\n")
+
+    def test_type_mismatches(self):
+        for line in ("A$=1", "A=\"X\"", "A=A$", "PRINT \"A\"+1", "PRINT 1+\"A\"", "PRINT -A$", "IF A$ THEN PRINT 1",
+                     "PRINT A$*2", "PRINT A$<1", "A%=A$", "PRINT \"A\"-\"B\""):
+            self.assertEqual(self.out(line + "\n"), "?TYPE MISMATCH ERROR\n", line)
+
+    def test_too_long(self):
+        self.assertEqual(self.out('10 A$="0123456789ABCDEF"\n20 FOR I=1 TO 5:A$=A$+A$:NEXT\nRUN\n'), "?STRING TOO LONG ERROR IN 20\n")
+
+    def test_the_collector_moves_blocks_and_variables_follow(self):
+        # a small arena (brk 20: 5 KB) and a loop that makes far more garbage than it holds
+        prog = ('10 A$="KEEP":B$="ME TOO"\n20 FOR I=1 TO 300\n30 C$=B$+A$+B$:D$=A$+C$:NEXT\n'
+                '40 PRINT A$;"|";B$;"|";C$;"|";D$\nRUN\nPRINT C$=B$+A$+B$;D$=A$+C$\n')
+        self.assertEqual(self.out(prog, brk=20), "KEEP|ME TOO|ME TOOKEEPME TOO|KEEPME TOOKEEPME TOO\n-1 -1 \n")
+
+    def test_out_of_memory_is_an_error_not_a_crash(self):
+        out = self.out('10 A$="01234567":A$=A$+A$:A$=A$+A$:A$=A$+A$:A$=A$+A$\n'
+                       '20 B$=A$:C$=A$:D$=A$:E$=A$:F$=A$:G$=A$:H$=A$:I$=A$:J$=A$:K$=A$:L$=A$:M$=A$:N$=A$:O$=A$:P$=A$:Q$=A$\n'
+                       '30 R$=A$:S$=A$:T$=A$:U$=A$:V$=A$:W$=A$:X$=A$:Y$=A$:Z$=A$\nRUN\nPRINT A$;"|"\n', brk=17)
+        self.assertTrue(out.startswith("?OUT OF MEMORY ERROR IN 30"), out)
+        self.assertTrue(out.endswith("01234567" * 16 + "|\n"), out)       # and the heap is intact after it
+
+    def test_compiled_file_matches_run(self):
+        prog = ('10 A$="AB":B$=A$+"CD"\n20 FOR I=1 TO 40:C$=B$+A$:B$=C$:IF I>3 THEN B$="Z"+A$\n30 NEXT\n'
+                '40 PRINT B$;"|";C$;A$<B$;"X"="X"\n')
+        want, _ = bas(prog + "RUN\n")
+        bx, st = bas(prog + "BUILD\n")
+        self.assertEqual(st, 0)
+        for brk in (64, 24, 120):
+            self.assertEqual(brun(bx.encode("latin-1"), brk=brk), (want, 0), brk)
 
 
 @unittest.skipUnless(test_pvm.HAVE_TOOLS, "needs ca65, ld65 and py65")

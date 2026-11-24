@@ -70,6 +70,9 @@ int main() {
     close(fd);
     for (i = msz - v; i < msz; i = i + 1) mem[i] = 0;
     reloc(mem - nul, n, mem - nul + msz - v, 0);
+    hlo = mem - nul + n;
+    htop = hlo;
+    hhi = mem - nul + msz - v;
     icall(mem);
     e = c_err();
     if (e) {

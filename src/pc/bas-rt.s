@@ -238,7 +238,7 @@ c_find: lda P_ESTKL,x
 ; src[si] is the parse position (lines are under 256 bytes); mem[cend] the next code byte, below
 ; vbot; straight counts the bytes since Y was last reset (bas.c's room() comment).
 
-.import g_src, g_si, g_mem, g_cend, g_vbot, g_straight, g_err
+.import g_src, g_si, g_mem, g_cend, g_clim, g_straight, g_err
 
 srcp:   lda g_src               ; ptr = src + si
         clc
@@ -331,13 +331,13 @@ c_ult:  ldy #0
         sta P_ESTKH,x
         rts
 
-; emitb: mem[cend++] = A, straight + 1; at vbot, err = OUT OF MEMORY (unless one came first)
+; emitb: mem[cend++] = A, straight + 1; at clim, err = OUT OF MEMORY (unless one came first)
 ; and nothing is written. X is kept.
 emitb:  pha
         lda g_cend
-        cmp g_vbot
+        cmp g_clim
         lda g_cend+1
-        sbc g_vbot+1
+        sbc g_clim+1
         bcc :+
         pla
         lda g_err

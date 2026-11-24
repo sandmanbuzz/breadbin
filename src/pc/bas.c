@@ -51,9 +51,10 @@ int ptop;               /* the program text: [0, ptop); per line its number (low
 int pend;               /* the program's code: [ptop, pend); 0 when out of date */
 int cend;               /* the end of the code */
 int vbot;               /* the variables: [vbot, MEM) */
+int clim;               /* where the code must stop: vbot, or the string heap once there is one */
 int straight;           /* bytes since the VM last reset Y: pvm.s addresses code as base + Y */
 int eline;              /* the line a compile error is in */
-char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|";
+char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|LEFT$|RIGHT$|MID$|LEN|CHR$|ASC|STR$|VAL|";
                         /* the keywords: the program holds each as a token, 128 + its place
                            here, written as the number with "tk NAME" in a comment (test_bas checks the
                            numbers; bas-rt.s has PRINT's and REM's); a keyword before its prefixes, as
@@ -160,9 +161,24 @@ int move(char *d, char *s, int n) {
     return 0;
 }
 
-int clearv() {          /* no variables, and the compiled program is out of date */
+int clearv() {          /* no variables or strings, and the compiled program is out of date */
     vbot = msz;
+    clim = msz;
+    hhi = addr(msz);
+    hlo = 0;
     pend = 0;
+    return 0;
+}
+
+int heapinit() {        /* the string heap, once the program's code is final: after the room an immediate
+                           line's code needs (tools/test_bas.py pins the longest line under it) */
+    int b = ptop;
+    if (pend) b = pend;
+    b = b + 768;
+    if (b > vbot) b = vbot;
+    hlo = addr(b);
+    htop = hlo;
+    clim = b;
     return 0;
 }
 
@@ -275,6 +291,7 @@ int epush(int d) {
 }
 
 int tonum(int k) {
+    if (k > 2) c_fail(13);
     if (k == 2) {
         c_xop(226 /* x FROMI */);
         epush(-1);
@@ -284,6 +301,7 @@ int tonum(int k) {
 }
 
 int toint(int k) {
+    if (k > 2) c_fail(13);
     if (k == 1) {
         c_xop(228 /* x TOI */);
         npush(-1);
@@ -308,17 +326,27 @@ int var() {             /* the variable at si (a letter): its value's address, m
         si = si + 1;
         vint = 1;
         c2 = c2 | 128;
-    } else if (src[si] == '$') c_fail(1);       /* strings come with L3d */
+    } else if (src[si] == '$') {
+        si = si + 1;
+        vint = 2;
+        c1 = c1 | 128;
+        c2 = c2 | 128;
+    }
     while (p < msz) {
         if (mem[p] == c1 && mem[p + 1] == c2) return addr(p + 2);
         p = p + 6 - (mem[p + 1] & 128) / 64;
     }
-    size = 6 - vint * 2;
-    if (vbot - size < cend) {
+    size = 6;
+    if (vint) size = 4;
+    p = cend;
+    if (hlo) p = htop - addr(0);
+    if (vbot - size < p) {
         c_fail(2);
         return 0;
     }
     vbot = vbot - size;
+    hhi = addr(vbot);
+    if (!hlo) clim = vbot;
     mem[vbot] = c1;
     mem[vbot + 1] = c2;
     for (p = 2; p < size; p = p + 1) mem[vbot + p] = 0;
@@ -355,6 +383,23 @@ int fn(int f) {       /* a function of one number: f(...) */
     return 1;
 }
 
+int strlit() {          /* a string literal after its quote: a CS, whose address is the string; "" is 0 */
+    int i = si;
+    int n;
+    int c;
+    while (src[si] && src[si] != '"') si = si + 1;
+    n = si - i;
+    c_tok('"');                 /* an unclosed string ends at the end of the line, as MS */
+    if (n) {
+        c_room(2);
+        c_emit(46 /* PO_CS */);
+        c_emit(n);
+        for (c = 0; c < n; c = c + 1) c_emit(src[i + c]);
+        straight = n + 1;       /* CS moves the base to the string: the next op is past it */
+    } else c_op1(0 /* PO_CN 0 */);
+    return epush(1) + 1;
+}
+
 int need(int t) {       /* the token t after spaces, or a syntax error */
     c_sp();
     if (c_tok(t)) return 1;
@@ -374,11 +419,13 @@ int primary() {
     if (c_tok(128 /* tk ABS */)) return fn(222 /* x ABS */);
     if (c_tok(137 /* tk INT */)) return fn(220 /* x INT */);
     if (c_tok(148 /* tk SGN */)) return fn(224 /* x SGN */);
+    if (c_tok('"')) return strlit();
     if (c_letter()) {
         k = var();
         if (vint) {
             c_opw(106 /* PO_LAW */, k);
-            return epush(1);
+            epush(1);
+            return vint + 1;
         }
         c_xopw(200 /* x LDV */, k);
         return npush(1);
@@ -462,11 +509,17 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
         if (p < min) break;         /* none is 0 */
         if (p == 6) {
             p = cmpops(c);   /* the relation's bits: p is not needed again here */
-            tonum(k);
-            tonum(climb(7));
-            c_xop(218 /* x CMP */);
-            npush(-2);
-            epush(1);
+            if (k == 3) {
+                if (climb(7) != 3) c_fail(13);
+                pcall(&rt_scmp);
+                epush(-1);
+            } else {
+                tonum(k);
+                tonum(climb(7));
+                c_xop(218 /* x CMP */);
+                npush(-2);
+                epush(1);
+            }
             c_op1(0 /* PO_CN 0 */);
             epush(1);
             relop(p);
@@ -480,6 +533,12 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
             if (p == 4) c_op1(148 /* PO_BAND */);
             else c_op1(150 /* PO_IOR */);
             k = epush(-1);
+            continue;
+        }
+        if (k == 3) {           /* a string: + joins */
+            if (c != '+' || climb(p + 1) != 3) c_fail(13);
+            pcall(&rt_scat);
+            epush(-1);
             continue;
         }
         tonum(k);
@@ -498,6 +557,12 @@ int climb(int min) {    /* the operators of precedence min and up, each left to 
 /* ---- statements ---- */
 
 int assign(int a, int isint, int k) {
+    if (isint == 2) {           /* the address of the variable was pushed before the expression */
+        if (k != 3) c_fail(13);
+        ecall(&rt_sset);
+        epush(-2);
+        return 0;
+    }
     if (isint) {
         toint(k);
         c_opw(122 /* PO_SAW */, a);
@@ -521,14 +586,16 @@ int let() {             /* [LET] v = expression */
     a = var();
     i = vint;
     if (!need('=')) return 0;
+    if (i == 2) {
+        c_opw(38 /* PO_LA */, a);
+        epush(1);
+    }
     return assign(a, i, climb(1));
 }
 
 int prints() {          /* PRINT: strings and numbers; ; between them, or after the last for no
                            newline; , to the next column of 10 */
     int nl = 1;
-    int i;
-    int n;
     int c;
     while (!err) {
         c = c_sp();
@@ -540,23 +607,14 @@ int prints() {          /* PRINT: strings and numbers; ; between them, or after 
             continue;
         }
         nl = 1;
-        if (!c_tok('"')) {
-            tonum(climb(1));
+        c = climb(1);
+        if (c == 3) {
+            ecall(&rt_prs);
+            epush(-1);
+        } else {
+            tonum(c);
             ecall(&rt_prn);
             npush(-1);
-            continue;
-        }
-        i = si;
-        while (src[si] && src[si] != '"') si = si + 1;
-        n = si - i;
-        c_tok('"');                 /* an unclosed string ends at the end of the line, as MS */
-        if (n) {
-            c_room(2);
-            c_emit(46 /* PO_CS */);
-            c_emit(n);
-            for (c = 0; c < n; c = c + 1) c_emit(src[i + c]);
-            straight = n + 1;       /* CS moves the base to the string: the next op is past it */
-            ecall(&rt_prs);
         }
     }
     if (nl) ecall(&rt_nl);
@@ -601,6 +659,7 @@ int gotol() {
 
 int ifs_() {            /* IF e THEN n | statements, IF e GOTO n: false goes to the next line */
     int k = climb(1);
+    if (k > 2) c_fail(13);
     if (k == 1) {
         c_xop(230 /* x TST */);
         npush(-1);
@@ -674,8 +733,33 @@ int nexts() {           /* NEXT [v [, w ...]] */
     return 0;
 }
 
+int sres() {            /* before a statement with strings in it, room for the temporaries it can make: one for
+                           each $, string function and +, to 6 (rt_sres). A GC moves blocks, so it runs only
+                           here, where nothing is on the stacks */
+    int i = si;
+    int q = 0;
+    int s = 0;
+    int n = 0;
+    int c;
+    while (src[i] && (src[i] != ':' || q)) {
+        c = src[i];
+        if (c == '"') q = 1 - q;
+        if (!q) {
+            if (c == '$' || c > 154) s = s + 1;
+            if (c == '+') n = n + 1;
+        }
+        i = i + 1;
+    }
+    if (!s || src[si] == 145 /* tk REM */) return 0;
+    n = n + s;
+    if (n > 6) n = 6;
+    pushint(n);
+    return ecall(&rt_sres);
+}
+
 int stmt() {
     c_sp();
+    sres();
     if (c_tok(144 /* tk PRINT */)) return prints();
     if (c_tok(145 /* tk REM */)) {
         while (src[si]) si = si + 1;
@@ -846,6 +930,7 @@ int run(int t, int has) {       /* RUN [t] */
     clearv();
     compile();
     if (err) return report(err, eline);
+    heapinit();
     if (!has) return go(ptop);
     cend = pend;
     cur = -1;
@@ -885,6 +970,7 @@ int immediate() {       /* compile the line after the program's code (compiling 
     }
     cend = pend;
     if (!cend) cend = ptop;
+    if (!hlo) heapinit();
     at = cend;
     body();
     return at;
