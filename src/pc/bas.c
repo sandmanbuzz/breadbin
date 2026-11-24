@@ -378,9 +378,9 @@ int array(int n1, int n2) {     /* the array nc1, nc2 of n1 elements (n2 by n1 f
         n1 = 11;                /* not DIMed: 0 to 10, as MS */
         if (n2) n2 = 11;
     }
-    q = n1;
-    if (n2) q = 15360 / n2;
-    if (n1 > q || n1 > 15360) {
+    q = 30720 / vsz(nc2);       /* elements that fit in 30,720 bytes: the size stays a positive int */
+    if (n2) q = q / n2;
+    if (n1 > q) {
         c_fail(2);
         return 0;
     }

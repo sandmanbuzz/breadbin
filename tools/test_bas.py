@@ -616,7 +616,8 @@ class Arrays(unittest.TestCase):
         for prog, err in (("10 A(-1)=1", "BAD SUBSCRIPT"), ("10 PRINT A(11)", "BAD SUBSCRIPT"),
                           ("10 DIM A(2,2):PRINT A(1)", "BAD SUBSCRIPT"), ("10 DIM A(1):PRINT A(1,1)", "BAD SUBSCRIPT"),
                           ("10 DIM A(2):DIM A(3)", "REDIM'D ARRAY"), ("10 DIM A(2):A(1)=A$(1)", "TYPE MISMATCH"),
-                          ("10 DIM A(32000)", "OUT OF MEMORY"), ("10 DIM A(2),B(3):A(3)=1", "BAD SUBSCRIPT"),
+                          ("10 DIM A(32000)", "OUT OF MEMORY"),
+                          ("10 DIM A(12500)", "OUT OF MEMORY"), ("10 DIM A(99,124)", "OUT OF MEMORY"), ("10 DIM A(2),B(3):A(3)=1", "BAD SUBSCRIPT"),
                           ("10 DIM A(X)", "SYNTAX")):
             self.assertEqual(bas(prog + "\nRUN\n")[0], "?%s ERROR IN 10\n" % err, prog)
         # a DIM that never runs before a use is still a DIM: a subroutine at the end makes the array the code above uses
@@ -634,6 +635,15 @@ class Arrays(unittest.TestCase):
     def test_input_into_elements(self):
         out, _ = bas('10 DIM Z$(3):INPUT Z$(2),Q(1),W%(0)\n30 PRINT Z$(2);Q(1);W%(0)\nRUN\nHEY,4.5,3\n')
         self.assertEqual(out, "? HEY 4.5  3 \n")
+
+    def test_input_past_the_buffer_is_an_error(self):
+        # the fields so far plus ?? commas must not run off ib: LINE TOO LONG, never a silent cut or a smash
+        out, _ = bas('10 INPUT A$,B$\n20 PRINT LEN(A$);LEN(B$)\nRUN\n' + "X" * 100 + "\n" + "Y" * 40 + "\n")
+        self.assertEqual(out, "? ??\n?LINE TOO LONG ERROR IN 10\n")
+        out, _ = bas('10 INPUT A$,B$,C$,D$,E$,F$,G$\nRUN\n' + "X" * 124 + "\n" * 8)
+        self.assertTrue(out.endswith("?LINE TOO LONG ERROR IN 10\n"), out)
+        out, _ = bas('10 INPUT A$,B$\n20 PRINT LEN(A$);LEN(B$)\nRUN\n' + "X" * 100 + "\n" + "Y" * 5 + "\n")
+        self.assertEqual(out, "? ?? 100  5 \n")
 
     def test_built_file_matches_run(self):
         prog = ('10 DIM A(40),B%(9,2),C$(9)\n20 FOR I=0 TO 40:A(I)=I/4:NEXT\n'

@@ -463,6 +463,7 @@ int iread() {           /* a line of stdin appended to ib (bas's command lines t
 
 int iline() {           /* INPUT's next line, or BREAK at the end of the input */
     if (!iread()) c_throw(9);
+    if (iov) c_throw(3);    /* a line (or the fields so far) past ib: LINE TOO LONG, not cut */
     col = 0;                /* the console echoed the return */
     return 0;
 }
@@ -524,6 +525,7 @@ int rt_inp(int s, int m) {      /* INPUT: the prompt s (0: none), then n = m / 1
     int k;
     int ok;
     rt_prs(s);
+    iov = 0;
     while (1) {
         outs("? ");
         il = 0;
@@ -534,6 +536,7 @@ int rt_inp(int s, int m) {      /* INPUT: the prompt s (0: none), then n = m / 1
             while (ifield()) k = k + 1;
             if (k >= n) break;
             outs("??");
+            if (il > 123) c_throw(3);
             ib[il] = ',';
             il = il + 1;
             iline();
