@@ -404,7 +404,7 @@ class Module(unittest.TestCase):
     def stubs_idle(self, s):
         """Every resident stub is `jmp cbm_none`."""
         none = s.lbl["cbm_none"]
-        return all(s.stub(i) == none for i in range(16))
+        return all(s.stub(i) == none for i in range(len(STUBS)))
 
     def test_classic_never_loads_the_module(self):
         s = Sim(None)
@@ -527,7 +527,7 @@ class Module(unittest.TestCase):
 
 STUBS = ["uci_namei", "uci_iget", "uci_read", "uci_xread", "uci_write", "uci_open", "uci_create",
          "uci_release", "uci_hw", "uci_attach", "uci_umount", "uci_fsinfo", "uci_mkdir", "uci_rmdir",
-         "uci_unlink", "uci_rename"]
+         "uci_unlink", "uci_rename", "uci_size"]
 
 
 if __name__ == "__main__":

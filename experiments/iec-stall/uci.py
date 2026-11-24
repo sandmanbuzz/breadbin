@@ -160,6 +160,28 @@ GROUPS = {
                     ("DELETE b.txt", cmd(1, 0x09, *b"/Temp/bqscratch/b.txt")), ("DELETE a.txt (if still there)", cmd(1, 0x09, *b"/Temp/bqscratch/a.txt")),
                     ("DELETE scratch dir", cmd(1, 0x09, *b"/Temp/bqscratch"))]),
     "net": ([("target 3 identify", cmd(3, 0x01)), ("target 4 identify", cmd(4, 0x01))]),
+    # H11 of docs/hardware-notes.md (SYS_LSEEK on UCI): FILE INFO on a write handle before a close, the size a
+    # second handle sees, a write-mode SEEK past the end, and a descriptor whose file another one truncated.
+    # Uses /Temp/h11.bin and /Temp/h11b.bin, deleted at the end.
+    "h11": ([("t1 create h11 ($0A)", cmd(1, 0x02, 0x0A, *b"/Temp/h11.bin")), ("t1 write 100 x 'A'", cmd(1, 0x05, 0, 0, *b"A" * 100)),
+             ("t1 FILE INFO (own writes: 100?)", cmd(1, 0x07)), ("t2 open h11 read", open_read(2, b"/Temp/h11.bin")),
+             ("t2 FILE INFO (sees 100?)", cmd(2, 0x07)), ("t2 read 16", cmd(2, 0x04, 16, 0)),
+             ("t1 SEEK 300 (write handle, past end)", seek(1, 300)), ("t1 FILE INFO after seek (300?)", cmd(1, 0x07)),
+             ("t1 write 'Z'", cmd(1, 0x05, 0, 0, *b"Z")), ("t1 FILE INFO (301?)", cmd(1, 0x07)),
+             ("t2 FILE INFO (stale?)", cmd(2, 0x07)), ("t1 close", close(1)), ("t2 FILE INFO after t1 close", cmd(2, 0x07)),
+             ("t2 close", close(2)), ("t1 open h11 read", open_read(1, b"/Temp/h11.bin")), ("t1 FILE INFO", cmd(1, 0x07)),
+             ("t1 seek 100, read 16 (the gap)", seek(1, 100)), ("t1 read 16", cmd(1, 0x04, 16, 0)),
+             ("t1 seek 290, read 16 (ends in Z)", seek(1, 290)), ("t1 read 16", cmd(1, 0x04, 16, 0)), ("t1 close", close(1)),
+             ("t1 create h11b, write 10, seek 50, close", cmd(1, 0x02, 0x0A, *b"/Temp/h11b.bin")),
+             ("t1 write 10 x 'B'", cmd(1, 0x05, 0, 0, *b"B" * 10)), ("t1 SEEK 50, no write", seek(1, 50)), ("t1 close", close(1)),
+             ("t1 open h11b read", open_read(1, b"/Temp/h11b.bin")), ("t1 FILE INFO (10 or 50?)", cmd(1, 0x07)), ("t1 close", close(1)),
+             ("t1 open h11 write, no create ($02)", cmd(1, 0x02, 0x02, *b"/Temp/h11.bin")), ("t1 FILE INFO (301)", cmd(1, 0x07)),
+             ("t2 create h11 again ($0A, truncates)", cmd(2, 0x02, 0x0A, *b"/Temp/h11.bin")), ("t2 FILE INFO (0?)", cmd(2, 0x07)),
+             ("t2 close", close(2)), ("t1 FILE INFO (stale 301?)", cmd(1, 0x07)), ("t1 SEEK 200", seek(1, 200)),
+             ("t1 write 'Y'", cmd(1, 0x05, 0, 0, *b"Y")), ("t1 FILE INFO", cmd(1, 0x07)), ("t1 close", close(1)),
+             ("t1 open h11 read", open_read(1, b"/Temp/h11.bin")), ("t1 FILE INFO (final size)", cmd(1, 0x07)),
+             ("t1 seek 190, read 16", seek(1, 190)), ("t1 read 16", cmd(1, 0x04, 16, 0)), ("t1 close", close(1)),
+             ("delete h11", cmd(1, 0x09, *b"/Temp/h11.bin")), ("delete h11b", cmd(1, 0x09, *b"/Temp/h11b.bin"))]),
     # Q2, Q4, Q5 of docs/design/next/uci-v1.md: directory commands (absolute and relative names after CHANGE DIR,
     # FILE STAT by name), the error cases, READ DIR packets. Creates and removes /Temp/bdir and /Temp/bdir/sub.
     "dirs": ([("mkdir /Temp/bdir", cmd(1, 0x16, *b"/Temp/bdir")), ("mkdir again (exists)", cmd(1, 0x16, *b"/Temp/bdir")),

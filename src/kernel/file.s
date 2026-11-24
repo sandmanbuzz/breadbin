@@ -43,7 +43,7 @@ pb_len:  .res 1
 .import cbm_read, cbm_readdir, cbm_open_write, cbm_write, cbm_wclose
 .import cbm_scratch, cbm_rename, cbm_fsinfo
 .import uci_read, uci_write, uci_open, uci_create, uci_release, uci_fsinfo
-.import uci_mkdir, uci_rmdir, uci_unlink, uci_rename
+.import uci_mkdir, uci_rmdir, uci_unlink, uci_rename, uci_size
 .export of_flags, open_exists, is_dot
 .export set_pp_r0
 
@@ -1416,3 +1416,96 @@ sys_fsinfo:
         sta (r1),y
         clc
 @r:     rts
+
+; lseek(A = fd, X = whence, r0 + r1 lo = offset, signed 24 bits) -> r0 + r1 lo = the new
+; position (r1 hi is kept; on an error r0 and r1 lo are undefined). A c64fs file or directory,
+; or a UCI file; ESPIPE on anything else (a pipe, the console, null, a CBM DOS file, whose
+; f_pos is a track and sector). EINVAL for an unknown whence and for a result below 0 or past
+; 16 MB. On c64fs a position past the end is allowed: reads there return 0 and a write leaves a
+; gap that reads as zeros (a hole, or bytes balloc zeroed; past 35,840 bytes a write is EFBIG).
+; On UCI it is EINVAL: the host grows a file open for writing when it seeks past the end (the
+; module seeks on a read too) and does not zero the gap.
+.export sys_lseek
+.assert FT_FILE = 1 && FT_DIR = 2, error, "sys_lseek takes the types below 3 as seekable"
+.segment "CODEHI"
+sys_lseek:
+        stx sb5             ; whence
+        jsr fd_get
+        bcs @r
+        stx sb6
+        lda f_type,x        ; FT_FILE or FT_DIR (fd_get never gives FT_FREE)
+        cmp #FT_DIR+1
+        bcs @sp
+        ldy f_dev,x
+        lda dev_type,y
+        beq @c64
+        bpl @sp             ; a CBM DOS disk
+        jsr uci_size        ; X = entry -> ci+I_SIZE; EINVAL on a directory
+        bcc @w
+@r:     rts
+@sp:    lda #ESPIPE
+        .byte $2c           ; (bit: skips the next lda)
+@inv:   lda #EINVAL
+        sec
+        rts
+@c64:   lda sb5
+        cmp #SEEK_END
+        bne @w
+        lda f_dev,x         ; the size is in the inode
+        pha
+        lda f_ino,x
+        tax
+        pla
+        jsr iget
+        bcs @r
+@w:     ldy #0              ; sb7 = the offset's sign extended: 0 or $FF
+        lda r1
+        bpl @p
+        dey
+@p:     sty sb7
+        ldx sb6
+        clc
+        ldy sb5
+        beq @chk            ; SEEK_SET: the offset itself
+        dey
+        beq @cur
+        dey
+        bne @inv
+        ldx #$fd            ; SEEK_END: r0..r1 lo += the size (zero page wraps: $05+$FD = r0)
+@e:     lda <(r0+3),x
+        adc ci+I_SIZE+3-256,x
+        sta <(r0+3),x
+        inx
+        bne @e
+        beq @chk            ; (always)
+@cur:   lda r0              ; SEEK_CUR
+        adc f_pos0,x
+        sta r0
+        lda r0+1
+        adc f_pos1,x
+        sta r0+1
+        lda r1
+        adc f_pos2,x
+        sta r1
+@chk:   lda sb7             ; the fourth byte must come out 0
+        adc #0
+        bne @inv            ; $FF: below 0; 1: past 16 MB
+        ldx sb6
+        ldy f_dev,x
+        lda dev_type,y
+        bpl @st
+        lda ci+I_SIZE       ; UCI: no further than the end
+        cmp r0
+        lda ci+I_SIZE+1
+        sbc r0+1
+        lda ci+I_SIZE+2
+        sbc r1
+        bcc @inv
+@st:    lda r0
+        sta f_pos0,x
+        lda r0+1
+        sta f_pos1,x
+        lda r1
+        sta f_pos2,x
+        clc
+        rts

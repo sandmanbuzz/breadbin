@@ -254,7 +254,7 @@ Every failure returns to the intact caller (ENOMEM if both images do not fit). T
 
 **BRK (30):** A = new end page (0 = query) → A = end page. It grows only into free pages that directly follow the run and shrinks no lower than img+bss+argv. ENOMEM. It updates `p_mlen` and `ZP_MEMTOP=$23`, which spawn and exec also set. ~60 B (U).
 
-**LSEEK (31):** A = fd, X = whence (0 SET, 1 CUR, 2 END), r0/r0+1/r1 = 24-bit signed offset → same registers = new position.
+**LSEEK (31):** A = fd, X = whence (0 SET, 1 CUR, 2 END), r0/r0+1/r1 = 24-bit signed offset → same registers = new position. *(Landed 2026-11-23 as slot 32 with this register shape, ahead of the compaction; `include/breadbin.inc`.)*
 - c64fs file or dir: set `f_pos0..2` (file.s:15-17, 471-500 V).
 - Pipe, console, null and CBM-DOS (`f_pos` holds track/sector there, file.s:347-351 V): ESPIPE.
 - A negative result gives EINVAL.

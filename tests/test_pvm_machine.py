@@ -327,7 +327,15 @@ class SharedVM(unittest.TestCase):
                     v.run("kill " + line.split()[0], clear=False)
             self.assertEqual(libs(), ([0, 0], [0, 0]))
             self.assertEqual(used(), base)
-            self.assertEqual(v.run("free", clear=False), before)
+            # kill only signals: the shell prints "[N] Done" and the kernel frees the process slot on a
+            # later tick, so free is polled until its figures match (a leak never matches and fails here)
+            def figures(text):
+                return [l for l in text.splitlines() if not l.startswith("[")]
+            for _ in range(50):
+                now = v.run("free", clear=False)
+                if figures(now) == figures(before):
+                    break
+            self.assertEqual(figures(now), figures(before))
             print("pages: base %d, one p-code process %d (library %d), two %d"
                   % (base, one - base, lib_pages, two - base), file=sys.stderr)
 

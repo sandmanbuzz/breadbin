@@ -26,7 +26,7 @@ What still hurts:
 
 - **Programming on the machine is assembly or a toy.** There is no compiler on the C64 and `basic` is not a BASIC a C64 user recognises.
 - **Every program carries its own copy of the library**, about half of `/bin` by bytes (`docs/design/research/next/SYNTHESIS.md`), on disk and in memory.
-- **The `$CF00` syscall page is full**: a new syscall needs entries re-shaped first (one multiplexed control call, `docs/design/next/cp3-spec.md`).
+- **The `$CF00` syscall page is full**: `SYS_LSEEK` (slot 32) took the last 19 bytes after `sys_return` moved out of the page; a new syscall needs entries re-shaped first (one multiplexed control call, `docs/design/next/cp3-spec.md`).
 - **The physical 1541 is slow** even with the JiffyDOS protocol (on by default, `make JIFFY=0` turns it off; the standard protocol is about 0.55 s a block) and the drive-side fast reader does not yet run on it. Its old root-mount stall is closed: it was the test harness halting the CPU with DMA mid-transfer (`docs/design/io-attack-log.md`, closing entry).
 - **Daily use is still rough at the edges**: no `2>`, no job control, slow first loads on a stock machine.
 
