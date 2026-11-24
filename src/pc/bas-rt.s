@@ -4,9 +4,17 @@
 ; bas's p-code by mk/pvm.mk (src/pc/NAME-rt.s goes with src/pc/NAME.c).
 .include "inc/rt.s"
 
-.export c_crunch, c_find
+.export c_crunch, c_find, c_const
 .export c_sp, c_digit, c_letter, c_tok, c_ult, c_fail, c_emit, c_room, c_op1, c_opw, c_ncall, c_xop, c_xopw
 .export xtab
+
+.segment "BSS"
+kbase:  .res 2                  ; c_crunch and c_find
+li:     .res 1
+lo:     .res 1
+lq:     .res 1
+ltok:   .res 1
+.segment "CODE"
 
 ; ---- the lexer and the line store (basic.md section 7: the compiler's hot helpers, native) ----
 
@@ -427,6 +435,119 @@ word:   lda P_ESTKL,x
         jsr emitb
         lda P_ESTKH,x
         jmp emitb
+
+; c_const(buf): read a number at si: digits, a point, digits (spaces among them stepped over, as MS);
+; its 4 bytes (units of 1/10000, rounded past 4 decimals) go to buf. Returns the value when it is a whole
+; number under 32768, else -2. FAIL 1 for no digits, 4 for a number past 2^31 - 1.
+; State, all in the lexer's bytes: li digits seen, lo the decimals seen (-1 in the whole part), lc
+; nonzero decimals, lj 1 to round up, lq overflow, tq the whole part (tq+2: past 32767). buf stays
+; on the eval stack at sx throughout.
+c_const: stx sx
+        lda #0
+        ldy #7
+:       sta acc,y
+        dey
+        bpl :-
+        sty lo                  ; -1
+        sta li
+        sta lc
+        sta lq
+        sta lj
+        sta nsp                 ; and the number stack is empty (a run that failed can leave it full)
+@loop:  jsr srcp
+        lda (ptr),y
+        sec
+        sbc #'0'
+        cmp #10
+        bcs @nd
+        sta t0
+        ldy lo
+        bmi @mac                ; a whole-part digit
+        cpy #4
+        bcc @dec
+        bne @next               ; past the 5th decimal: dropped
+        inc lo                  ; the 5th rounds the 4th up, and counts as nonzero
+        cmp #5
+        bcc @next
+        inc lj
+        inc lc
+        bcs @next
+@dec:   ora lc
+        sta lc
+        inc lo
+@mac:   jsr mac
+@next:  jsr incsi
+        jsr c_sp
+        inx
+        inc li
+        bne @loop
+@nd:    ldy lo
+        bpl @pad                ; the decimals are over
+        inc lo                  ; the whole part is: keep it, and look for the point
+        lda acc
+        sta tq
+        lda acc+1
+        sta tq+1
+        and #$80
+        ora acc+2
+        ora acc+3
+        sta tq+2
+        ldy #0
+        lda (ptr),y
+        cmp #'.'
+        beq @next               ; step over the point (it counts in li, so a bare . is a number: 0, as MS)
+@pad:   lda #0                  ; four decimals
+        sta t0
+        ldy lo
+        cpy #4
+        bcs @end
+        jsr mac
+        inc lo
+        bne @pad
+@end:   lda lj
+        jsr maca
+        jsr pusha
+        ldx sx
+        jsr n_stv               ; to buf; X = sx + 1 after
+        dex
+        lda #1
+        ldy li
+        beq :+
+        lda lq
+        beq @ok
+        lda #E_OVF
+:       jsr seterr
+@ok:    lda lc
+        ora tq+2
+        ora lq
+        ldy li
+        beq @big
+        tay
+        bne @big
+        lda tq
+        ldy tq+1
+        jmp stay
+@big:   lda #$FE
+        ldy #$FF
+        jmp stay
+
+; mac: acc = acc * 10 + t0 (maca: + A); lq nonzero past 2^31 - 1. X = sx after.
+mac:    lda #10
+        jsr setb8
+        jsr umul
+        lda t0
+maca:   jsr setb8
+        jsr addb
+        jsr big
+        beq :+
+        sta lq
+:       ldx sx
+        rts
+
+incsi:  inc g_si                ; si + 1; Z clear after (si is never 0 then)
+        bne :+
+        inc g_si+1
+:       rts
 
 xtab:   .word x_ldv, x_stv, x_ldk, x_ln                 ; C8 CA CC CE
         .word n_add, n_sub, n_mul, n_div                 ; D0 D2 D4 D6

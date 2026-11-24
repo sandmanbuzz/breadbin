@@ -1,6 +1,7 @@
 """bas (src/pc/bas.c), the compiled BASIC, slice L3b (docs/design/basic.md section 5): built from
 the mini C with cc.py --pcode, run under py65 (tools/asim.py) with /lib/pvm. Needs ca65, ld65 and
 py65 (the container image has them)."""
+import glob
 import os
 import random
 import re
@@ -9,6 +10,7 @@ import unittest
 
 import asim
 import cc
+import cc_pcode
 import bxfile
 import pvmlink
 import test_bas_rt
@@ -34,6 +36,30 @@ def binary():
         with open(RT) as g:
             _built["path"] = test_cc_pcode.build(cc.read_source(SRC), _built["dir"].name, natives=g.read())
     return _built["path"]
+
+
+BRUN_SRC = os.path.join(ROOT, "src", "pc", "brun.c")
+BRUN_RT = os.path.join(ROOT, "src", "pc", "brun-rt.s")
+
+
+def brun_binary():
+    if "brun" not in _built:
+        _built["brun_dir"] = tempfile.TemporaryDirectory(prefix="brun-")
+        with open(BRUN_RT) as g:
+            _built["brun"] = test_cc_pcode.build(cc.read_source(BRUN_SRC), _built["brun_dir"].name, natives=g.read())
+    return _built["brun"]
+
+
+def brun(bx, brk=64, name="/p.bx"):
+    """The compiled file bx (bytes) run by brun: (output as str, exit status)."""
+    r = asim.run("brun", [name], path=brun_binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
+                 files={name: bx}, brk=brk)
+    return r.out.decode("latin-1"), r.exit
+
+
+def labels(lbl):
+    with open(lbl) as f:
+        return {m.group(2): int(m.group(1), 16) for m in re.finditer(r"^al ([0-9A-F]+) \.(\w+)$", f.read(), re.M)}
 
 
 def bas(text, tty=False, limit=40_000_000, brk=64):
@@ -455,6 +481,50 @@ class Language(unittest.TestCase):
 
     def test_bytes_free(self):
         self.assertEqual(self.out("", tty=True), FREE + "READY.\n")
+
+
+@unittest.skipUnless(test_pvm.HAVE_TOOLS, "needs ca65, ld65 and py65")
+class Compiled(unittest.TestCase):
+    """bas's BUILD and brun (docs/design/basic.md 6.1)."""
+    PROGS = (
+        '10 FOR I=1 TO 3:A%=A%+I:B=B+I^2\n20 PRINT I;"X";B,A%:NEXT\n30 GOSUB 50:GOTO 60\n50 PRINT "SUB":RETURN\n60 IF A%>5 THEN PRINT "BIG"\n',
+        '10 X=1/3:PRINT X;X*3;-X\n30 FOR J=10 TO 1 STEP -3:PRINT J:NEXT J\n',
+        '10 PRINT "HI":END\n20 PRINT "NO"\n',
+    )
+
+    def test_a_built_file_runs_as_run_does(self):
+        for prog in self.PROGS:
+            want, st = bas(prog + "RUN\n")
+            self.assertEqual(st, 0, prog)
+            bx, st = bas(prog + "BUILD\n")
+            self.assertEqual(st, 0, bx)
+            # the arena is a different size and place: the file does not know its addresses
+            for brk in (64, 40, 120):
+                self.assertEqual(brun(bx.encode("latin-1"), brk=brk), (want, 0), (prog, brk))
+
+    def test_an_error_stops_the_run_and_exits_1(self):
+        bx, _ = bas('10 PRINT "A"\n20 PRINT 1/0\n30 PRINT "C"\nBUILD\n')
+        self.assertEqual(brun(bx.encode("latin-1")), ("A\n?DIVISION BY ZERO ERROR\n", 1))
+
+    def test_a_file_that_is_not_one_is_refused(self):
+        bx, _ = bas('10 PRINT 1\nBUILD\n')
+        bad = bx.encode("latin-1")
+        for data in (b"", b"BX", b"XX" + bad[2:], b"BX\x02" + bad[3:]):
+            out, st = brun(data)
+            self.assertEqual((out, st), ("", 1), data[:4])
+
+    def test_the_runtime_has_the_same_layout_in_both(self):
+        # a file names the natives by offsets from rt_mark and the runtime's bytecode by offsets from rt_prs
+        binary(), brun_binary()
+        a, b = (labels(glob.glob(os.path.join(_built[k].name, "*.lbl"))[0]) for k in ("dir", "brun_dir"))
+        rt = ("rt_mark rt_go rt_ln c_ldv c_stv c_add c_sub c_mul c_div c_int c_fromi c_toi c_cmp c_fmt c_throw "
+              "n_add n_sub n_mul n_div n_neg n_cmp n_int n_abs n_sgn n_fromi n_toi n_tst x_ldv x_stv x_ldk x_ln").split()
+        self.assertEqual({n: a[n] - a["rt_mark"] for n in rt}, {n: b[n] - b["rt_mark"] for n in rt})
+        block = []
+        for src in (SRC, BRUN_SRC):
+            asm = cc_pcode.compile_pcode(cc.read_source(src))
+            block.append(re.search(r"^fn_rt_prs:.*?^FS_rt_next = \d+$", asm, re.M | re.S).group(0))
+        self.assertEqual(block[0], block[1])
 
 
 if __name__ == "__main__":

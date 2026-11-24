@@ -946,7 +946,12 @@ def compile_pcode(src, fstack=None):
                 xcalls[m.group(1)] = n
         g = PGen(funcs, fstack, xops, xcalls, xvoid=xvoid)
         text = g.program(funcs, globs)
-        voids = {n for n, _, b, _ in funcs if b is not None and n != "main"} - g.valued
+        # a program may keep functions valued whatever it does with their results: /* valued f g */. Code
+        # that names a function by its place (a compiled BASIC file calls the rt_ functions by offsets) needs
+        # the same bytes from every program that has it, and a function's code depends on which of the
+        # functions it calls are void.
+        forced = {n for m in re.finditer(r"^/\*[ \t]*valued\b([^*]*)\*/", src, re.M) for n in m.group(1).split()}
+        voids = {n for n, _, b, _ in funcs if b is not None and n != "main"} - g.valued - forced
         if voids:               # a second pass: nobody reads those results, so no 0 to return and no DROP
             text = PGen(funcs, fstack, xops, xcalls, voids, xvoid).program(funcs, globs)
         return text

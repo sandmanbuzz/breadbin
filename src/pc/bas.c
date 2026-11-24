@@ -20,9 +20,6 @@
 #include "inc/rt.c"
 /* fstack 416 */   /* the VM frame stack: a measured size (tools/test_bas.py, the nesting sweep), with the nesting limit in climb */
 
-extern int rt_mark();   /* bas-rt.s, for the compiled code: these take their arguments from the */
-extern int rt_go();     /* eval stack and the number stack as the comments there say; the */
-extern int rt_ln();     /* compiler only takes their addresses */
 extern int c_const(char *buf);
 extern int c_err();
 extern int c_curip();
@@ -794,49 +791,12 @@ int compile() {         /* the program into code from ptop: pend, or err and eli
    of a variable: the offset from the variables' start, with bit 15 set), or the runtime (CALL
    and NCAL: the offset from the first routine of its kind). The runner turns them back, so it need not share bas's layout. */
 
-int unreloc() {         /* the code [ptop, pend) in place: its walk is the format. The runtime's calls
-                           are offsets from rt_mark (the natives) and rt_prs (the first of the rest) */
-    int i = ptop;
-    int n;
-    int b;
-    int f;
-    int w;
-    int op;
-    while (i < pend) {
-        op = mem[i];
-        n = 1;
-        b = 0;
-        f = 0;
-        w = getw(mem + i + 1);
-        if (op == 38 /* PO_LA */ && w) {
-            b = addr(ptop);
-            if (w - (mem - nul) >= pend) {
-                b = addr(vbot);
-                f = 1 << 15;
-            }
-        }
-        if (op == 106 /* PO_LAW */ || op == 122 /* PO_SAW */ || op == 200 /* x LDV */ || op == 202 /* x STV */) {
-            b = addr(vbot);
-            f = 1 << 15;
-        }
-        if (op == 82 /* PO_NCAL */) b = &rt_mark - nul;
-        if (op == 84 /* PO_CALL */) b = &rt_prs - nul;
-        if (op == 196 /* PO_JUMP */) b = addr(ptop);
-        if (b || op == 38 /* PO_LA */ || op == 44 /* PO_CW */) n = 3;
-        else if (op == 42 /* PO_CB */ || op == 76 /* PO_BRFLS */ || op == 78 /* PO_BRTRU */ || op == 80 /* PO_BRNCH */) n = 2;
-        else if (op == 46 /* PO_CS */) n = mem[i + 1] + 2;
-        if (b) putw(mem + i + 1, w - b + f);
-        i = i + n;
-    }
-    return 0;
-}
-
 int build() {           /* BUILD: the program as a file on the output: "BX", 1, the code's length, the
                            variables' size, then the code. The code in the arena is spent */
     clearv();
     compile();
     if (err) return report(err, eline);
-    unreloc();
+    reloc(addr(ptop), pend - ptop, addr(vbot), 1);
     lbuf[0] = 'B';
     lbuf[1] = 'X';
     lbuf[2] = 1;

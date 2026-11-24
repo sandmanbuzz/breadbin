@@ -4,6 +4,12 @@
    natives in rt.s by offsets from rt_mark; docs/design/basic.md 6.1). Included first in each,
    which keeps those offsets the same; tools/test_bas.py checks that they are. */
 
+/* valued getw outb rt_prs rt_prn rt_nl rt_tab rt_pow rt_gosub rt_return rt_for rt_next */   /* tools/cc_pcode.py: a
+   program that never reads one of these (brun) would make it void, and the offsets would differ from bas's */
+
+extern int rt_mark();   /* rt.s, for the compiled code: these take their arguments from the */
+extern int rt_go();     /* eval stack and the number stack as the comments there say; the */
+extern int rt_ln();     /* compiler only takes their addresses */
 extern int c_ldv(char *p); /* xop 240 void */      /* bas-rt.s, for the mini C: one result each */
 extern int c_stv(char *p); /* xop 246 void */
 extern int c_add(); /* void */
@@ -212,5 +218,51 @@ int report(int e, int line) {   /* error e as MS prints it; line -1 for none */
     }
     outc('\n');
     err = 0;
+    return 0;
+}
+
+int reloc(int c, int n, int vb, int un) {  /* the n bytes of code at address c, in place: their addresses
+                           to offsets (un) or back, the format of a compiled file (basic.md 6.1). A code
+                           address is an offset from c, a variable's one from vb with bit 15 set, a NCAL's
+                           from rt_mark (the natives) and a CALL's from rt_prs (the rest of the runtime) */
+    char *p = nul + c;
+    int i = 0;
+    int k;
+    int b;
+    int f;
+    int w;
+    int op;
+    while (i < n) {
+        op = p[i];
+        k = 1;
+        b = 0;
+        f = 0;
+        w = getw(p + i + 1);
+        if (op == 38 /* PO_LA */ && w) {
+            b = c;
+            if (un) {
+                if (w - c >= n) {
+                    b = vb;
+                    f = 1 << 15;
+                }
+            } else if (w < 0) {
+                b = vb;
+                f = 1 << 15;
+            }
+        }
+        if (op == 106 /* PO_LAW */ || op == 122 /* PO_SAW */ || op == 200 /* x LDV */ || op == 202 /* x STV */) {
+            b = vb;
+            f = 1 << 15;
+        }
+        if (op == 82 /* PO_NCAL */) b = &rt_mark - nul;
+        if (op == 84 /* PO_CALL */) b = &rt_prs - nul;
+        if (op == 196 /* PO_JUMP */) b = c;
+        if (b || op == 38 /* PO_LA */ || op == 44 /* PO_CW */) k = 3;
+        else if (op == 42 /* PO_CB */ || op == 76 /* PO_BRFLS */ || op == 78 /* PO_BRTRU */ || op == 80 /* PO_BRNCH */) k = 2;
+        else if (op == 46 /* PO_CS */) k = p[i + 1] + 2;
+        if (un) b = 0 - b;
+        if (b) putw(p + i + 1, w + b + f);
+        i = i + k;
+    }
     return 0;
 }
