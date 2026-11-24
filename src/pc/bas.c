@@ -64,7 +64,7 @@ int straight;           /* bytes since the VM last reset Y: pvm.s addresses code
 int err;                /* the error numbers are emsg's */
 int eline;              /* the line a compile error is in */
 char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|";
-char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|";
+char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|";
                         /* the keywords: the program holds each as a token, 128 + its place
                            here, written as the number with "tk NAME" in a comment (test_bas checks the
                            numbers; bas-rt.s has PRINT's and REM's); a keyword before its prefixes, as
@@ -841,8 +841,8 @@ int fors() {            /* FOR v = a TO b [STEP c] */
         npush(1);
     }
     c_room(9);            /* so that the body is 10 bytes on */
-    c_opw(44 /* PO_CW */, addr(cend + 10));
-    c_opw(44 /* PO_CW */, a);
+    c_opw(38 /* PO_LA */, addr(cend + 10));
+    c_opw(38 /* PO_LA */, a);
     ecall(&rt_for);
     c_ncall(&rt_ln);      /* the body starts here */
     npush(-2);
@@ -858,7 +858,7 @@ int nexts() {           /* NEXT [v [, w ...]] */
             a = var();
             if (vint) c_fail(1);
         }
-        c_opw(44 /* PO_CW */, a);
+        c_opw(38 /* PO_LA */, a);
         pcall(&rt_next);
         c_ncall(&rt_go);
         c_sp();
@@ -878,7 +878,7 @@ int stmt() {
     if (c_tok(136 /* tk IF */)) return ifs_();
     if (c_tok(133 /* tk GOSUB */)) {
         c_room(6);        /* the return address is 10 bytes on */
-        c_opw(44 /* PO_CW */, addr(cend + 10));
+        c_opw(38 /* PO_LA */, addr(cend + 10));
         ecall(&rt_gosub);
         gotol();
         c_ncall(&rt_ln);  /* the return address: the line is current again */
@@ -978,6 +978,67 @@ int compile() {         /* the program into code from ptop: pend, or err and eli
         eline = fx[64];
     }
     if (!err) pend = cend;
+    return 0;
+}
+
+/* ---- the compiled file (BUILD; docs/design/basic.md 6.1, option B) ----
+   The code in the arena holds addresses. A file holds none: the walk below turns each word
+   operand into an offset, by what the opcode says it is: a place in the code (LA of a return
+   or loop address, JUMP: the offset from the code's start), a variable (LAW SAW LDV STV, an LA
+   of a variable: the offset from the variables' start, with bit 15 set), or the runtime (CALL
+   and NCAL: the offset from the first routine of its kind). The runner turns them back, so it need not share bas's layout. */
+
+int unreloc() {         /* the code [ptop, pend) in place: its walk is the format. The runtime's calls
+                           are offsets from rt_mark (the natives) and rt_prs (the first of the rest) */
+    int i = ptop;
+    int n;
+    int b;
+    int f;
+    int w;
+    int op;
+    while (i < pend) {
+        op = mem[i];
+        n = 1;
+        b = 0;
+        f = 0;
+        w = getw(mem + i + 1);
+        if (op == 38 /* PO_LA */ && w) {
+            b = addr(ptop);
+            if (w - (mem - nul) >= pend) {
+                b = addr(vbot);
+                f = 1 << 15;
+            }
+        }
+        if (op == 106 /* PO_LAW */ || op == 122 /* PO_SAW */ || op == 200 /* x LDV */ || op == 202 /* x STV */) {
+            b = addr(vbot);
+            f = 1 << 15;
+        }
+        if (op == 82 /* PO_NCAL */) b = &rt_mark - nul;
+        if (op == 84 /* PO_CALL */) b = &rt_prs - nul;
+        if (op == 196 /* PO_JUMP */) b = addr(ptop);
+        if (b || op == 38 /* PO_LA */ || op == 44 /* PO_CW */) n = 3;
+        else if (op == 42 /* PO_CB */ || op == 76 /* PO_BRFLS */ || op == 78 /* PO_BRTRU */ || op == 80 /* PO_BRNCH */) n = 2;
+        else if (op == 46 /* PO_CS */) n = mem[i + 1] + 2;
+        if (b) putw(mem + i + 1, w - b + f);
+        i = i + n;
+    }
+    return 0;
+}
+
+int build() {           /* BUILD: the program as a file on the output: "BX", 1, the code's length, the
+                           variables' size, then the code. The code in the arena is spent */
+    clearv();
+    compile();
+    if (err) return report(err, eline);
+    unreloc();
+    lbuf[0] = 'B';
+    lbuf[1] = 'X';
+    lbuf[2] = 1;
+    putw(lbuf + 3, pend - ptop);
+    putw(lbuf + 5, msz - vbot);
+    write(1, lbuf, 7);
+    write(1, mem + ptop, pend - ptop);
+    pend = 0;
     return 0;
 }
 
@@ -1092,6 +1153,10 @@ int command() {         /* a line without a number */
         }
         if (!ended()) return 0;
         return run(a, b == 1);
+    }
+    if (c_tok(154 /* tk BUILD */)) {
+        if (!ended()) return 0;
+        return build();
     }
     if (c_tok(130 /* tk BYE */) || c_tok(151 /* tk SYSTEM */)) {
         if (!ended()) return 0;

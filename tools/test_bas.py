@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 import asim
+import bxfile
 import pvmlink
 import test_bas_rt
 import test_cc_pcode
@@ -417,6 +418,40 @@ class Language(unittest.TestCase):
         # a mix found by a fuzz, 68 characters: it overflowed a frame stack sized by parentheses alone
         self.out("10 A=1OR1AND1<1+(1+1*1^(1+1*1^(1+1*1^(NOT(1^(1OR(NOT ABS(1))))))))\nRUN\n")
         self.assertEqual(self.out("10 " + "IF 1 THEN " * 4 + "A=" + "1+(" * 2 + "1" + ")" * 2 + ":PRINT A\nRUN\n"), " 3 \n")
+
+    def build(self, text):
+        out, status = bas(text)
+        self.assertEqual(status, 0, out)
+        return bxfile.parse(out.encode("latin-1"))
+
+    def test_build_writes_code_with_no_addresses(self):
+        # every class of word operand, in one program: a FOR/NEXT (LA of the body and of the variable, and a
+        # NEXT with none), GOSUB/RETURN, GOTO, an IF, an integer and a number variable, PRINT, ^
+        n, v, code = self.build('10 FOR I=1 TO 3:A%=A%+1:B=B+I^2\n20 PRINT I;"X";:IF I>2 THEN 40\n30 NEXT:GOSUB 50\n'
+                                '40 GOTO 60\n50 RETURN\n60 NEXT I\nBUILD\n')
+        self.assertEqual(n, len(code))
+        self.assertEqual(v, 6 + 6 + 4)                  # I and B: a number's 4 bytes and the name; A%: an int's 2
+        classes = {}
+        for at, op, cls, w in bxfile.walk(code):
+            classes.setdefault(cls, []).append(w)
+            if cls == "code":
+                self.assertTrue(w < n, (at, w))
+            elif cls == "var":
+                self.assertTrue(w & 0x8000 and (w & 0x7FFF) < v, (at, w))
+            else:
+                self.assertTrue(w < 0x400, (cls, at, w))          # an offset inside the runtime, not an address
+        self.assertEqual(sorted(classes), ["call", "code", "ncall", "var", "zero"])
+        self.assertEqual(len(set(classes["var"])), 3)               # I, A%, B
+
+    def test_build_of_an_empty_program_and_of_an_error(self):
+        n, v, code = self.build("BUILD\n")
+        self.assertEqual((v, list(bxfile.walk(code))[0][2:]), (0, ("ncall", 0)))   # the prologue's rt_mark
+        out, status = bas("10 PRINT\n20 GOTO 99\nBUILD\n")
+        self.assertEqual((out, status), ("?UNDEF'D STATEMENT ERROR IN 20\n", 0))      # no file, a message
+
+    def test_build_leaves_the_program_to_run(self):
+        out, _ = bas('10 PRINT "A"\nBUILD\nRUN\n')
+        self.assertTrue(out.endswith("A\n") and out.startswith("BX"), out[-8:])
 
     def test_bytes_free(self):
         self.assertEqual(self.out("", tty=True), FREE + "READY.\n")
