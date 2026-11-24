@@ -891,7 +891,8 @@ JUMP:   iny
         ldy #0
         jmp FETCHOP
 
-; SYS n: syscall n (bits 0-4). Pops TOS into A (low) and X (high); with bit 7 set, then pops
+; SYS n: syscall n (bits 0-4: slots 0-31 only; SYS_LSEEK at 32 is out of reach, and 32 would
+; wrap to slot 0, EXIT: widen the field before a compiler emits it). Pops TOS into A (low) and X (high); with bit 7 set, then pops
 ; TOS-1's low byte into Y. r0-r2 are set beforehand with stores to $02-$07. Pushes A | X << 8,
 ; or -1 with the errno in pvm_errno. The syscall clobbers $08-$1F: the eval stack is saved on
 ; the frame stack (ESTKSZ bytes, through fsalloc, so a full frame stack exits with ENOMEM).

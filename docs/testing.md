@@ -10,11 +10,11 @@ Three levels, cheapest first. Run the cheapest one that covers your change, and 
 | Targeted | `tools/ci/run.sh test-only T="<tests>"` | one boot (about 25 s) plus about 10 to 30 s per test |
 | Console | `tools/ci/run.sh test-console` | about 2.5 minutes (6 tests, 143 s in the last shard run): screen RAM, colour RAM and VIC registers read back |
 | Keyboard | `tools/ci/run.sh test-keyboard` | about 4 minutes (7 tests, 232 s): real keystrokes through VICE's keyboard matrix |
-| Full suite, sharded | `tools/ci/sharded.sh` | six containers at once under one `with-lock -x`, about 10 to 25 minutes depending on load (147 tests in 1344 s on `ac46aec`, stock ROMs, the last time it was quoted; the run prints the count and the shard times). Fails on any non-zero shard, any skip, or a total that differs from the discovered count. With `BREADBIN_CI_JIFFY` set the skips whose reason is "this drive speaks JiffyDOS" (the IEC fault tests that need the standard byte protocol, 14 of them) are by design and do not fail it |
+| Full suite, sharded | `tools/ci/sharded.sh` | six containers, one slot each (six of the twelve-slot pool; `--exclusive` takes the whole pool for timing), about 10 to 25 minutes depending on load (147 tests in 1344 s on `ac46aec`, stock ROMs, the last time it was quoted; the run prints the count and the shard times). Fails on any non-zero shard, any skip, or a total that differs from the discovered count. With `BREADBIN_CI_JIFFY` set the skips whose reason is "this drive speaks JiffyDOS" (the IEC fault tests that need the standard byte protocol, 14 of them) are by design and do not fail it |
 | Full suite, JiffyDOS ROMs | `BREADBIN_CI_JIFFY=<dir> tools/ci/sharded.sh` | the same run: 74 of 74 in 562 s on `2048e78`. `BREADBIN_VICE_PRINT_ARGS=1` prints the emulator command line, so `-kernal JiffyDOS-C64.bin -dos1541 JiffyDOS_1541-II.bin` can be seen |
 | Full suite, serial (the reference) | `BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh --serial-because "<why>" test` (refused without the reason: it holds every slot for about two hours) | Measured when the suite was 63 VICE tests (now 105, not re-timed serially): 2,804 s on the runner, every slot taken (about 47 minutes). The older 55-test figure, 2,511 s on 4778b1a (the Mac), is not comparable |
 
-The commands in the first column are the container ones: the container is the only toolchain (`docs/process.md`). The host recipes further down (`xvfb-run make ...`) are history from the Mac. Run a timing you will quote with every slot (`BREADBIN_CI_EXCLUSIVE=1`, or `tools/with-lock -x` around the sharded driver, which takes them itself).
+The commands in the first column are the container ones: the container is the only toolchain (`docs/process.md`). The host recipes further down (`xvfb-run make ...`) are history from the Mac. Run a timing you will quote with every slot (`BREADBIN_CI_EXCLUSIVE=1`, or `tools/with-lock -x --emergency` around the sharded driver, which takes them itself).
 
 The keyboard tests inject real X key events with `xdotool` (`apt install xdotool xvfb`). The other system tests type into VICE's key buffer with `keybuf`, which bypasses the matrix scan, so they cannot catch a bug in it. The system tests drive VICE (`x64sc`) through its monitor, so they need the C64 ROMs (`tools/setup-vice-roms.sh`) and, on a machine without a display, a virtual one: `xvfb-run -a make test-smoke`.
 
@@ -76,7 +76,7 @@ This runs the monitor-driven tests (`Boot`, `test_console`) with no X server. `t
 
 ## In a container (the default way)
 
-`tools/ci/run.sh` runs the tests in a disposable container with its own VICE (3.9), Xvfb and `xdotool`, so parallel runs do not collide (`docs/ci.md`: the image, the slots, the sharded suite). It copies the repo at start, so edit freely while it runs, and it takes one `vice` slot (six at once on the runner; `BREADBIN_CI_EXCLUSIVE=1` takes them all).
+`tools/ci/run.sh` runs the tests in a disposable container with its own VICE (3.9), Xvfb and `xdotool`, so parallel runs do not collide (`docs/ci.md`: the image, the slots, the sharded suite). It copies the repo at start, so edit freely while it runs, and it takes one `vice` slot (the pool is twelve on the runner; a work unit takes at most six; `BREADBIN_CI_EXCLUSIVE=1` takes them all).
 
 ```sh
 tools/ci/run.sh all test-host                  # the fast gate, about 45 s
@@ -113,6 +113,7 @@ By test name; refine this as we learn what actually catches what.
 | The compiled BASIC (`src/pc/bas.c`, `/bin/bas`) | `tools/test_bas.py` (host, py65, run from `tools/`), then `tests.test_pvm_machine.Basic` on the machine |
 | The p-code VM (`src/pvm/`) | `tools/test_pvm.py` (host, py65, run from `tools/`), `python3 tools/pvm_bench.py` for speed against `cc.py` and cc65, then `tests.test_pvm_machine` (`PCode`, `SharedVM`) on the machine; the CX loader (`src/kernel/exec.s`) also wants `Modules` and `Exec` |
 | Image tools, key tables (`tools/`) | `make test-host` |
+| `SYS_LSEEK` (`sys_lseek` in `file.s`, `uci_size` in `src/mod/uci.s`) | `tools/test_lseek_sim.py` (py65, c64fs and UCI), `Pipes` (`tail` seeks) |
 | UCI v1 (`src/mod/uci.s` = `/lib/km/uci`, the stubs in `src/kernel/uci.s`, the `bmi` sites in `file.s`, `fs.s`, `exec.s`, `cbm.s`) | `make test-host` with py65 (`tools/test_uci_sim.py`), plus `Drives`, `REU`, `Pool`, `Modules` and a smoke run in VICE |
 | 1581 volumes (`src/mod/d81.s` = `/lib/km/d81`, the hook labels `ts_rd_io`, `ts_wr_io` in `blk.s` and `open_mnt_io`, `open_dio_io` in `cbm.s`, `tools/mkimage.py d81`) | `make test-host` (`tools/test_mkimage.py`, and `tools/test_d81_sim.py` with py65: fake drives at the DOS-command level), plus `tools/ci/run.sh test-only T="tests.test_d81_vice"` (its 1581 test skips without a `dos1581*` ROM, which `tools/setup-vice-roms.sh` does not fetch) and `Drives` |
 | Anything that adds or removes kernel code | `make size`, and quote the numbers in the commit message |
