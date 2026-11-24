@@ -109,7 +109,7 @@ test-console: all
 
 # Targeted: make test-only T="tests.test_system.Boot.test_24_editor tests.test_system.REU"
 test-only: all
-	python3 -m unittest $(T) -v
+	python3 tools/ci/timed_unittest.py $(T) -v
 
 test: all test-host
 	python3 -m unittest discover -s tests -p 'test_*.py' -v
