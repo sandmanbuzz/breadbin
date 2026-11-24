@@ -37,7 +37,7 @@ int ofd;                /* where output goes: 1, or the file a SAVE is writing (
 
 int outc(int c) {       /* a write each: the kernel buffers the console, and obuf was 66 bytes */
     pb[0] = c;
-    write(ofd, pb, 1);
+    if (write(ofd, pb, 1) < 0 && ofd != 1) ofd = 0 - 1;   /* a SAVE sees it: the disk filled */
     col = col + 1;
     if (c == '\n') col = 0;
     return 0;

@@ -1276,6 +1276,7 @@ int command() {         /* a line without a number */
         if (!(a & 1)) {      /* LOAD, 166 */
             a = open(ib + b, 0);
             if (a >= 0) {
+                if (ifd) close(ifd);     /* a LOAD in a loaded file takes over from it */
                 ptop = 0;
                 clearv();
                 ifd = a;
@@ -1285,8 +1286,10 @@ int command() {         /* a line without a number */
             if (a >= 0) {
                 ofd = a;
                 list(0, -1);
+                b = ofd;
                 ofd = 1;
                 close(a);
+                if (b < 0) a = -1;      /* a write failed */
             }
         }
         if (a < 0) report(16, -1);

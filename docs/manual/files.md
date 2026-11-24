@@ -27,7 +27,8 @@ program.
 ## Errors
 
 - `?FILE NOT FOUND ERROR`: `LOAD` could not open the name, or `SAVE` could not make it (a
-  directory that is not there, a full disk). A failed `LOAD` leaves the program as it was.
+  directory that is not there), or a write failed (a full disk). In the second case the file is
+  left part-written. A `LOAD` that cannot open the file leaves the program as it was; once the file is open, the old program is gone.
 - `?SYNTAX ERROR`: the name is not in quotes.
 
 ## Without typing LOAD
@@ -40,3 +41,12 @@ runs them. Add `BYE` (or let the input end) to leave.
 
 `SAVE` and `LOAD` take a Unix path, not a device number, and there is no `VERIFY`. A
 `LOAD "name"` does not mean `,8`: the file is read from wherever the path says.
+
+## Things to know
+
+- Errors in a loaded file do not stop the load: a bad line reports its error and the next line is
+  read. A file that ends in `RUN` still runs.
+- A `LOAD` line inside a loaded file does a new `LOAD`: the rest of the first file is not read.
+- `SAVE` to the file being loaded empties it. Do not.
+- `SAVE` and `LOAD` are now keywords, so a variable cannot start with either (`SAVED`, `LOADED`),
+  as on the C64.
