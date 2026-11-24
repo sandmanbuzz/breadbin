@@ -25,7 +25,7 @@ extern int c_throw(int e); /* void */
 extern int c_mcpy(int d, int s, int n); /* void */  /* an ascending byte copy */
 
 int err;                /* the error numbers are emsg's */
-char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|STRING TOO LONG|TYPE MISMATCH|BAD SUBSCRIPT|REDIM'D ARRAY|";
+char emsg[] = "SYNTAX|OUT OF MEMORY|LINE TOO LONG|OVERFLOW|DIVISION BY ZERO|ILLEGAL QUANTITY|RETURN WITHOUT GOSUB|NEXT WITHOUT FOR|BREAK|UNDEF'D STATEMENT|FORMULA TOO COMPLEX|STRING TOO LONG|TYPE MISMATCH|BAD SUBSCRIPT|REDIM'D ARRAY|FILE NOT FOUND|";
 char ctl[193];          /* GOSUB and FOR entries, each with its tag last: G (3 bytes) the return
                            address; F (13) the variable, the body, the limit and the step */
 int csp;
@@ -33,9 +33,11 @@ char pb[4];             /* scratch: the byte outc writes, and the number rt_pow 
 int col;                /* the output column */
 char *nul;              /* 0: an address minus nul is the address as an int */
 
+int ofd;                /* where output goes: 1, or the file a SAVE is writing (main sets it) */
+
 int outc(int c) {       /* a write each: the kernel buffers the console, and obuf was 66 bytes */
     pb[0] = c;
-    write(1, pb, 1);
+    write(ofd, pb, 1);
     col = col + 1;
     if (c == '\n') col = 0;
     return 0;
@@ -441,11 +443,11 @@ int fl;
 
 int iov;                /* iread cut a line: it was too long */
 
-int iread() {           /* a line of stdin appended to ib (bas's command lines too): 0 at the end of the input */
+int iread(int f) {      /* a line of fd f appended to ib (bas's command lines too): 0 at the end of the input */
     int n = il;
     int c;
     while (1) {
-        if (read(0, pb, 1) <= 0) {      /* a byte a call: no read-ahead to keep, and no buffer */
+        if (read(f, pb, 1) <= 0) {      /* a byte a call: no read-ahead to keep, and no buffer */
             if (n == il) return 0;
             break;
         }
@@ -462,7 +464,7 @@ int iread() {           /* a line of stdin appended to ib (bas's command lines t
 }
 
 int iline() {           /* INPUT's next line, or BREAK at the end of the input */
-    if (!iread()) c_throw(9);
+    if (!iread(0)) c_throw(9);
     if (iov) c_throw(3);    /* a line (or the fields so far) past ib: LINE TOO LONG, not cut */
     col = 0;                /* the console echoed the return */
     return 0;

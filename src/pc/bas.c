@@ -63,7 +63,7 @@ int vbot;               /* the variables: [vbot, MEM) */
 int clim;               /* where the code must stop: vbot, or the string heap once there is one */
 int straight;           /* bytes since the VM last reset Y: pvm.s addresses code as base + Y */
 int eline;              /* the line a compile error is in */
-char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|LEFT$|RIGHT$|MID$|LEN|CHR$|ASC|STR$|VAL|INPUT|DIM|";
+char kwt[] = "ABS|AND|BYE|END|FOR|GOSUB|GOTO|GO|IF|INT|LET|LIST|NEW|NEXT|NOT|OR|PRINT|REM|RETURN|RUN|SGN|STEP|STOP|SYSTEM|THEN|TO|BUILD|LEFT$|RIGHT$|MID$|LEN|CHR$|ASC|STR$|VAL|INPUT|DIM|SAVE|LOAD|";
                         /* the keywords: the program holds each as a token, 128 + its place
                            here, written as the number with "tk NAME" in a comment (test_bas checks the
                            numbers; bas-rt.s has PRINT's, REM's and DIM's); a keyword before its prefixes, as
@@ -1263,6 +1263,35 @@ int command() {         /* a line without a number */
         build();
         return 0;
     }
+    if (c_tok(165 /* tk SAVE */) || c_tok(166 /* tk LOAD */)) {
+        a = ib[si - 1];     /* the token just taken: only its low bit tells them apart */
+        c_sp();
+        if (!c_tok('"')) {
+            report(1, -1);
+            return 0;
+        }
+        b = si;
+        while (c_ch() && c_ch() != '"') incsi();
+        ib[si] = 0;     /* the name, ended in place; the line has nothing else to give */
+        if (!(a & 1)) {      /* LOAD, 166 */
+            a = open(ib + b, 0);
+            if (a >= 0) {
+                ptop = 0;
+                clearv();
+                ifd = a;
+            }
+        } else {
+            a = open(ib + b, 1 + 16 + 32);       /* O_WRONLY | O_CREAT | O_TRUNC */
+            if (a >= 0) {
+                ofd = a;
+                list(0, -1);
+                ofd = 1;
+                close(a);
+            }
+        }
+        if (a < 0) report(16, -1);
+        return 0;
+    }
     if (c_tok(130 /* tk BYE */) || c_tok(151 /* tk SYSTEM */)) {
         if (!ended()) return 0;
         exit(0);
@@ -1281,6 +1310,8 @@ int command() {         /* a line without a number */
     return 0;
 }
 
+int ifd;                /* the file a LOAD is reading, else 0: the keyboard */
+
 int main() {
     int tty = isatty(0);
     int n;
@@ -1290,6 +1321,7 @@ int main() {
         write(2, "bas: out of memory\n", 19);
         exit(1);
     }
+    ofd = 1;
     clearv();
     if (tty) {
         outu(vbot - ptop);
@@ -1298,7 +1330,12 @@ int main() {
     while (1) {
         il = 0;         /* the next line of stdin into ib (iread) */
         iov = 0;
-        if (!iread()) break;
+        if (!iread(ifd)) {
+            if (!ifd) break;
+            close(ifd);         /* the end of a LOAD: back to the keyboard */
+            ifd = 0;
+            continue;
+        }
         if (iov) report(3, -1);     /* too long */
         else {
             n = c_crunch(ib, kwt);  /* ib in place: keywords to tokens and the rest upper case,
