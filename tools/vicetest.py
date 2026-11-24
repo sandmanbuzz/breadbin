@@ -376,7 +376,11 @@ class Vice(Target):
         except (TimeoutError, RuntimeError):
             data = None
         self._cmd("x")
-        return data if data is not None else self._mem_save(start, end)
+        if data is None:
+            # the save path is correct but slow: say so, so a slow run shows why
+            print(f"vicetest: monitor m did not answer {start:04x}-{end:04x}; reading by save", file=sys.stderr)
+            return self._mem_save(start, end)
+        return data
 
     def _mem_save(self, start, end):
         """Memory through the monitor's save command and a file (retried while VICE is still

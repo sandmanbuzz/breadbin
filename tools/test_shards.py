@@ -360,7 +360,10 @@ class DriverRuns(unittest.TestCase):
     def test_ctrl_c_stops_every_shard(self):
         import signal
         import time
-        p = subprocess.Popen(self.args, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # its own process group: a failing test must not leave shard subshells behind (they are
+        # children of the driver's group, not of the driver, so killing the driver alone leaks them)
+        p = subprocess.Popen(self.args, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             start_new_session=True)
         try:
             n = len(shards.shards())
             deadline = time.time() + 60
@@ -370,8 +373,11 @@ class DriverRuns(unittest.TestCase):
             p.send_signal(signal.SIGINT)
             p.wait(timeout=60)
         finally:
-            if p.poll() is None:
-                p.kill()
+            try:
+                os.killpg(p.pid, signal.SIGKILL)     # the driver's shards, whatever state the test left
+            except ProcessLookupError:
+                pass
+            p.wait()
             p.stdout.close()
             p.stderr.close()
         self.assertEqual(p.returncode, 130)
