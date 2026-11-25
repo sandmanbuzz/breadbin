@@ -171,7 +171,10 @@ unreserve:
         jmp iec_ch_close
 
 ; ft_close: in place of the jmp iec_ch_close that closes a drive's command channel
-; (A = drive, X = 15): the drive frees every buffer, so the program has to go up again.
+; (A = drive, X = 15): the drive frees every buffer, so the program has to go up again. The
+; next read sees state 0 and installs the blob, whose d_kt (the held sector) is zero: a close
+; (umount, eject) therefore drops the held sector. A disk swap with no close reaches here
+; never, and the held sector survives it: accepted risk, docs/design/fast-io.md 18.16.
 ft_close:
         pha
         and #3
