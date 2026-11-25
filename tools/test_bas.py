@@ -63,10 +63,12 @@ def labels(lbl):
         return {m.group(2): int(m.group(1), 16) for m in re.finditer(r"^al ([0-9A-F]+) \.(\w+)$", f.read(), re.M)}
 
 
-def bas(text, tty=False, limit=40_000_000, brk=64):
-    """bas with text on stdin: (output as str, exit status)."""
+def bas(text, tty=False, limit=40_000_000, brk=64, files=None, want_files=False, fail_create=None, fail_write=None):
+    """bas with text on stdin: (output as str, exit status), and the files too with want_files."""
     r = asim.run("bas", [], path=binary(), libs={pvmlink.LIBPATH: os.path.join(test_pvm.lib_dir(), "pvm")},
-                 stdin=text.encode("latin-1"), tty=tty, limit=limit, brk=brk)
+                 stdin=text.encode("latin-1"), tty=tty, limit=limit, brk=brk, files=files, fail_create=fail_create, fail_write=fail_write)
+    if want_files:
+        return r.out.decode("latin-1"), r.exit, r.files
     return r.out.decode("latin-1"), r.exit
 
 
@@ -644,6 +646,31 @@ class Arrays(unittest.TestCase):
         self.assertTrue(out.endswith("?LINE TOO LONG ERROR IN 10\n"), out)
         out, _ = bas('10 INPUT A$,B$\n20 PRINT LEN(A$);LEN(B$)\nRUN\n' + "X" * 100 + "\n" + "Y" * 5 + "\n")
         self.assertEqual(out, "? ?? 100  5 \n")
+
+    def test_save_and_load(self):
+        prog = '10 A=7\n20 PRINT "SEVEN";A\n'
+        out, st, files = bas(prog + 'SAVE "/p.bas"\n', want_files=True)
+        self.assertEqual((out, st), ("", 0))
+        self.assertEqual(files["/p.bas"], b'10 A=7\n20 PRINT "SEVEN";A\n')
+        # LOAD replaces the program and the variables; the file's lines are stored as typed
+        out, st, files = bas('5 PRINT "OLD"\nLOAD "/p.bas"\nLIST\nRUN\n', files=files, want_files=True)
+        self.assertEqual((out, st), ('10 A=7\n20 PRINT "SEVEN";A\nSEVEN 7 \n', 0))
+        # a file with its own RUN, and a lower-case name as typed
+        out, _ = bas('LOAD "/Q.bas"\n', files={"/Q.bas": b'10 PRINT 1+1\nRUN\n'})
+        self.assertEqual(out, " 2 \n")
+        # missing file, missing quote, a bad path to save
+        self.assertEqual(bas('LOAD "/nope"\n')[0], "?FILE NOT FOUND ERROR\n")
+        self.assertEqual(bas('LOAD /nope\n')[0], "?SYNTAX ERROR\n")
+        self.assertEqual(bas('SAVE "/x"\n', fail_create="/x")[0], "?FILE NOT FOUND ERROR\n")
+        # the program survives a failed LOAD, and SAVE of nothing is an empty file
+        self.assertEqual(bas('10 PRINT 5\nLOAD "/nope"\nRUN\n')[0], "?FILE NOT FOUND ERROR\n 5 \n")
+        self.assertEqual(bas('SAVE "/e"\n', want_files=True)[2]["/e"], b"")
+        # a full disk is an error, and the console still works after it
+        self.assertEqual(bas('10 PRINT 1\n20 PRINT 2\n30 PRINT 3\nSAVE "/w"\nPRINT 7\n', fail_write=2)[0],
+                         "?FILE NOT FOUND ERROR\n 7 \n")
+        # a LOAD inside a loaded file closes the outer file and takes over
+        out, _ = bas('LOAD "/a"\n', files={"/a": b'10 PRINT 1\nLOAD "/b"\nPRINT 2\n', "/b": b'20 PRINT 3\nRUN\n'})
+        self.assertEqual(out, " 3 \n")   # /b's LOAD did a NEW; /a's PRINT 2 is not read
 
     def test_built_file_matches_run(self):
         prog = ('10 DIM A(40),B%(9,2),C$(9)\n20 FOR I=0 TO 40:A(I)=I/4:NEXT\n'
