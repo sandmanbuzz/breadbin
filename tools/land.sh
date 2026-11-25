@@ -47,6 +47,12 @@ fi
 abort_if_merging() {
     if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then git merge --abort; fi
 }
+# Only a merge this script starts is ours to abort: a merge already in progress in the primary (another
+# session's landing) is refused, not aborted.
+if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+    echo "land: the primary is mid-merge (not started here); nothing touched" >&2
+    exit 1
+fi
 trap abort_if_merging EXIT
 
 if ! git merge --no-ff --no-commit "$branch"; then

@@ -9,7 +9,7 @@ import subprocess
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LIVE = ["README.md", "CLAUDE.md", "docs/testing.md", "docs/process.md", "docs/roadmap.md",
+LIVE = ["README.md", "CLAUDE.md", "docs/README.md", "docs/wip.md", "docs/testing.md", "docs/process.md", "docs/roadmap.md",
         "docs/filesystem.md", "docs/ci.md"]
 
 
@@ -67,7 +67,7 @@ class Drift(unittest.TestCase):
     def test_files_named_in_live_documents_exist(self):
         files = tracked()
         base = {os.path.basename(t) for t in files}
-        skip = re.compile(r"^(build/|fleet/)|\.km$|NAME\.s$")      # build output, local-only, modules, a placeholder
+        skip = re.compile(r"^build/|\.km$|NAME\.s$")      # build output, modules, a placeholder
         for doc in LIVE:
             for m in re.finditer(r"`([A-Za-z0-9_./-]+\.(?:s|py|md|sh|cfg|inc|txt|tsv|c))`", read(doc)):
                 p = m.group(1)

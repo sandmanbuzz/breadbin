@@ -166,8 +166,8 @@ Upstream's cost is about 33 kernel bytes of `jsr` hooks, with the rest in the ca
 | `2374af2` | bounded waits (17-21 s) in the bus send, talk turnaround and talker-ready paths; format gets about 10 minutes | SHAPE-OF, read first | overlaps our stall mitigation; compare timeout structure and the "drive left in fast-read code ignores ATN" case |
 | `6aca717` | a drive that was reset answers "70 no channel"; the kernel reopens and retries once, fast reads return | SHAPE-OF | check our retry path against a drive reset |
 | `3ad7236` | with an REU, idle processes swap to a 32 KB REU area (`docs/design-swap.md` upstream, 64 resident bytes) | INSPO now, SHAPE-OF with Expanded work | read the design when swapping is scheduled |
-| `5112865` | `SYS_SEEK`, 24-bit offset, SET or END, 115 bytes | SHAPE-OF | upstream returns EINVAL off c64fs; decide what it means on our filesystem modules |
-| `3c346f8`, `b9b1ffc` | `tail` and `fsck` use seek / one-block reads | REJECT for now | depend on `SYS_SEEK` and c64fs |
+| `5112865` | `SYS_SEEK`, 24-bit offset, SET or END, 115 bytes | SHAPE-OF, done | ours is `SYS_LSEEK` (slot 32, whence in X, signed offset, SET/CUR/END): c64fs allows positions past the end (zeros, holes), UCI refuses them (the Ultimate's FatFs would extend the file with undefined bytes), CBM DOS, pipes and the console give ESPIPE |
+| `3c346f8`, `b9b1ffc` | `tail` and `fsck` use seek / one-block reads | `tail` ported; `fsck` REJECT for now | `tail` takes the seek with our ABI; `fsck` depends on c64fs v1 |
 | `7321cb4` | hot kernel variables moved to zero page, 405 bytes of code saved | REJECT | contrary to our zero-page rule; noted as a measure of what a ZP pass would buy |
 | `36bb840` | `edit`: Ctrl-L or CLR redraws the whole screen | ACCEPT | user program, useful with job control |
 | `dc452fb`, `cd860e8` | boot message when drive 8 has no Breadbin disk; `ps` shows 0 pages for an unreaped job | ACCEPT if they apply | check against our boot and `ps` |
@@ -191,4 +191,4 @@ P2:
 - `edit` Ctrl-L redraw; the missing-disk boot message and the `ps` unreaped-job fix, if they apply.
 
 P3:
-- Read `docs/design-swap.md` when Expanded-tier swapping is scheduled. Decide `SYS_SEEK` semantics on our filesystem modules.
+- Read `docs/design-swap.md` when Expanded-tier swapping is scheduled.

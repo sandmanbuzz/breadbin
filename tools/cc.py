@@ -1178,6 +1178,16 @@ def compile_program(src):
     return text
 
 
+def read_source(path):
+    """The text of path with each `#include "file"` line replaced by that file (found beside the
+    one that names it): the one preprocessor feature, for the files the p-code programs share."""
+    import os
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    here = os.path.dirname(path)
+    return re.sub(r'^#include "([^"\n]+)"[ \t]*$', lambda m: read_source(os.path.join(here, m.group(1))), text, flags=re.M)
+
+
 def main(argv):
     pcode = len(argv) == 3 and argv[1] == "--pcode"
     if pcode:
@@ -1185,9 +1195,8 @@ def main(argv):
     if len(argv) != 2:
         print("usage: cc.py [--pcode] prog.c > prog.s", file=sys.stderr)
         return 2
-    with open(argv[1], encoding="utf-8") as f:
-        src = f.read()
     try:
+        src = read_source(argv[1])
         if pcode:
             from cc_pcode import compile_pcode     # ca65 source for the VM (tools/cc_pcode.py)
             sys.stdout.write(compile_pcode(src))

@@ -136,20 +136,22 @@ prove the whole path with one tiny program end to end before widening anything.
     store alone went from 40M to 9.6M. Still far from the estimate of about a second per 100
     lines in §7; what remains is spread over `getline` (4.3M), `cline`, `var` and `constant`,
     each next in line to go native.
-  - *Memory:* `bas` is about 10 KB of code and 29 KB with its 16,384-byte arena, 1 KB of VM
+  - *Memory:* `bas` was about 10 KB of code (7.6 KB after the squish below) and 29 KB with its 16,384-byte arena, 1 KB of VM
     frames and the 2.5 KB VM library, against the 31 KB `free` shows at the shell. The first
     build with the full arena **did not load** (`sh: bas: out of memory`); 15,872 did. Fitting
     16,384 took a 768-byte frame stack (a `/* fstack N */` directive in the source, read by
     `cc_pcode`), 32 forward-GOTO fixups, a 192-byte GOSUB/FOR stack and 64-byte I/O buffers. It
-    fits by about 500 bytes: the 16 KB gate is met, barely, and L3d (strings) will not fit
-    without one of the options in §6.
+    fits by about 500 bytes: the 16 KB gate was met, barely; L3d's strings landed in the
+    runtime and the compiler's own bytes, see §6.2.
 - **L3d. Strings and arrays:**
   - string variables and a string heap with garbage collection;
   - `LEFT$`, `MID$`, `RIGHT$`, `LEN`, `CHR$`, `ASC`, `STR$`, `VAL`;
   - `DIM`;
   - `INPUT`.
 - **L3e. Files and acceptance:**
-  - `SAVE`, `LOAD` and `basic FILE`;
+  - `SAVE`, `LOAD` (done, `docs/manual/files.md`: SAVE is LIST into a file, LOAD is NEW then the
+    file's lines as typed; `bas` +305 B, `brun` +27, the shell arena 16,384 -> 16,128 B, accepted by
+    the owner). `basic FILE` is open: mini C has no argv, so `bas < file` is the way for now;
   - error messages;
   - the period-style listings (written for this, not copied) that the roadmap's acceptance
     names;
@@ -268,12 +270,95 @@ today) and the compiler K. **The peak is T + C + K, and only the peak limits a p
    equivalent), no text, no compiler. Interactive `bas` stays the small-program path; the
    file route is the big-program path, and the SDK story (L3f). Needs code that is position-bound
    to a load base and an entry table for the runtime (a build id check).
+   *Design (2026-11-23, option B; owner: "shoot for B", the size threat first, now removed: `bas` is
+   7.6 KB of code, 34 pages with its BSS).* Findings from reading `bas.c`:
+   - The compiled code holds absolute addresses of four kinds: the runtime (`CALL rt_*`, `c_ncall`
+     to natives), the arena's variables (`CW addr(vbot+2)`, string constants `CW addr(cend+10)`),
+     jumps and calls inside the code (`JUMP`/`CALL` to a line, the `IF` chain's targets), and plain
+     16-bit constants (`CW`, which is the same opcode as an address: the emit site must say which).
+   - The runtime is in `bas` itself (`rt_*` bytecode plus the natives), so a runner is
+     "bas without the compiler": the same source, minus `cline`/`stmt`/`climb` and the editor. The
+     mini C has no `#include`; the shared part goes in by a build-time concatenation (mk/pvm.mk), not a
+     language feature.
+   - File format (`.bx`): header (magic, the build id of the runner it was made for, code length,
+     variable-area size, fixup count), the code, then fixups delta-coded one byte each (an offset
+     step; a 0 step escapes to two bytes), the kind in the opcode that precedes the word
+     (`CALL`/`JUMP` are code-relative, `LA`/`CW` as tagged). The loader adds the load base to
+     code-relative words, the runner's base to runtime words, and the variable base to variable words.
+     A mismatched build id is `ENOEXEC`: the runtime addresses are only valid for one runner.
+   - Tagging costs bytes in `bas` (a fixup recorder in `c_opw`/`c_ncall`, one tag per emit site);
+     budget: under 150 B, and the page count is the gate (34 now; 36 would still beat the 40 we
+     started the crush with).
+   - Slices: **B1** the fixup recorder and a host-side `.bx` writer (`bas -c in.bas out.bx`),
+     tested by loading the file in the py65 harness at two different bases and running both;
+     **B2** the runner (`brun`) from the shared runtime, no compiler: measured free arena;
+     **B3** `ENOEXEC` on a build-id mismatch, errors by line number kept (a line table or none:
+     decide by size), the runner under VICE and on the Ultimate; **B4** the manual page (L3f).
+   - *Landed (2026-11-23, B1 to B3 host part):* the file is `"BX"`, 1, **rtid**, the code's length, the
+     variables' size, the code, then a **line table** (per line the offset of its code and its number).
+     No fixup list: the code is walked (`reloc()` in `src/pc/inc/rt.c`, one function both ways,
+     `bas` un-relocates at BUILD and `brun` relocates at load), which is smaller than the tags were
+     going to be. The runtime is shared, not concatenated: `cc.py` has `#include "file"` (one level
+     of the one preprocessor feature), `inc/rt.c` and `inc/rt.s` come first in `bas` and `brun`, and
+     the runner is `brun.c` + `brun-rt.s` (its `xtab` keeps the two number xops the shared bytecode
+     uses). A file names the runtime by offsets, so the layout must agree: `rtid` is the sizes of the
+     two blocks (`rt_mark` to `rt_end`, `rt_prs` to `report`), a mismatch is refused (`brun: not a file of
+     this bas`; there is no `ENOEXEC` for a program that reads the file itself), and a host test
+     compares the label offsets and the generated `rt_` block of both. The bytecode block is only the
+     same if void inference is: `/* valued ... */` in `rt.c` pins it (cc_pcode). Errors: `brun`
+     reads the file again after an error and finds the line in the table (the dead code's room is the
+     buffer), so the table costs the arena nothing. `bas` 8,143 B code + 986 B BSS (36 pages), `brun`
+     3,209 + 816.
 4. **REU/Recommended tiers** may spill text or code; never required.
 Rejected: dropping T and decompiling `LIST` from code (loses REM text and layout; heavy).
 
 *Order:* 1 and 2 first (they also fix compile speed), measured against the fixture; then 3. The
 banner stays `BYTES FREE` = arena minus text until the code is dense enough that it is honest to
 within about 10 %.
+
+### 6.2 Strings (L3d, S1-S2)
+
+- **Representation.** A string expression is kind 3 on the eval stack: a pointer to the length
+  byte of a heap block `[backptr(2), len, text]`; 0 is the empty string. `A$` variables are
+  4-byte cells (kind 2 with both name bytes' high bits set). A literal points into the code
+  (CS) and is copied when assigned.
+- **Heap.** Between the immediate-line area (768 B after the code, `heapinit`) and the variables,
+  which grow down from the top. `rt_sres(n)` at the start of every statement is the only
+  collection point (a reserve of up to 6 temporaries), so a statement never moves blocks it holds.
+  Allocation is a bump; `sgc()` slides live blocks down and rewrites each owner cell through the
+  backptr (the owning cell, -1 temporary, 0 dead). Assignment (`rt_sset`) takes ownership of a
+  temporary and copies anything else, so literals in immediate-line code are never aliased.
+- **Limits.** `var()` refuses with OUT OF MEMORY when `vbot - size` falls below the heap top;
+  `clim` (the emitter's code limit, replacing `g_vbot`) keeps compiled code out of the heap, so
+  an overflow is an error, not corruption. Strings are at most 255 (STRING TOO LONG).
+- **Accepted divergences from MS BASIC.** `VAL` truncates past four decimals and has no
+  exponent; type errors (`X$=1`) are raised at compile time; the temporary reserve is capped;
+  the immediate-line area is fixed.
+- **Files.** The new `rt_` functions sit inside the `rt_prs`..`report` block and are in the
+  `valued` list, so `rtid` changes and old `.bx` files are refused; layouts of `bas` and `brun`
+  stay identical (host test).
+
+### 6.3 INPUT and arrays (L3d, S3-S4)
+
+- **INPUT.** `rt_inp(prompt, mask | n * 128)` reads one line into `ib` and fills `n` variables
+  (`inputs()` prescans the list, with paren depth, to build the numeric mask). A short line
+  prompts again with `??`; a bad number prints `?REDO FROM START` and rereads the whole line; extra
+  fields print `?EXTRA IGNORED`; an empty numeric field is 0. End of input is error 9 (BREAK), so a
+  piped program ends instead of looping. Fields come from `rt_ifld()` as temporaries; numbers
+  then go through `rt_val`. Elements of arrays are valid targets (`eassign`).
+- **Arrays.** Table entry `[c1|32, c2, n1(2), n2(2)]` and the elements after it (4 bytes for
+  numbers, 2 for int and string); `n2` is 0 for one dimension; the element is `(i * n2 + j)`.
+  Each subscript is checked by `rt_sub(i, n)` (BAD SUBSCRIPT, error 14); string elements are
+  owned cells like `A$` and follow the collector. `DIM` sizes are **constants**: arrays are
+  allocated at compile time (`predim()` scans every line first, so a DIM in a late subroutine is
+  seen). Implicit arrays are 0..10 (11 x 11 for two subscripts). A second, different DIM is
+  REDIM'D ARRAY (15); a DIM that runs again is a no-op. `DIM A(N)` with a variable is a SYNTAX
+  error for now (a runtime DIM is a decision for later: it needs the heap and variable table to
+  grow together).
+- **Cost.** `bas` 10,402 -> 14,411 B across strings, INPUT and arrays, after the size pass; the
+  shell arena stayed at exactly 16,384 B, with no margin (`docs/program-size-ledger.tsv`). `c_mcpy` (rt.s) is the one native byte copy and fill: `scopy`, `move` and the
+  zeroing in `grab` use it instead of p-code loops (a `DIM A(1000)` is then a few thousand
+  cycles, not hundreds of thousands).
 
 ## 7. Open questions
 

@@ -118,12 +118,14 @@ class Driver(unittest.TestCase):
                 self.assertEqual(len(parts), 3)
                 self.assertGreaterEqual(int(parts[2]), 0)
 
-    def test_check_mode_fails_when_slots_are_fewer_than_shards(self):
+    def test_check_mode_fits_a_work_unit_of_six_slots(self):
+        # a sharded run takes one slot per shard and a work unit takes at most six (docs/process.md),
+        # so the check is against six whatever the pool size is
         script = os.path.join(ROOT, "tools", "ci", "sharded.sh")
         r = subprocess.run([script, "--check"], capture_output=True, text=True,
                            env=dict(os.environ, BREADBIN_VICE_SLOTS="2"))
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("shards > 2 slots", r.stderr)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("slots", r.stderr)
 
     def test_bad_option(self):
         script = os.path.join(ROOT, "tools", "ci", "sharded.sh")
@@ -344,7 +346,7 @@ class DriverRuns(unittest.TestCase):
             f.write(STUB)
         os.chmod(self.stub, 0o755)
         self.out = os.path.join(self.d, "out")
-        self.args = [self.SCRIPT, "--no-outer-lock", "--no-preflight", "--run-sh", self.stub,
+        self.args = [self.SCRIPT, "--no-preflight", "--run-sh", self.stub,
                      "--stagger", "0", "--out", self.out, "--rev", "HEAD"]
         self.env = dict(os.environ, STUB_DIR=self.d)
 
@@ -358,7 +360,13 @@ class DriverRuns(unittest.TestCase):
     def test_ctrl_c_stops_every_shard(self):
         import signal
         import time
-        p = subprocess.Popen(self.args, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # its own process group: a failing test must not leave shard subshells behind (they are
+        # children of the driver's group, not of the driver, so killing the driver alone leaks them)
+        # SIGINT back to default in the child: a shell that launched the suite with & ignores it, and
+        # a non-interactive sh cannot install a handler over an inherited ignore
+        p = subprocess.Popen(self.args, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             start_new_session=True,
+                             preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
         try:
             n = len(shards.shards())
             deadline = time.time() + 60
@@ -368,8 +376,11 @@ class DriverRuns(unittest.TestCase):
             p.send_signal(signal.SIGINT)
             p.wait(timeout=60)
         finally:
-            if p.poll() is None:
-                p.kill()
+            try:
+                os.killpg(p.pid, signal.SIGKILL)     # the driver's shards, whatever state the test left
+            except ProcessLookupError:
+                pass
+            p.wait()
             p.stdout.close()
             p.stderr.close()
         self.assertEqual(p.returncode, 130)

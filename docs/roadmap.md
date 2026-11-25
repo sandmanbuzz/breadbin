@@ -10,7 +10,9 @@ Where this fork is heading. Realigned 2026-11-18 after the owner's direction on 
 - **Contract drift:** internal behaviour may improve if the call looks the same and does not violate least surprise. The user-facing contract matters more than the vintage one.
 - **Never buy the next milestone's problems.**
 
-## Where we are (2026-11-18)
+## Where we are (2026-11-24)
+
+Since 2026-11-18, on `main`: the VM runs as a shared library (L1 and L1s: `/lib/pvm`, two processes share one copy, `SharedVM`); the BASIC compiler's first slices (L3a, L3b, `docs/design/basic.md`) and compile to file; `SYS_LSEEK` (the `$CF00` page is now full); an opt-in 80-column console module (`con80`); the `fast.km` write path; `cut`, `uniq` and `calc`.
 
 Built and on `main`:
 
@@ -26,7 +28,7 @@ What still hurts:
 
 - **Programming on the machine is assembly or a toy.** There is no compiler on the C64 and `basic` is not a BASIC a C64 user recognises.
 - **Every program carries its own copy of the library**, about half of `/bin` by bytes (`docs/design/research/next/SYNTHESIS.md`), on disk and in memory.
-- **The `$CF00` syscall page is full**: a new syscall needs entries re-shaped first (one multiplexed control call, `docs/design/next/cp3-spec.md`).
+- **The `$CF00` syscall page is full**: `SYS_LSEEK` (slot 32) took the last 19 bytes after `sys_return` moved out of the page; a new syscall needs entries re-shaped first (one multiplexed control call, `docs/design/next/cp3-spec.md`).
 - **The physical 1541 is slow** even with the JiffyDOS protocol (on by default, `make JIFFY=0` turns it off; the standard protocol is about 0.55 s a block) and the drive-side fast reader does not yet run on it. Its old root-mount stall is closed: it was the test harness halting the CPU with DMA mid-transfer (`docs/design/io-attack-log.md`, closing entry).
 - **Daily use is still rough at the edges**: no `2>`, no job control, slow first loads on a stock machine.
 
@@ -76,7 +78,7 @@ UCI v1 was the unlock: without it the filesystem limits make anything beyond toy
 
 ### E4. Quality of life, differentiators, upstream parity
 
-An epic of its own, not a backlog: what a user meets in the first ten minutes decides whether the rest is ever seen. Candidates, to be ranked when the epic starts (`docs/design/feature-priority.md` has costs for most, `docs/design/upstream-survey.md` the upstream side):
+An epic of its own, not a backlog: what a user meets in the first ten minutes decides whether the rest is ever seen. Candidates, to be ranked when the epic starts (`docs/design/upstream-survey.md` has the upstream side):
 
 - `2>` and `2>&1`; job control (Ctrl-Z, `fg`, `bg`); line-editor polish.
 - The web demo hosted (hosting is an owner call), which needs the root filesystem served from a preloaded REU, and doubles as a benchmark. The emulator (EmulatorJS with the libretro VICE core) is GPL: its parts are never committed here, and any hosted copy ships LICENSES and a source offer.

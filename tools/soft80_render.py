@@ -62,9 +62,9 @@ def screen_code(ch):
         return None
     if o <= 0x7A:
         return o - 0x60          # a-z
-    if o == 0x7C:
-        return 0x5D              # |
-    return 0x3F                  # { } ~ and the rest
+    if 0x7B <= o <= 0x7E:
+        return o - 0x16          # { | } ~ : the glyphs $65-$68 (sc80 in con80.inc)
+    return 0x3F                  # the rest
 
 
 def kernel_order(font):
@@ -79,7 +79,7 @@ def kernel_order(font):
     return bytes(f)
 
 
-NGLYPH = 101                     # screen codes 0-$64: all that to_screen returns
+NGLYPH = 105                     # screen codes 0-$68: to_screen's 0-$64 and sc80's $65-$68
 
 
 def glyphs(font):

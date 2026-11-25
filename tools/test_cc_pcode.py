@@ -31,6 +31,7 @@ def build(src, d, fstack=None, natives=None):
             f.write(text)
         objs.append(os.path.join(d, name + ".o"))
         pvmlink.sh("ca65", "-g", "-I", os.path.join(ROOT, "include"), "-I", os.path.join(ROOT, "src", "pvm"),
+                   "-I", os.path.join(ROOT, "src", "pc"),
                    "-o", objs[-1], s)
     return pvmlink.link_prog(os.path.join(d, "p.cx"), test_pvm.lib_dir(), objs)
 
@@ -101,6 +102,25 @@ class Refused(unittest.TestCase):
         two = cc_pcode.compile_pcode("int f(int a) { if (a) return 1; }\nint main() { return f(1); }")
         f = two[two.index("fn_f:"):two.index("fn_main:")]
         self.assertEqual(f.count("PO_LEAVE"), 2)
+
+    def test_a_function_nobody_reads_returns_nothing(self):
+        # every call a statement and no address taken: no 0 to return and no DROP after the call
+        src = "int g(int a) { return 0; }\nint h(int a) { return a; }\nint main() { g(1); return h(2) + h(3); }"
+        t = cc_pcode.compile_pcode(src)
+        g = t[t.index("fn_g:"):t.index("fn_h:")]
+        self.assertNotIn("PO_DROP", t[t.index("fn_main:"):t.index("P_W PO_CALL, fn_h")])
+        self.assertEqual(g.count("P_CN"), 0)       # no 0 pushed for the return, none read
+        self.assertEqual(g.count("PO_LEAVE"), 1)
+        # one read anywhere (or &g for icall) keeps the value
+        t = cc_pcode.compile_pcode(src.replace("g(1);", "int x = g(1);"))
+        self.assertEqual(t[t.index("fn_g:"):t.index("fn_h:")].count("P_CN"), 1)
+
+    def test_a_void_extern_has_no_result(self):
+        src = "extern int e(int a); /* void */\nint main() { e(1); return 0; }"
+        self.assertNotIn("PO_DROP", cc_pcode.compile_pcode(src))
+        self.fails("extern int e(int a); /* void */\nint main() { int x; x = e(1); return x; }", "leaves no result")
+        # return e(1) is fine: the function returns 0
+        cc_pcode.compile_pcode("extern int e(int a); /* void */\nint f() { return e(1); }\nint main() { return f(); }")
 
     def test_the_type_rules_are_the_native_ones(self):
         self.fails("int main() { int *p; int x; x = p; return 0; }", "a pointer where a number is needed")
@@ -539,16 +559,21 @@ class L3b(unittest.TestCase):
                    'int main() { char *p = &h; if (icall(p) != 7) return 1; return icall(&h) + 30; }',
                    b"HH", 37)
 
+    def test_icall_of_a_native_is_refused(self):
+        # ICAL is bytecode-only: icall(&native) would run the routine as bytecode and trap
+        with self.assertRaises(cc.CompileError) as cm:
+            cc_pcode.compile_pcode("extern int nat();\nint main() { return icall(&nat); }")
+        self.assertIn("icall of the native nat", str(cm.exception))
+
     @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")
     def test_icall_runs_code_built_at_run_time(self):
-        # what RUN does: the JSR pvm_interp header copied from a function of the program, then
-        # bytecode: CALL h; CB 5; ADD; RET (PO_CALL $54, PO_CB $2A, PO_ADD $82, PO_RET $5C)
+        # what RUN does: bytecode built in a buffer and run by icall: CALL h; CB 5; ADD; RET
+        # (PO_CALL $54, PO_CB $2A, PO_ADD $82, PO_RET $5C)
         self.check('char buf[16];\n'
                    'int h() { puts("H"); return 7; }\n'
                    'int main() { char *z = 0; char *p = &h; int a = p - z; int i;\n'
-                   '  for (i = 0; i < 3; i = i + 1) buf[i] = p[i];\n'
-                   '  buf[3] = 84; buf[4] = a; buf[5] = a >> 8; buf[6] = 42; buf[7] = 5; buf[8] = 130;'
-                   ' buf[9] = 92;\n'
+                   '  buf[0] = 84; buf[1] = a; buf[2] = a >> 8; buf[3] = 42; buf[4] = 5; buf[5] = 130;'
+                   ' buf[6] = 92;\n'
                    '  return icall(buf); }', b"H", 12)
 
     @unittest.skipUnless(HAVE_TOOLS, "needs ca65, ld65 and py65")

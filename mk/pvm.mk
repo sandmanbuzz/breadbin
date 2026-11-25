@@ -17,13 +17,13 @@ PCPROGS := $(patsubst src/pc/%.c,%,$(wildcard src/pc/*.c))
 PCBIN   := $(patsubst %,$(BUILD)/root/bin/%,$(PCPROGS))
 $(if $(filter $(PROGS),$(PCPROGS)),$(error src/pc and src/bin both make $(filter $(PROGS),$(PCPROGS))))
 
-$(BUILD)/pc/%.s: src/pc/%.c tools/cc.py tools/cc_pcode.py
+$(BUILD)/pc/%.s: src/pc/%.c $(wildcard src/pc/inc/*.c) tools/cc.py tools/cc_pcode.py
 	@mkdir -p $(dir $@)
 	python3 tools/cc.py --pcode $< > $@.tmp
 	mv $@.tmp $@
 
 # A program's native routines (its `extern`s), if it has any: src/pc/NAME-rt.s.
-$(BUILD)/pc/%-rt.o: src/pc/%-rt.s src/pvm/pvm.inc include/breadbin.inc
+$(BUILD)/pc/%-rt.o: src/pc/%-rt.s src/pc/inc/rt.s src/pvm/pvm.inc include/breadbin.inc
 	@mkdir -p $(dir $@)
 	ca65 -I include -I src/pvm -o $@ $<
 

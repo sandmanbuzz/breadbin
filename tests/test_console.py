@@ -47,19 +47,20 @@ class Console(unittest.TestCase):
             time.sleep(0.2)
 
     def ls_bin(self, timeout=90):
-        """Type `ls -l /bin` and return the screen lines once the whole listing has been drawn: the
-        screen has changed from before (or, when the same listing repeats and finishes before the first
-        look, 4 s have passed: the shell has long since taken the line), the last row is the prompt, the listing's last entry is
-        on screen and the screen has held still for a second (a disk read can pause the listing)."""
-        before = self.v.screen_lines()
+        """Clear the screen, type `ls -l /bin`, and return the screen lines once the whole listing is
+        drawn: the last row is the prompt, the listing's last entry is on screen, and the screen has
+        held still for a second (a disk read can pause the listing). Clearing first makes every
+        listing fresh, so a repeat of the last one cannot pass as this one."""
+        self.v.type("clear\n")
+        self.wait_lines(lambda l: l == ["/ $"])
         self.v.type("ls -l /bin\n")
-        start = time.time()
-        end = start + timeout
+        end = time.time() + timeout
         stable = None
+        lines = []
         while time.time() < end:
             time.sleep(0.5)
             lines = self.v.screen_lines()
-            done = ((lines != before or time.time() - start > 4) and lines[24] == "/ $" and any("whoami" in l for l in lines))
+            done = lines[24] == "/ $" and any("whoami" in l for l in lines)
             if done and lines == stable:
                 return lines
             stable = lines if done else None

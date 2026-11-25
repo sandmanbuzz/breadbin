@@ -8,9 +8,9 @@
 ; busy and calls the handler. Handlers return carry/A/X/r-registers; `sys_return` acts on
 ; pending signals and deferred reschedules before going back to user code.
 .include "k.inc"
-.import sys_isatty, sys_conmode, sys_getuid, sys_setuid, sys_mount, sys_umount, sys_mntinfo, sys_diskio, sys_cache, rgate, ejected
+.import sys_isatty, sys_conmode, sys_getuid, sys_setuid, sys_mount, sys_umount, sys_mntinfo, sys_diskio, sys_cache, sys_lseek, rgate, ejected
 
-NSYS = 32               ; the page holds 3*NSYS (table) + 3*NSYS (records) + enter (about 36 bytes)
+NSYS = 33               ; the page holds 3*NSYS (table) + 3*NSYS (records) + enter (about 36 bytes)
 
 .export records
 .segment "JUMPTAB"
@@ -113,11 +113,15 @@ records:
         .byte 0
         .word sys_cache-1
         .byte 0
+        .word sys_lseek-1
+        .byte 0
 
 
-; sys_return shares the page with `enter` (it fills the rest of it). need_resched and
+; sys_return is reached only through the address `enter` pushes, so it need not share the
+; page (it left it when the table grew to 33 calls). need_resched and
 ; in_kernel only ever hold 0 or 1, so `lsr` tests and clears each in one instruction; the
 ; carry it leaves is thrown away by the plp.
+.segment "CODEHI"
 sys_return:
         php
         sei

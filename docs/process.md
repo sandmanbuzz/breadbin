@@ -28,16 +28,22 @@ In practice: do not build on origin's history or on a hash that exists only ther
 
 ## The machine lock
 
-The tests are timing-sensitive, so sessions share the machine through `tools/with-lock`. The `vice` resource is a pool of 8 slots (raised from 6 by the user, 2026-11-13; the cap check in `docs/ci.md` measured six) (`BREADBIN_VICE_SLOTS`; the user's call on the runner, which has 32 threads and 125 GB: a stake in the ground, not a measurement, to be checked against the jitter baseline in `docs/runner-move.md`, step 0.7): a plain run takes any one, so up to eight VICE runs go at once. A run whose wall-clock data matters (timing, performance, anything you will quote a number from) takes the whole pool with `-x`, and nothing else VICE runs meanwhile. `ultimate` (the hardware) is one holder at a time.
+The tests are timing-sensitive, so sessions share the machine through `tools/with-lock`. The `vice` resource is a pool of 12 slots (`BREADBIN_VICE_SLOTS`; raised from 8 on 2026-11-23 for testing, not yet measured at 12; the cap check in `docs/ci.md` measured six). **A work unit should take at most six slots (a guideline, not a hard limit: be polite about the pool).** A plain run takes one, so up to twelve VICE runs go at once; `tools/ci/sharded.sh` takes six (one per shard) and no more. **The exclusive run (`-x`) is an emergency measure, not a default.** Pattern: a run whose wall-clock figures you will quote (timing, performance, anything you will put a number from) takes every slot file with `-x`, so nothing else VICE runs until it finishes. For everyone else the whole pool is one atomic unit. Rules:
+
+- `-x` needs `--emergency` to confirm. Without it `with-lock` refuses before taking anything. `BREADBIN_CI_EXCLUSIVE=1` and `sharded.sh --exclusive` pass it for you, because setting them is the confirmation.
+- The notice on stderr grows with the slots taken: past 6 is past the guideline (say why in the commit); past 12 is impolite; past 32 is dangerous; past 64 `with-lock` refuses, because the nested lock chain is one `flock` process per slot.
+- Take it for the command, not while you think. Whether it is needed at all is the exclusivity backlog item in `docs/wip.md`.
+
+`ultimate` (the hardware) is one holder at a time; its `-x` is implied.
 
 VICE runs in the container: `tools/ci/run.sh` takes its own slot (`BREADBIN_CI_EXCLUSIVE=1` takes them all), so the one obvious way to run the emulator is `tools/ci/run.sh <make target>`. Host VICE is a stopgap for what the container cannot do yet; if you hit such a gap, write it down in `docs/wip.md` so it can be closed.
 
 ```sh
 tools/ci/run.sh test-smoke                                      # takes one vice slot itself
 BREADBIN_CI_EXCLUSIVE=1 tools/ci/run.sh test-only T="..."       # every slot: wall-clock measurements
-tools/with-lock -x -- <cmd>                                     # the same for a host command
+tools/with-lock -x --emergency -- <cmd>                          # the same for a host command (emergency)
 tools/with-lock -r ultimate -- python3 tools/ultimate.py ...    # the hardware
-tools/with-lock -r ultimate -- tools/with-lock -x -- ...        # hardware run that also uses VICE
+tools/with-lock -r ultimate -- tools/with-lock -x --emergency -- ...   # hardware run that also uses VICE
 ```
 
 The lock directory is `$BREADBIN_LOCKDIR` (default `/tmp/breadbin-locks`); sessions in separate containers share it by bind-mounting the same host path. `with-lock` prints the holders and waits (default an hour, exit 75 on timeout); a stale `*.holder` file is informational only, the kernel releases the `flock` when the process dies. A command already under `with-lock` for that resource passes straight through, so wrapping `run.sh` in `with-lock` still works; asking for `-x` while holding a plain slot is an error. An `-x` request closes the queue behind it, so it is not starved by new plain runs. Do not hold a lock while thinking: take it for the command, release it.
@@ -49,9 +55,9 @@ The repository is the mailbox. Results and requests go in:
 - `docs/hardware-notes.md`: measurements, with the command, the date and the commit. Hardware session writes, kernel session reads.
 - `docs/wip.md`: who is doing what, the work packages, and the "state" block a fresh context needs. Update it when the plan changes, not for every step.
 - A request to another session: a short entry in the other's file ("Request from <role>, <date>: what, why, the smallest version"). Answer it in the same place.
-- `tools/claude-quota`: subscription quota, burn projection and sprint marks for dispatching by remaining quota; see `docs/claude-quota.md`.
+- `tools/claude-quota now`: an ad hoc read of the subscription quota (`docs/claude-quota.md`). Agent management is manual; nothing dispatches on it.
 
-Sessions message each other at the addresses on the roster (`fleet/roster.md` on the `fleet-store` branch: `git show fleet-store:fleet/roster.md`); the address of a parked session is dead and a message to it fails quietly. All worktrees share one set of refs, so before you start `git log --oneline -15 main` shows what the others did. Do not `git pull` from origin: it is a stale mirror.
+There is no roster or fleet coordination any more; the owner manages sessions by hand. All worktrees share one set of refs, so before you start `git log --oneline -15 main` shows what the others did. Do not `git pull` from origin: it is a stale mirror.
 
 ## Kickoff procedure (a new or replacement session)
 
@@ -60,7 +66,7 @@ Sessions message each other at the addresses on the roster (`fleet/roster.md` on
 3. Toolchain: `make` needs cc65 (`ca65`, `ld65`); VICE tests need `x64sc`, `c1541`, xvfb and the ROMs from `tools/setup-vice-roms.sh`. JiffyDOS images go **outside** the repo; point `BREADBIN_VICE_ARGS` at them (see `docs/testing.md`). Run `make test-host` once to prove the environment.
 4. Scratchpad: use one directory per session outside the repo (the session's scratchpad under `/tmp/claude-<uid>/`, which is tmpfs and lost at reboot). Put in it: downloaded sources (each archive in its own new, empty directory, never executed), ROM images, logs, throw-away scripts. Anything another session needs, or you will want after a restart, gets committed: reports to `docs/design/research/`, experiment scripts to `experiments/<topic>/` with a README.
 5. Containers: a local container only needs the toolchain above, the repo checked out, and the shared lock directory. Record the recipe (image, packages, mounts) in `docs/testing.md` the first time it works, so the next session can reproduce it.
-6. Say hello to the facilitator at its roster address (the role, the branch, what you are about to do) and add your lane to the board in `docs/wip.md` when it changes.
+6. Say in `docs/wip.md` what you are about to do when it changes what others should expect.
 
 ## Tests
 
@@ -84,7 +90,7 @@ From the debriefs of the parked sessions (2026-11): what they say cost them time
 - Findings go in one append-only log. A wrong conclusion is retracted in the log, in the open, not edited away.
 
 **Working together**
-- Claim work in `fleet/roster.md` before building (two sessions once built the same module tooling at once).
+- Say what you are building (in `docs/wip.md`) before a long build; two sessions once built the same module tooling at once.
 - A message to a peer carries the result, the commands, and what was NOT run.
 - Hands-needed asks go last and one at a time, with the exact state wanted ("drive on, device 8, nothing else on the bus").
 - Relay an owner decision verbatim and say who answered. A policy finding is a branch, not an applied edit.

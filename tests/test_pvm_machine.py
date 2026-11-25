@@ -13,14 +13,14 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from vicetest import Vice  # noqa: E402
+from vicetest import make_target  # noqa: E402
 import test_pvm  # noqa: E402
 import test_cc_pcode  # noqa: E402
 from tests import test_compiled  # noqa: E402
 
 # PLASMA's compiler output for the benchmark (docs/design/pvm.md section 3): 469
 BENCH = open(os.path.join(ROOT, "src", "pvm", "test", "bench.s")).read() + """
-f_main: P_FUNC
+f_main:
         P_W PO_CALL, _C003
         P_W PO_CALL, f_pdec
         P_OP PO_RET
@@ -28,19 +28,19 @@ f_main: P_FUNC
 
 # n + f(n - 1), 120 deep, under a pending 1000: ENTER spills at every level
 REC = """
-f_rec:  P_FUNC
-        P_ENTER 2, 1
-        P_B PO_LLW, 0
+f_rec:
+        P_ENTER 3, 1
+        P_B PO_LLW, 1
         P_BR PO_BRTRU, @r
         P_CN 0
-        P_B PO_LEAVE, 2
-@r:     P_B PO_LLW, 0
-        P_B PO_LLW, 0
+        P_OP PO_LEAVE
+@r:     P_B PO_LLW, 1
+        P_B PO_LLW, 1
         P_B PO_SUBI, 1
         P_W PO_CALL, f_rec
         P_OP PO_ADD
-        P_B PO_LEAVE, 2
-f_main: P_FUNC
+        P_OP PO_LEAVE
+f_main:
         P_W PO_CW, 1000
         P_B PO_CB, %d
         P_W PO_CALL, f_rec
@@ -53,7 +53,7 @@ f_main: P_FUNC
 # sleeps 30,000 ticks (over 8 minutes), then prints 1: something to share the library with
 SLP = """
 SYSN_SLEEP = (SYS_SLEEP - SYS_BASE) / 3
-f_main: P_FUNC
+f_main:
         P_W PO_CW, 30000
         P_SYS SYSN_SLEEP
         P_OP PO_DROP
@@ -65,7 +65,7 @@ f_main: P_FUNC
 # exec(path) with no argv; prints 1 only if exec came back
 EXEC = """
 SYSN_SPAWN = (SYS_SPAWN - SYS_BASE) / 3
-f_main: P_FUNC
+f_main:
         P_W PO_LA, path
         P_W PO_SAW, r0
         P_CN 0
@@ -155,7 +155,7 @@ class PCode(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.results = {}
-        with Vice(make_disk()) as v:
+        with make_target(make_disk()) as v:
             v.wait_shell()
             for name in PROGRAMS:
                 cls.results[name] = v.run(f"/home/{name}", timeout=120)
@@ -192,7 +192,7 @@ class CompiledC(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.results = {}
-        with Vice(make_disk(C_PROGRAMS)) as v:
+        with make_target(make_disk(C_PROGRAMS)) as v:
             v.wait_shell()
             for name in C_PROGRAMS:
                 cls.results[name] = v.run(f"/home/{name}", timeout=120)
@@ -225,7 +225,7 @@ class Basic(unittest.TestCase):
         pg_used = label("pg_used")
         npool = (int(re.search(r"^KSTART\s*=\s*\$([0-9A-Fa-f]+)", open(os.path.join(ROOT, "src", "kernel", "k.inc")).read(),
                               re.M).group(1), 16) >> 8) - 8
-        with Vice(make_disk()) as v:
+        with make_target(make_disk()) as v:
             v.wait_shell()
 
             def used():
@@ -246,17 +246,62 @@ class Basic(unittest.TestCase):
             status = v.run("echo $?", clear=False, timeout=30)
             piped = v.run("echo '? \"PIPED\";:?\"!\"' | bas", timeout=60)
             after = used()
-        # BYTES FREE is what BRK gave the arena: never fewer than the 16,384 the compiler started
-        # with, and all of it comes back at exit
+        # BYTES FREE is what BRK gave the arena, and all of it comes back at exit. The floor was
+        # the 16,384 the compiler started with; SAVE/LOAD (L3e) spent 256 B of it, approved by
+        # the owner as user-visible value (16,128 measured)
         free = int(re.search(r"(\d+) BYTES FREE", banner).group(1))
         sys.stderr.write("bas banner: %d BYTES FREE, %d pages in use (%d before)\n" % (free, during, before))
-        self.assertGreaterEqual(free, 16384)
+        self.assertGreaterEqual(free, 16128)
         self.assertGreaterEqual(during - before, free // 256)
         self.assertEqual(after, before)
         self.assertIn('10 PRINT "hello, world"', listed)
         self.assertEqual([l for l in ran.split("run")[-1].splitlines() if l.strip()], ["hello, world", "READY."])
         self.assertEqual(status.split(), ["0"])
         self.assertEqual(piped.splitlines(), ["PIPED!"])
+
+    def test_save_and_load_through_the_filesystem(self):
+        # SAVE writes the listing to a real file, NEW forgets it, LOAD brings it back and RUN runs it;
+        # a name that is not there is FILE NOT FOUND
+        with make_target(make_disk()) as v:
+            v.wait_shell()
+            v.run("echo '10 print 7*6' > /s.in", timeout=60)
+            for line in ('save "/s.bas"', "new", 'load "/s.bas"', "run", 'load "/nope"'):
+                v.run("echo '%s' >> /s.in" % line, timeout=60)
+            ran = v.run("bas < /s.in", timeout=90)
+            saved = v.run("cat /s.bas", timeout=60)
+        self.assertEqual([l for l in saved.splitlines() if l.strip()][-1:], ["10 PRINT 7*6"], saved)
+        self.assertIn("42", ran.split())
+        self.assertIn("?FILE NOT FOUND ERROR", ran)
+
+    def test_build_a_file_and_run_it_with_brun(self):
+        # BUILD writes the program as a file; brun runs it without the compiler: the same output as RUN,
+        # an error in its line, a refusal of what is not a compiled file, and every page back at exit
+        pg_used = label("pg_used")
+        npool = (int(re.search(r"^KSTART\s*=\s*\$([0-9A-Fa-f]+)", open(os.path.join(ROOT, "src", "kernel", "k.inc")).read(),
+                              re.M).group(1), 16) >> 8) - 8
+        with make_target(make_disk()) as v:
+            v.wait_shell()
+
+            def used():
+                return sum(1 for b in v.mem(pg_used, pg_used + npool - 1) if b)
+            before = used()
+            v.run("echo '10 for i=1 to 3:print i;:next' > /t.bas", timeout=60)
+            v.run("echo '20 print \"built\":x=1/0' >> /t.bas", timeout=60)
+            v.run("cp /t.bas /r.bas", timeout=60)
+            v.run("echo run >> /r.bas", timeout=60)
+            v.run("cp /t.bas /b.bas", timeout=60)
+            v.run("echo build >> /b.bas", timeout=60)
+            ran = v.run("bas < /r.bas", timeout=60)
+            v.run("bas < /b.bas > /p.bx", timeout=60)
+            built = v.run("brun /p.bx", timeout=60)
+            status = v.run("echo $?", clear=False, timeout=30)
+            refused = v.run("brun /t.bas", timeout=60)
+            after = used()
+        self.assertEqual(built.splitlines()[-2:], [" 1  2  3 built", "?DIVISION BY ZERO ERROR IN 20"], built)
+        self.assertIn("?DIVISION BY ZERO ERROR IN 20", ran)
+        self.assertEqual(status.split(), ["1"])
+        self.assertIn("not a file of this bas", refused)
+        self.assertEqual(after, before)
 
 
 class SharedVM(unittest.TestCase):
@@ -269,7 +314,7 @@ class SharedVM(unittest.TestCase):
         lib_base, lib_ref = label("lib_base"), label("lib_ref")
         lib_np = label("lib_np")
 
-        with Vice(make_disk()) as v:
+        with make_target(make_disk()) as v:
             v.wait_shell()
 
             def used():
@@ -289,7 +334,7 @@ class SharedVM(unittest.TestCase):
             self.assertEqual(sorted(refs), [0, 2], refs)                # used by both
             prog = two - one
             lib_pages = max(v.mem(lib_np, lib_np + 1))
-            self.assertEqual(lib_pages, 7)                              # 1,789 bytes (the opcode table and the handlers)
+            self.assertEqual(lib_pages, 7)                              # 1,787 bytes (the opcode table and the handlers)
             self.assertEqual(one - base, prog + lib_pages)              # the second paid no library
             self.assertIn("exec format", v.run("/home/pvmbadid", clear=False))
             self.assertIn("exec format", v.run("/home/pvmnolib", clear=False))
@@ -327,7 +372,15 @@ class SharedVM(unittest.TestCase):
                     v.run("kill " + line.split()[0], clear=False)
             self.assertEqual(libs(), ([0, 0], [0, 0]))
             self.assertEqual(used(), base)
-            self.assertEqual(v.run("free", clear=False), before)
+            # kill only signals: the shell prints "[N] Done" and the kernel frees the process slot on a
+            # later tick, so free is polled until its figures match (a leak never matches and fails here)
+            def figures(text):
+                return [l for l in text.splitlines() if not l.startswith("[")]
+            for _ in range(50):
+                now = v.run("free", clear=False)
+                if figures(now) == figures(before):
+                    break
+            self.assertEqual(figures(now), figures(before))
             print("pages: base %d, one p-code process %d (library %d), two %d"
                   % (base, one - base, lib_pages, two - base), file=sys.stderr)
 
