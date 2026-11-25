@@ -116,9 +116,9 @@ On a C64 keyboard, `|` is **SHIFT + `-`**, and RUN/STOP interrupts the running c
 
 An optional 80-column console runs as a kernel module (`/lib/km/con80`): a hires bitmap with a 4 x 8 font, 80 by 25 characters. The 40-column console is unchanged and stays the default.
 
-- **Start in 80 columns at boot:** as root, `echo 1 > /etc/con80`, then reboot. The module loads before the first shell.
-- **Switch on from a shell:** `mod load /lib/km/con80`. A shell that is already running can hold the pages it needs, and the load then fails with ENODEV: use the boot file instead.
-- **Switch off:** `mod ls` shows the slot (`slot N (con80)`); `mod unload N` puts the 40-column console back. A second load works after that.
+- **Start in 80 columns at boot:** as root, `echo 1 > /etc/con80`, then reboot. The module loads before the first shell. This is the supported route.
+- **Load from a running system:** `mod load /lib/km/con80` only works while no process holds pool pages `$20-$3F`. On a standard boot the shell's image covers them, so the load fails with ENODEV. The loader reports every refused `init` as ENODEV, so that message does not mean the module or the disk is missing. Treat the 80-column console as a boot option, not a module you can switch on later.
+- **Switch off:** `mod ls` shows the slot (`slot N (con80)`); `mod unload N` puts the 40-column console back. A second load works in the same session, because the shell was laid out around the module at boot (VICE test `test_load_80_columns_unload_reload`). A session that started without `/etc/con80` cannot load it.
 
 It needs no REU and no Ultimate. The screen is drawn in software, so scrolling is slower than on the 40-column console (on a stock 1 MHz C64 a full-screen `ls` takes a couple of seconds). On an Ultimate, `turbo max` (or a higher speed) makes scrolling much faster. The font is Novaterm's 80-column font by Nick Rossi, redrawn in part (credit in `src/mod/con80.s`). Details: [docs/design/soft80-spike.md](docs/design/soft80-spike.md).
 
