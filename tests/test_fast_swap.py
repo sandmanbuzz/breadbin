@@ -1,7 +1,8 @@
 """Finding 1 of the ce02c7f hater: a held sector must not outlive the disk it came from.
 
-Only the umount path is tested (FastClose): umount reaches ft_close through iec_close and
-sets ft_inval, so the next read drops the held sector. A swap with no umount is NOT covered,
+Only the umount path is tested (FastClose): umount reaches ft_close through iec_close, which
+clears the drive's state, so the next read re-installs the drive code and its blob zeroes the
+held sector. A swap with no umount and no eject is NOT covered (accepted risk, fast-io.md 18.16),
 and no layout tried reproduces the stale hit; see docs/hardware-notes.md.
 """
 import os
@@ -80,9 +81,10 @@ def drive_byte(v, a):
 
 
 class FastClose(unittest.TestCase):
-    def test_close_marks_next_read(self):
-        """Mechanism (finding 1): umount (iec_close) leaves ft_inval set, so the next read sends a
-        throwaway request and drops any sector the drive still holds."""
+    def test_close_reinstalls_before_next_read(self):
+        """Mechanism (finding 1): a channel close (umount) clears state for the drive, so the next
+        fast read re-installs the drive code, and the blob's d_kt is zero: the held sector is dropped.
+        The check: state of drive 8 is 0 after umount, and back to 1 after the next fast read."""
         os.makedirs(WORK, exist_ok=True)
         a = make_disk("A", with_z=False, s=runs(mkimage.FS(mkimage.load(IMAGE)), K)[0])
         img = os.path.join(WORK, "boot.d64")
@@ -96,10 +98,14 @@ class FastClose(unittest.TestCase):
             self.assertEqual(v.run("mount 8 /mnt"), "")
             self.assertEqual(v.run("mod load /lib/km/fast"), "")
             base, lbl = module_base(v)
+            st = base + lbl["state"]                             # drive 8 is index 0
             v.run("wc /mnt/f", timeout=900)
+            self.assertEqual(v.mem(st, st)[0], 1, "fast path not active before the close")
             self.assertEqual(v.run("umount /mnt"), "")          # the swap path: umount -> iec_close
-            inval = v.mem(base + lbl["ft_inval"], base + lbl["ft_inval"])[0]
-            self.assertEqual(inval, 1, "ft_close did not mark the next read: a held sector would survive the close")
+            self.assertEqual(v.mem(st, st)[0], 0, "the close did not clear the drive's state")
+            self.assertEqual(v.run("mount 8 /mnt"), "")
+            v.run("wc /mnt/f", timeout=900)
+            self.assertEqual(v.mem(st, st)[0], 1, "the next read did not re-install the drive code")
         finally:
             v.close()
 

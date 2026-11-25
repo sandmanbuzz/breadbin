@@ -171,10 +171,10 @@ unreserve:
         jmp iec_ch_close
 
 ; ft_close: in place of the jmp iec_ch_close that closes a drive's command channel
-; (A = drive, X = 15): the drive frees every buffer, so the program has to go up again.
-; The sector kept in RB2 is from the disk that was in the drive then. sys_umount reaches this
-; through iec_close, so a swap done with umount -> swap -> mount gets a throwaway request first
-; (ft_inval), which drops the held sector. A swap without umount reaches no close: not covered.
+; (A = drive, X = 15): the drive frees every buffer, so the program has to go up again. The
+; next read sees state 0 and installs the blob, whose d_kt (the held sector) is zero: a close
+; (umount, eject) therefore drops the held sector. A disk swap with no close reaches here
+; never, and the held sector survives it: accepted risk, docs/design/fast-io.md 18.16.
 ft_close:
         pha
         and #3
@@ -182,8 +182,6 @@ ft_close:
         lda #0
         sta state,y
         sta ovl,y
-        lda #1
-        sta ft_inval
         pla
         jmp iec_ch_close
 
