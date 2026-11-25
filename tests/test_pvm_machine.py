@@ -259,6 +259,20 @@ class Basic(unittest.TestCase):
         self.assertEqual(status.split(), ["0"])
         self.assertEqual(piped.splitlines(), ["PIPED!"])
 
+    def test_save_and_load_through_the_filesystem(self):
+        # SAVE writes the listing to a real file, NEW forgets it, LOAD brings it back and RUN runs it;
+        # a name that is not there is FILE NOT FOUND
+        with make_target(make_disk()) as v:
+            v.wait_shell()
+            v.run("echo '10 print 7*6' > /s.in", timeout=60)
+            for line in ('save "/s.bas"', "new", 'load "/s.bas"', "run", 'load "/nope"'):
+                v.run("echo '%s' >> /s.in" % line, timeout=60)
+            ran = v.run("bas < /s.in", timeout=90)
+            saved = v.run("cat /s.bas", timeout=60)
+        self.assertEqual([l for l in saved.splitlines() if l.strip()][-1:], ["10 PRINT 7*6"], saved)
+        self.assertIn("42", ran.split())
+        self.assertIn("?FILE NOT FOUND ERROR", ran)
+
     def test_build_a_file_and_run_it_with_brun(self):
         # BUILD writes the program as a file; brun runs it without the compiler: the same output as RUN,
         # an error in its line, a refusal of what is not a compiled file, and every page back at exit
