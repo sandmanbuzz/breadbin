@@ -1,8 +1,8 @@
 # Breadbox
 
-A small Unix-like operating system for the Commodore 64 — the "breadbin".
+A small Unix-like operating system for the Commodore 64.
 
-Breadbox is a fork of [Breadbin](https://github.com/kpatr1981/breadbin) by Konstantinos Patronas. Based on breadbin by kpatronas@gmail.com. The boot banner reads "breadbox 0.1 / based on breadbin by kpatronas@gmail.com".
+This is the README of **Breadbox**, a variant of [Breadbin](https://github.com/kpatr1981/breadbin), the upstream project by Konstantinos Patronas (kpatronas@gmail.com). Breadbox and this repository are ours. Where something is unchanged from upstream, we call it breadbin. The boot banner reads "breadbox 0.1 / based on breadbin by kpatronas@gmail.com".
 
 - The name is temporary and may be renamed. The version number restarts at 0.1 on purpose and makes no claim of tracking upstream's numbering.
 - How and why this fork differs from upstream: [docs/why-this-fork.md](docs/why-this-fork.md).

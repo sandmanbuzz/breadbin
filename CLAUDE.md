@@ -1,6 +1,6 @@
-# Breadbin
+# Breadbox
 
-A Unix-like OS for the Commodore 64 (6502 assembly, ca65), forked to be developed further. Read `docs/process.md` (how sessions work together: branches, the machine lock, kickoff) and `docs/roadmap.md` first: it holds the direction, the decisions below in full, and the story list. `docs/wip.md` says where things stand right now and who is doing what; `docs/hardware-notes.md` is where findings from the real Ultimate and 1541 are recorded. `README.md` describes the system; `docs/testing.md` says which tests to run.
+A Unix-like OS for the Commodore 64 (6502 assembly, ca65). Naming is a working rule, not final: **breadbox** is this project, the published repo and this body of work; **breadbin** is the upstream it is a variant of. Say breadbox for what is ours and breadbin for unchanged upstream parts and for file names still carrying the old name (`build/breadbin.d64`, `BREADBIN`, `include/breadbin.inc`). Read `docs/process.md` (how sessions work together: branches, the machine lock, kickoff) and `docs/roadmap.md` first: it holds the direction, the decisions below in full, and the story list. `docs/wip.md` says where things stand right now and who is doing what; `docs/hardware-notes.md` is where findings from the real Ultimate and 1541 are recorded. `README.md` describes the system; `docs/testing.md` says which tests to run.
 
 ## Build and test
 
@@ -45,7 +45,7 @@ Physical 1541: the root-mount stall is **closed** (owner, 2026-11-18). The cause
 
 ## Hardware and external references
 
-- The Ultimate 64 runs Breadbin (see `docs/hardware-notes.md`). A REST client (`tools/ultimate.py`), a fake server for tests (`tools/fake_ultimate.py`) and a test backend with the same interface as `tools/vicetest.py` (`tools/ultimatetest.py`) exist; hardware runs go through the `ultimate` lock. Run tests on the real machine with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (tests built with `make_target`: the `Boot` class, the keyboard and the console tests). Docs: <https://github.com/GideonZ/1541u-documentation> (`uci/`, `api/api_calls.rst`).
+- The Ultimate 64 runs Breadbox (see `docs/hardware-notes.md`). A REST client (`tools/ultimate.py`), a fake server for tests (`tools/fake_ultimate.py`) and a test backend with the same interface as `tools/vicetest.py` (`tools/ultimatetest.py`) exist; hardware runs go through the `ultimate` lock. Run tests on the real machine with `BREADBIN_TARGET=ultimate BREADBIN_ULTIMATE=host[:port]` (tests built with `make_target`: the `Boot` class, the keyboard and the console tests). Docs: <https://github.com/GideonZ/1541u-documentation> (`uci/`, `api/api_calls.rst`).
 - A real 1541 is available for validating the IEC driver. A 1581 is too, but see "non-1541 devices" above.
 - `mist64/fastboot1541` (credit Michael Steil if adapted) is the basis for the fast boot and fast read story M0-8.
 - The hardware is a C64 Ultimate (firmware 1.1.0, 2 MB REU, UCI enabled) with a JiffyDOS KERNAL and JiffyDOS ROMs in every drive on the bus; it has no REST key injection. See `docs/hardware-notes.md` for what has been verified.
