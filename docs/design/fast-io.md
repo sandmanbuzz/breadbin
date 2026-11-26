@@ -1,13 +1,15 @@
-# Fast disk I/O: paper design
+# Fast disk I/O
 
-Status: paper only (2026-10-31). No kernel changes. The hardware session is busy with IEC corner cases and has no VICE access yet, so everything here that depends on timing is a hypothesis to be checked, not a measurement. Companion to "Disk speed" in `docs/roadmap.md`, which holds the measured baseline (standard protocol: about 1.8 ms per byte, 0.55 s per block, boot about 70 blocks).
+Status (2026-11-26): built, and tested under VICE only. Sections 17 and 18 describe what is in the tree. Sections 1 to 16 are the research record from the paper stage (2026-10-31); they are kept as history and their "we will" and "not yet" wording is from that date. Companion to "Disk speed" in `docs/roadmap.md`, which holds the measured baseline (standard protocol: about 1.8 ms per byte, 0.55 s per block, boot about 70 blocks).
+
+Shipped: the JiffyDOS byte protocol in the kernel (`make JIFFY=0` leaves it out; 17.1), and `fast.km` (`mod load /lib/km/fast`), a block module for c64fs mounts on a stock 1541 that reads and writes whole blocks with its own drive code (17.2). Not yet proven on a physical drive, and the Ultimate's emulated 1541 has shown fallbacks to the standard path (17.3). Open: which path a JiffyDOS drive should use (18.7), and a faster raw-GCR path (18.9 to 18.11).
 
 ## 1. What we want
 
 - Faster reads **and writes** on 1541-class drives (stock and JiffyDOS), without making the core depend on either.
-- Code small enough to be worth it: the kernel has 6,079 bytes of room today, and M0-7 will squeeze it.
+- Code small enough to be worth it: `fast.km` costs the kernel no bytes (17.2); the JiffyDOS protocol's cost is in `iec.s`.
 - Everything probed at run time (platform tiers: Classic must still boot on the plain protocol).
-- Prefer code we may legally adopt and then compact over reimplementation.
+- Original or clean-room code under the licence policy (section 4).
 
 ## 2. The candidates
 
@@ -21,11 +23,15 @@ Status: paper only (2026-10-31). No kernel changes. The hardware session is busy
 | F | Cartridge fast loaders (Epyx, Action Replay...) | resident in the cartridge | their own drive code | fast | some | not adoptable |
 | G | sd2iec / SD2IEC-family fast protocols | their firmware is the *device* side; the host side is in the Jiffy/Dreamload/EPYX code of the KERNAL replacements | n/a | n/a | n/a | **GPLv2**: cannot be copied into an MIT tree without relicensing the whole kernel |
 
-Honest ranking for *this* project: E (principal, already decided) and D (cheap, fixes the hardware bench), then C (it is the only one that is adoptable code and helps stock drives), and B last and optional.
+Ranking at the paper stage: E (principal, already decided) and D (cheap, fixes the hardware bench), then C (the only adoptable code that helps stock drives), and B last and optional.
+
+As built: D (the REU cache, shipped), B (the JiffyDOS byte protocol, shipped clean-room, 17.1), and a drive-side uploaded loader for the stock 1541 in C's role (`fast.km`, 17.2). `fastboot1541` itself was not adopted (3.1).
 
 ## 3. What is worth adopting
 
-### 3.1 `fastboot1541` (C): adopt, with credit
+### 3.1 `fastboot1541` (C): studied, not adopted
+
+Not adopted. `fast.km` (17.2) fills the same role with code written from the 1541's public documentation; the drive-side job loop idea is shared, with credit. What follows is the reading record.
 
 `start.s` is 199 lines; the whole scheme is one sector holding both the drive code and the host receive loop. Notes from reading it:
 
@@ -37,7 +43,7 @@ Honest ranking for *this* project: E (principal, already decided) and D (cheap, 
 
 Why it is the best fit: it works for stock and JiffyDOS drives alike, needs no knowledge of JiffyDOS, and its cost is almost all in the drive. Its limits: not for 1581 or Software IEC (those take other paths; NTH), and it replaces the *block* layer, not the file layer, which matches how Breadbin uses disks (`blk.s`, b-block reads).
 
-### 3.2 JiffyDOS (B): learn from, do not copy
+### 3.2 JiffyDOS (B): studied, then implemented clean-room (17.1)
 
 The ROM is proprietary. We use two clean public descriptions: Michael Steil's `cbmbus_doc` ("7 JiffyDOS.md") and the MEGA65 open-roms `Protocol-JiffyDOS.md`. The open-roms authors worked from bus logs only. Facts that matter to us (both documents agree):
 
