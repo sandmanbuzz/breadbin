@@ -1,8 +1,8 @@
 # Breadbox
 
-A small Unix-like operating system for the Commodore 64 — the "breadbin".
+A small Unix-like operating system for the Commodore 64.
 
-Breadbox is a fork of [Breadbin](https://github.com/kpatr1981/breadbin) by Konstantinos Patronas. Based on breadbin by kpatronas@gmail.com. The boot banner reads "breadbox 0.1 / based on breadbin by kpatronas@gmail.com".
+This is the README of **Breadbox**, a variant of [Breadbin](https://github.com/kpatr1981/breadbin), the upstream project by Konstantinos Patronas (kpatronas@gmail.com). Breadbox and this repository are ours. Where something is unchanged from upstream, we call it breadbin. The boot banner reads "breadbox 0.1 / based on breadbin by kpatronas@gmail.com".
 
 - The name is temporary and may be renamed. The version number restarts at 0.1 on purpose and makes no claim of tracking upstream's numbering.
 - How and why this fork differs from upstream: [docs/why-this-fork.md](docs/why-this-fork.md).
@@ -22,7 +22,7 @@ It is a real kernel, not a shell that prints canned output:
 - **`exec`.** `exec PATH` replaces the current process with another program (same pid and descriptors); `login` execs into the shell.
 - **More drives.** `mount 9 /mnt` attaches drive 9, 10 or 11. A Breadbox disk shows up with its directories. A normal C64 disk shows up as one flat directory that you can read, write (`cp`), `rm` and `mv`; the writes go through the drive's own DOS, so other C64 software can read the results.
 - **Users and screen.** There's a `login` with passwords (`passwd`, `whoami`), a full-screen editor (`edit`), colour `theme`s, shell wildcards (`*.bas`) and `jobs`.
-- **JiffyDOS.** The serial driver speaks the JiffyDOS byte protocol with a JiffyDOS drive (it probes at the start of each session, and stays on the standard protocol with any other drive, or with a sprite on); `make JIFFY=0` builds without it. Details and caveats: `docs/design/fast-io.md`.
+- **JiffyDOS.** The serial driver speaks the JiffyDOS byte protocol with a JiffyDOS drive (it probes at the start of each session, and stays on the standard protocol with any other drive, or with a sprite on); `make JIFFY=0` builds without it. The block module `fast.km` (`/lib/km/fast`) needs a `JIFFY=1` build and engages only on c64fs mounts. Both fast paths are measured in emulation (VICE) only; on a stock 1541 ROM `fast.km` ran about 1.65 to 1.7 times faster than the standard protocol. It has had informal use on hardware (it works) but no recorded hardware run through the test path; the Ultimate's emulated 1541 has shown fallbacks to the standard path. Which path a JiffyDOS drive should use is still being measured. Details and caveats: `docs/design/fast-io.md`, sections 17 and 18.
 - **Stock hardware.** It runs on a stock C64 with a 1541, and the same disk boots with or without an REU or an Ultimate (see Platform tiers).
 - **BASIC and an assembler.** Both run *on* the C64: `basic` is an integer BASIC, and `as` is a 6502 assembler that produces new Breadbox commands (a trailing `.res` is the program's BSS, so big buffers cost no disk space). A small C-subset compiler, `tools/cc.py`, runs on the host and emits `as` source that the C64 assembles and runs, or with `--pcode` bytecode for the shared p-code VM (`/lib/pvm`, `docs/design/pvm.md`), with real recursion; it is a host-side reference for now.
 
